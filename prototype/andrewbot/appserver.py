@@ -262,7 +262,9 @@ class AppServerClient:
             "execution_settings": {
                 # Letta intersects this launch list with each input allowlist.
                 "tools": sorted(self.SAFE_CONTROLLER_TOOL_NAMES) if controller_tools else [],
-                "allowed_tools": [],
+                # Strict/headless execution needs exact approval rules as well
+                # as visibility. Controller policy still validates every call.
+                "allowed_tools": sorted(self.SAFE_CONTROLLER_TOOL_NAMES) if controller_tools else [],
                 "disallowed_tools": ["Bash", "exec_command", "Read", "Write", "Edit", "Glob", "Grep", "LS", "WebSearch", "WebFetch", "Browser"],
                 "disable_memory_guard": False,
             },

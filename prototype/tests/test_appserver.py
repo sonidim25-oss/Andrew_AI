@@ -302,10 +302,15 @@ class AppServerWebSocketTests(unittest.TestCase):
         self.assertNotIn("edit_safety_policy", names)
         self.assertEqual(start["mode"], "strict")
         self.assertEqual(set(start["execution_settings"]["tools"]), set(names))
-        self.assertEqual(start["execution_settings"]["allowed_tools"], [])
+        self.assertEqual(set(start["execution_settings"]["allowed_tools"]), set(names))
         self.assertIn("Bash", start["execution_settings"]["disallowed_tools"])
         self.assertEqual(client.connection.sent[1]["toolset_preference"], "none")
         self.assertEqual(runtime["agent_id"], "a")
+        client.start_runtime("a", controller_tools=False)
+        disabled_start = client.connection.sent[2]
+        self.assertEqual(disabled_start["execution_settings"]["tools"], [])
+        self.assertEqual(disabled_start["execution_settings"]["allowed_tools"], [])
+        self.assertNotIn("external_tools", disabled_start)
 
     @unittest.skipUnless(os.environ.get("ANDREW_LETTA_SERVER_TEST") == "1", "enable when the local Letta service is available")
     def test_running_server_advertises_persistent_agent_operations(self):

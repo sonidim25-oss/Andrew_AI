@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sys
+import syslog
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,20 @@ EVIDENCE = ROOT / "lifecycle-validation.json"
 
 class ValidationFailure(Exception):
     """Contains only a locally written, credential-free check name."""
+
+
+def failure_message(error):
+    if isinstance(error, ValidationFailure):
+        message = "Live lifecycle validation failed: " + str(error)
+    else:
+        message = "Live lifecycle validation failed (" + type(error).__name__ + ")"
+    # systemd-run --pipe forwards stderr to SSH; also publish the same safe
+    # check to the journal so diagnostics do not require another privileged read.
+    try:
+        syslog.syslog(syslog.LOG_ERR, message)
+    except OSError:
+        pass
+    return message
 
 
 def require(condition, message):
@@ -185,7 +200,5 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
         run(sys.argv[1] if len(sys.argv) == 2 else "")
-    except ValidationFailure as error:
-        sys.exit("Live lifecycle validation failed: " + str(error))
     except Exception as error:
-        sys.exit("Live lifecycle validation failed (" + type(error).__name__ + ")")
+        sys.exit(failure_message(error))

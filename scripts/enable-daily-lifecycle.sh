@@ -55,6 +55,10 @@ trap rollback ERR INT TERM
 
 echo "Stopping only Andrew controller for two bounded live commissioning sessions..."
 systemctl stop andrew-control.service
+if [ "$RETRY" -eq 1 ]; then
+  echo "Restarting only Andrew Letta to discard the failed process runtime while preserving its saved conversation..."
+  systemctl restart andrew-letta.service
+fi
 bash "$PROJECT/scripts/validate-and-start-controller.sh" --validate-only
 install -d -o root -g andrew-control -m 0750 /opt/andrew/admin
 install -o root -g andrew-control -m 0640 "$PROJECT/scripts/verify-live-lifecycle.py" /opt/andrew/admin/verify-live-lifecycle.py

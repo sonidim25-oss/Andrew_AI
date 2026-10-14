@@ -58,3 +58,15 @@ class CommissioningRetryTests(unittest.TestCase):
                     self.probe.prepare_wake(self.controller, self.now, retry=True)
                 for key, value in state.items():
                     self.assertEqual(self.store.get_state(key), value)
+
+    def test_remote_failure_logging_includes_type_without_remote_details(self):
+        with patch.object(self.probe.syslog, "syslog") as journal:
+            message = self.probe.failure_message(RuntimeError("sensitive-provider-detail"))
+        self.assertEqual(message, "Live lifecycle validation failed (RuntimeError)")
+        self.assertNotIn("sensitive-provider-detail", str(journal.call_args))
+
+    def test_local_check_name_is_logged_for_operator_diagnosis(self):
+        with patch.object(self.probe.syslog, "syslog") as journal:
+            message = self.probe.failure_message(self.probe.ValidationFailure("Scheduled wake did not fire"))
+        self.assertEqual(message, "Live lifecycle validation failed: Scheduled wake did not fire")
+        self.assertIn(message, str(journal.call_args))

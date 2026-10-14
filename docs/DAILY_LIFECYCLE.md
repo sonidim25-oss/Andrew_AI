@@ -45,6 +45,8 @@ Evidence is stored privately in `/var/lib/andrew/control/lifecycle-validation.js
 
 The initial 2026-10-14 commissioning run installed `7595b7d` and passed startup, but its first live stage stopped with `Agent did not choose sleep`. Both the runtime launch list and input client-tool allowlist were empty. The pinned server intersects these lists and applies them to external controller tools, hiding the diary and sleep tools. The corrected runtime and input both explicitly allow only the nine approved lifecycle and memory tools, while built-in execution and external workers remain excluded.
 
+The first retry installed `a37e2fb` and reached real tool requests, but strict/headless approval rejected `check_budget` and `recent_activity`. The runtime now grants exact permission rules for the same nine controller tools. Strict mode remains enabled, with no wildcard grants; controller argument, diary, pause and budget checks still apply. Retry also restarts Letta before installation to clear failed process state. Approval recovery retains the pinned server's default of not resuming an interrupted turn; stale tool requests are not silently executed. Safe failure check names are mirrored to the journal without remote exception details.
+
 After installing this correction, the owner can retry with:
 
 ```sh
