@@ -68,4 +68,6 @@ Retry requires the exact disabled configuration written by the previous failure 
 
 Use owner Telegram commands `/status`, `/budget`, `/diary` and `/activity`. Use `/pause` to suspend activity and `/wake` to clear pause. The controller's systemd service must remain running for scheduled wakes; no separate timer is needed.
 
-Live enablement is **pending** until the administrator command succeeds and its output is reviewed. See [FEATURE_STATUS.md](FEATURE_STATUS.md) for the current verified deployment state. Historical phase specifications describe their original activation restrictions; this document records the newer owner-authorized release scope.
+Live enablement **passed on 2026-10-14 at 23:13 UTC**, using runtime `2971be0`. Both commissioning stages passed with real Qwen and confirmed Telegram diary delivery. The controller is polling with autonomous/fallback settings enabled and isolated runtime disabled. The successful run settled three charges totaling $0.001025076 with no unsettled reservations. The saved next wake is **2026-10-15 09:00 America/Toronto (13:00 UTC)**; that future event has not yet occurred.
+
+Commissioning is complete; do not rerun the commissioning/retry command for routine operation. See [FEATURE_STATUS.md](FEATURE_STATUS.md) for the verified deployment state and exact scope of the live checks. Historical phase specifications describe their original activation restrictions; this document records the newer owner-authorized release scope.
