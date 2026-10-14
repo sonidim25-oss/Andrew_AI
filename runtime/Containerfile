@@ -21,3 +21,6 @@ ENV CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 WORKDIR /workspace
 USER 1000:1000
 ENTRYPOINT ["python3", "/opt/andrew/worker_entry.py"]
+
+COPY runtime/browser_entry.py /opt/andrew/browser_entry.py
+COPY prototype/andrewbot/browser_protocol.py /opt/andrew/browser_protocol.py

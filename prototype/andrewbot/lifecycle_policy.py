@@ -1,6 +1,7 @@
 """Release approval is scoped to conversation and memory, with owner opt-in."""
 import math
 from dataclasses import dataclass
+from .runtime_readiness import validate_runtime_proof
 
 
 TEXT_MEMORY_LIFECYCLE_READY = True
@@ -27,8 +28,8 @@ def load_lifecycle_policy(environment):
     autonomous = enabled(environment, "ANDREW_AUTONOMOUS_ENABLED")
     if autonomous and not TEXT_MEMORY_LIFECYCLE_READY:
         raise ValueError("conversation and memory lifecycle release is not ready")
-    if autonomous and enabled(environment, "ANDREW_ISOLATED_RUNTIME_ENABLED"):
-        raise ValueError("external runtime is not approved for autonomous use")
+    if enabled(environment, "ANDREW_ISOLATED_RUNTIME_ENABLED"):
+        validate_runtime_proof()
     try:
         monthly = float(environment.get("ANDREW_MONTHLY_LIMIT_USD", "10"))
         reserve = float(environment.get("ANDREW_MONTHLY_RESERVE_USD", "1"))

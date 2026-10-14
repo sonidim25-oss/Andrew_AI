@@ -27,3 +27,5 @@ logs/
 *.sock
 *.tar
 *.oci
+
+.artifacts/

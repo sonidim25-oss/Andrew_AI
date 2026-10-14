@@ -320,7 +320,10 @@ class Controller:
                 "\n".join(f"{row['id']} — {row['event']}" for row in rows)
                 or "No objective events are available."
             )
-        if name in {"python.run", "node.run", "shell.run", "browser.open"}:
+        if name in {"python.run", "node.run", "shell.run", "browser.open", "browser.control", "browser.account"}:
+            allowed, reason = self.budget_allows(0)
+            if not allowed:
+                raise ValueError(f"external action blocked by {reason} budget gate")
             if self.tool_runtime is None:
                 raise ValueError("isolated runtime is unavailable")
             return self.tool_runtime.execute(name, arguments)

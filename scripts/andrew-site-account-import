@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$(id -u)" -ne 0 ]; then echo 'Use sudo from an interactive SSH terminal.' >&2; exit 2; fi
+exec systemd-run --wait --pty --collect --quiet --unit=andrew-site-account-import \
+  --uid=andrew-control --gid=andrew-control \
+  --property=WorkingDirectory=/opt/andrew/prototype \
+  --property=Environment=PYTHONPATH=/opt/andrew/prototype \
+  --property=LoadCredentialEncrypted=andrew-vault-key:/etc/credstore.encrypted/andrew-vault-key \
+  --property=UMask=0077 --property=NoNewPrivileges=yes \
+  /usr/bin/python3 -m andrewbot.account_import

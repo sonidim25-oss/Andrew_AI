@@ -4,8 +4,8 @@ Description=Andrew runtime egress proxy socket
 [Socket]
 ListenStream=/run/andrew/egress.sock
 SocketUser=andrew-runtime
-SocketGroup=andrew-runtime
-SocketMode=0600
+SocketGroup=andrew-egress-access
+SocketMode=0660
 RemoveOnStop=yes
 Service=andrew-egress.service
 

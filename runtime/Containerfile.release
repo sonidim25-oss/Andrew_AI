@@ -1,0 +1,5 @@
+# Reuse the previously pinned local worker image; no packages fetched at release.
+FROM localhost/andrew-worker@sha256:f155abf61fa72b32e762fa7dd3b78c8b8f9deae11bd0414d372f2a5073e87d52
+COPY runtime/browser_entry.py /opt/andrew/browser_entry.py
+COPY prototype/andrewbot/browser_protocol.py /opt/andrew/browser_protocol.py
+COPY runtime/worker_entry.py /opt/andrew/worker_entry.py

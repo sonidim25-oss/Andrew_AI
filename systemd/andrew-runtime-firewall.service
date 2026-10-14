@@ -1,0 +1,12 @@
+[Unit]
+Description=Andrew dedicated runtime UID egress firewall
+Before=andrew-runner.service andrew-browser.service andrew-egress.service
+
+[Service]
+Type=oneshot
+ExecStartPre=-/usr/sbin/nft add table inet andrew_runtime
+ExecStart=/usr/sbin/nft -f /etc/nftables.d/andrew-runtime.nft
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

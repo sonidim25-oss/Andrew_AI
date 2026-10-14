@@ -17,14 +17,17 @@ class ToolPolicy:
 
 
 class ToolRuntime:
-    def __init__(self, runner, policy: ToolPolicy, on_visit=None):
+    def __init__(self, runner, policy: ToolPolicy, on_visit=None, browser_tools=None):
         self.runner = runner
         self.policy = policy
         self.on_visit = on_visit
+        self.browser_tools = browser_tools
 
     def execute(self, name: str, arguments: dict) -> str:
         if not self.policy.enabled:
             raise ValueError("isolated runtime is unavailable")
+        if name in {"browser.open", "browser.control", "browser.account"} and self.browser_tools:
+            return self.browser_tools.execute(name, arguments)
         if not isinstance(arguments, dict):
             raise ValueError("tool arguments must be an object")
         if name in {"python.run", "node.run"}:

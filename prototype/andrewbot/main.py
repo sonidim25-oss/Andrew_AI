@@ -21,6 +21,9 @@ from .vault import Vault
 from .browser_history import VisitHistory
 from .runner_client import RunnerClient
 from .tool_runtime import ToolPolicy, ToolRuntime
+from .browser_client import BrowserClient
+from .browser_tools import BrowserTools
+from .account_broker import StoredAccountBroker
 
 
 def data_directory():
@@ -149,8 +152,12 @@ def run(validate_only=False):
     tool_runtime = None
     if env_enabled("ANDREW_ISOLATED_RUNTIME_ENABLED", False):
         runner = RunnerClient(os.environ.get("ANDREW_RUNNER_SOCKET", "/run/andrew/runner.sock"))
-        tool_runtime = ToolRuntime(runner, ToolPolicy(enabled=True),
-                                   on_visit=lambda url, title: history.record(url, title))
+        browser = BrowserClient()
+        browser_tools = BrowserTools(browser, StoredAccountBroker(vault_directory(), browser),
+                                     "/srv/andrew/workspace/projects", root / "browser-artifacts", history.record)
+        tool_runtime = ToolRuntime(runner, ToolPolicy(enabled=True), browser_tools=browser_tools,
+                                   on_visit=history.record)
+        agent.external_tools_enabled = True
     controller = Controller(
         store,
         agent,

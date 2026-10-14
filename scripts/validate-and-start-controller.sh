@@ -54,7 +54,7 @@ if ! systemd-run --wait --pipe --collect --quiet --unit=andrew-control-validatio
   --uid=andrew-control --gid=andrew-control \
   --property=Type=oneshot \
   --property=WorkingDirectory=/opt/andrew/prototype \
-  --property=EnvironmentFile=/etc/andrew/controller.conf \
+  --property='EnvironmentFile=/etc/andrew/controller.conf -/etc/andrew/browser-runtime.conf' \
   --property='Environment=PYTHONPATH=/opt/andrew/prototype ANDREW_LETTA_URL=ws://127.0.0.1:8283/ws ANDREW_GATEWAY_PORT=8284 ANDREW_MONTHLY_LIMIT_USD=10 ANDREW_MONTHLY_RESERVE_USD=1 ANDREW_DAILY_TARGET_USD=0.30 ANDREW_TIMEZONE=America/Toronto ANDREW_FALLBACK_WAKE=09:00' \
   --property=LoadCredentialEncrypted=andrew-vault-key:/etc/credstore.encrypted/andrew-vault-key \
   --property=LoadCredentialEncrypted=andrew-memory-backup-key:/etc/credstore.encrypted/andrew-memory-backup-key \

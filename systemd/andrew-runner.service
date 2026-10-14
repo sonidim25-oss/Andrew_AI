@@ -1,35 +1,30 @@
 [Unit]
 Description=Andrew rootless disposable tool runner
-Requires=andrew-runner.socket
-After=andrew-runner.socket
+Requires=srv-andrew-workspace-projects.mount andrew-runner.socket andrew-runtime-firewall.service
+After=andrew-runner.socket andrew-runtime-firewall.service
 
 [Service]
 Type=simple
 User=andrew-runtime
 Group=andrew-runtime
-WorkingDirectory=/opt/andrew/prototype
-Environment=PYTHONPATH=/opt/andrew/prototype
+WorkingDirectory=/opt/andrew/runtime-services
+Environment=PYTHONPATH=/opt/andrew/runtime-services
 Environment=HOME=/var/lib/andrew/runtime
-Environment=XDG_RUNTIME_DIR=/run/andrew-runtime
+EnvironmentFile=/etc/andrew/runner-environment.conf
 Environment=ANDREW_RUNNER_CONFIG=/etc/andrew/runner.conf
 ExecStart=/usr/bin/python3 -m andrewbot.runner_service
 Restart=on-failure
 RestartSec=3
 UMask=0077
-RuntimeDirectory=andrew-runtime
-RuntimeDirectoryMode=0700
-NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
-ProtectControlGroups=yes
 LockPersonality=yes
-RestrictSUIDSGID=yes
-RestrictAddressFamilies=AF_UNIX AF_NETLINK
-ReadWritePaths=/var/lib/andrew/runtime /srv/andrew/workspace/projects /run/andrew
-MemoryMax=256M
-CPUQuota=100%
-TasksMax=128
+Delegate=yes
+ReadWritePaths=/var/lib/andrew/runtime /srv/andrew/workspace/projects /sys/fs/cgroup
+MemoryMax=3G
+CPUQuota=250%
+TasksMax=512
 LimitNOFILE=2048

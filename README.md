@@ -8,6 +8,8 @@ See [the verified feature status](docs/FEATURE_STATUS.md) for the dated distinct
 
 The [daily lifecycle guide](docs/DAILY_LIFECYCLE.md) describes the conversation-and-memory release gate, preserved safety/budget limits, local tests and VPS commissioning command. Autonomous enablement is recorded separately from source readiness.
 
+The [browser runtime guide](docs/BROWSER_RUNTIME.md) describes owner-authorized browser control, signup/login without approval prompts, credential import, isolation proofs and the administrator commissioning command. Source readiness is separate from installed enablement.
+
 Chromium currently runs with `--no-sandbox` inside the rootless, networkless, capability-free worker because nested user namespaces are unavailable in the development environment. The owner approved that setting for this outer isolation boundary. This reduces defense in depth and should be revisited where nested Chromium sandboxing is supported.
 
 ## Development checks

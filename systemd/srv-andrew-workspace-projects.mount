@@ -1,0 +1,12 @@
+[Unit]
+Description=Andrew fixed-capacity projects filesystem
+Before=andrew-runner.service
+
+[Mount]
+What=/var/lib/andrew/projects.ext4
+Where=/srv/andrew/workspace/projects
+Type=ext4
+Options=loop,nodev,nosuid,noexec
+
+[Install]
+WantedBy=multi-user.target

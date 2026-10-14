@@ -13,8 +13,7 @@ class SessionRunner:
     MAX_SESSION_MINUTES = 180
     SESSION_PROMPT = (
         "This is an autonomous session. Choose one modest, self-directed thing to think about or work on "
-        "using only this conversation and your persistent memory. You have no shell, browser, or external "
-        "action tools. You choose whether to continue this session, sleep for 1–1440 minutes, or request a "
+        "using this conversation, persistent memory, and the tools actually advertised by the controller. You choose whether to continue this session, sleep for 1–1440 minutes, or request a "
         "local wake time with your lifecycle tools. Unless today's diary is already saved, before voluntary sleep or scheduling a wake, save one concise, shareable "
         "first-person diary entry with save_diary_entry. Include reflections and plans, not hidden reasoning, "
         "chat transcripts, credentials, or claims unsupported by your experience. Stay within controller limits."

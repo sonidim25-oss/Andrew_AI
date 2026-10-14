@@ -1,0 +1,29 @@
+[Unit]
+Description=Andrew trusted ephemeral browser launcher
+Requires=andrew-browser.socket andrew-runtime-firewall.service
+After=andrew-browser.socket andrew-runtime-firewall.service
+
+[Service]
+Type=simple
+User=andrew-browser
+Group=andrew-browser
+WorkingDirectory=/opt/andrew/runtime-services
+Environment=PYTHONPATH=/opt/andrew/runtime-services
+Environment=HOME=/var/lib/andrew/browser
+EnvironmentFile=/etc/andrew/browser-environment.conf
+ExecStart=/usr/bin/python3 -m andrewbot.browser_service
+Restart=on-failure
+RestartSec=3
+UMask=0077
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+LockPersonality=yes
+Delegate=yes
+ReadWritePaths=/var/lib/andrew/browser /sys/fs/cgroup
+MemoryMax=3G
+CPUQuota=250%
+TasksMax=512
+LimitNOFILE=2048

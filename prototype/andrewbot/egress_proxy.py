@@ -6,6 +6,8 @@ import re
 import asyncio
 import os
 import sys
+import json
+from .network_policy import excluded_networks, is_public
 from urllib.parse import urlsplit
 
 
@@ -17,8 +19,9 @@ _HOST_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.IGNORECAS
 
 
 class DestinationPolicy:
-    def __init__(self, resolver=None):
+    def __init__(self, resolver=None, blocked_networks=()):
         self.resolver = resolver or socket.getaddrinfo
+        self.exclusions = excluded_networks(blocked_networks)
 
     def resolve_and_validate(self, host: str, port: int) -> tuple[str, ...]:
         if not isinstance(host, str) or not host or len(host) > 253:
@@ -33,7 +36,7 @@ class DestinationPolicy:
         except ValueError:
             literal = None
         if literal is not None:
-            if not literal.is_global or literal.is_multicast or literal.is_unspecified:
+            if not is_public(literal, self.exclusions):
                 raise ProxyPolicyError("destination is not public")
             return (str(literal),)
         try:
@@ -53,7 +56,7 @@ class DestinationPolicy:
                 address = ipaddress.ip_address(record[4][0].split("%", 1)[0])
             except (ValueError, IndexError, TypeError):
                 raise ProxyPolicyError("destination resolution was invalid") from None
-            if not address.is_global or address.is_multicast or address.is_unspecified:
+            if not is_public(address, self.exclusions):
                 raise ProxyPolicyError("destination is not public")
             canonical = str(address)
             if canonical not in addresses:
@@ -71,12 +74,44 @@ class EgressProxy:
     TUNNEL_LIMIT = 256 * 1024 * 1024
     CONNECT_TIMEOUT = 15
     SESSION_TIMEOUT = 120
+    MAX_CONNECTIONS = 32
 
     def __init__(self, policy=None, connector=None):
         self.policy = policy or DestinationPolicy()
         self.connector = connector or self._connect_pinned
+        self._connections = 0
+        self._resolving = 0
+
+    async def _resolve(self, host, port):
+        if self._resolving >= 8:
+            raise ProxyPolicyError("resolver capacity reached")
+        self._resolving += 1
+        future = asyncio.get_running_loop().run_in_executor(None, self.policy.resolve_and_validate, host, port)
+        def finished(done):
+            self._resolving -= 1
+            if not done.cancelled(): done.exception()
+        future.add_done_callback(finished)
+        # Timeout/cancellation must not release a slot while libc still resolves.
+        return await asyncio.wait_for(asyncio.shield(future), self.CONNECT_TIMEOUT)
 
     async def handle_request(self, reader, writer):
+        if self._connections >= self.MAX_CONNECTIONS:
+            writer.write(b"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
+            try:
+                await writer.drain()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+            return
+        self._connections += 1
+        try:
+            await asyncio.wait_for(self._handle_request(reader, writer), self.SESSION_TIMEOUT)
+        except (asyncio.TimeoutError, OSError):
+            writer.close()
+        finally:
+            self._connections -= 1
+
+    async def _handle_request(self, reader, writer):
         upstream_writer = None
         try:
             header = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=self.CONNECT_TIMEOUT)
@@ -86,7 +121,9 @@ class EgressProxy:
             method, target, _version = request_line
             if method == "CONNECT":
                 host, port = self._parse_authority(target)
-                address = self.policy.resolve_and_validate(host, port)[0]
+                if port != 443:
+                    raise ProxyPolicyError("CONNECT requires HTTPS port 443")
+                address = (await self._resolve(host, port))[0]
                 upstream_reader, upstream_writer = await asyncio.wait_for(
                     self.connector(address, port), timeout=self.CONNECT_TIMEOUT
                 )
@@ -98,7 +135,7 @@ class EgressProxy:
             if parsed.scheme != "http" or not parsed.hostname or parsed.username or parsed.password:
                 raise ProxyPolicyError("only absolute public HTTP requests are accepted")
             port = parsed.port or 80
-            address = self.policy.resolve_and_validate(parsed.hostname, port)[0]
+            address = (await self._resolve(parsed.hostname, port))[0]
             content_length = self._content_length(headers)
             if content_length > self.BODY_LIMIT:
                 raise ProxyPolicyError("request body exceeded limit")
@@ -229,6 +266,7 @@ class EgressProxy:
             for task in tasks:
                 if not task.done():
                     task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def serve_systemd_socket(proxy=None):
@@ -244,7 +282,11 @@ async def serve_systemd_socket(proxy=None):
 
 def main():
     try:
-        asyncio.run(serve_systemd_socket())
+        from .runtime_readiness import protected_read
+        settings = json.loads(protected_read('/etc/andrew/egress.conf'))
+        if set(settings) != {'blocked_networks'} or not settings['blocked_networks']:
+            raise ValueError('host-network exclusions required')
+        asyncio.run(serve_systemd_socket(EgressProxy(DestinationPolicy(blocked_networks=settings['blocked_networks']))))
     except KeyboardInterrupt:
         return 0
     except Exception as error:

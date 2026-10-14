@@ -18,6 +18,13 @@ def fake_resolver(addresses):
 
 
 class DestinationPolicyTests(unittest.TestCase):
+    def test_rejects_transition_documentation_and_host_connected_ranges(self):
+        module = proxy_module(self)
+        for address in ("64:ff9b::a00:1", "2002:7f00:1::", "3fff::1", "198.51.100.4", "8.8.8.8"):
+            with self.subTest(address=address):
+                policy = module.DestinationPolicy(fake_resolver([address]), blocked_networks=["8.8.8.0/24"])
+                with self.assertRaises(module.ProxyPolicyError):
+                    policy.resolve_and_validate("untrusted.example", 443)
     def test_returns_pinned_public_ipv4_and_ipv6_answers(self):
         module = proxy_module(self)
         policy = module.DestinationPolicy(resolver=fake_resolver(["1.1.1.1", "2606:4700:4700::1111"]))
@@ -88,6 +95,63 @@ class FakeWriter:
 
 
 class EgressProxyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_limits_concurrent_proxy_connections(self):
+        module = proxy_module(self)
+        entered, release = asyncio.Event(), asyncio.Event()
+        class HoldingReader(FakeReader):
+            async def readuntil(self, separator):
+                entered.set()
+                await release.wait()
+                return b"CONNECT 127.0.0.1:443 HTTP/1.1\r\n\r\n"
+        proxy = module.EgressProxy()
+        proxy.MAX_CONNECTIONS = 1
+        first = asyncio.create_task(proxy.handle_request(HoldingReader(b""), FakeWriter()))
+        try:
+            await entered.wait()
+            rejected = FakeWriter()
+            await proxy.handle_request(FakeReader(b""), rejected)
+            self.assertIn(b"503 Service Unavailable", rejected.data)
+        finally:
+            release.set()
+            await first
+    async def test_tunnel_retrieves_both_failures(self):
+        import gc
+        from unittest.mock import AsyncMock
+        module=proxy_module(self)
+        events=[]; loop=asyncio.get_running_loop(); original=loop.get_exception_handler()
+        loop.set_exception_handler(lambda loop,context:events.append(context))
+        try:
+            with patch.object(module.EgressProxy,'_copy_bounded',new=AsyncMock(side_effect=ConnectionResetError('test'))):
+                with self.assertRaises(ConnectionResetError):
+                    await module.EgressProxy._tunnel(None,None,None,None)
+            gc.collect(); await asyncio.sleep(0)
+            self.assertEqual(events,[])
+        finally: loop.set_exception_handler(original)
+
+    async def test_dns_saturation_cannot_queue_more_resolver_jobs(self):
+        module=proxy_module(self)
+        calls=[]
+        async def connector(address,port):
+            calls.append(address)
+            return FakeReader(b""),FakeWriter()
+        proxy=module.EgressProxy(module.DestinationPolicy(fake_resolver(["1.1.1.1"])),connector)
+        proxy._resolving=8
+        writer=FakeWriter()
+        await proxy.handle_request(FakeReader(b"CONNECT public.example:443 HTTP/1.1\r\n\r\n"),writer)
+        self.assertEqual(calls,[])
+        self.assertIn(b"502 Bad Gateway",writer.data)
+
+    async def test_connect_cannot_tunnel_plain_http_or_non_https_ports(self):
+        module = proxy_module(self)
+        calls = []
+        async def connector(address, port):
+            calls.append((address, port))
+            return FakeReader(b""), FakeWriter()
+        proxy = module.EgressProxy(module.DestinationPolicy(fake_resolver(["1.1.1.1"])), connector)
+        writer = FakeWriter()
+        await proxy.handle_request(FakeReader(b"CONNECT public.example:80 HTTP/1.1\r\n\r\n"), writer)
+        self.assertEqual(calls, [])
+        self.assertIn(b"502 Bad Gateway", writer.data)
     async def test_refuses_unmanaged_listener(self):
         module = proxy_module(self)
         with patch.dict("os.environ", {"LISTEN_PID": "0", "LISTEN_FDS": "0"}, clear=False):

@@ -1,0 +1,13 @@
+[Unit]
+Description=Andrew private trusted browser control socket
+
+[Socket]
+ListenStream=/run/andrew/browser.sock
+SocketUser=andrew-control
+SocketGroup=andrew-control
+SocketMode=0600
+RemoveOnStop=yes
+Service=andrew-browser.service
+
+[Install]
+WantedBy=sockets.target
