@@ -187,9 +187,14 @@ def run(stage):
                        "cycles_after_" + stage: store.cycle_count(day)})
         write_evidence(report)
         new = settled[len(report["usage_before"]):]
-        print(json.dumps({"stage": stage, "result": "passed", "diary_delivery": "delivered",
-                          "new_settled_charges": len(new), "new_cost_usd": sum(row[1] for row in new),
-                          "unsettled_reservations": 0, "next_wake_utc": due.isoformat(timespec="seconds")}))
+        summary = json.dumps({"stage": stage, "result": "passed", "diary_delivery": "delivered",
+                              "new_settled_charges": len(new), "new_cost_usd": sum(row[1] for row in new),
+                              "unsettled_reservations": 0, "next_wake_utc": due.isoformat(timespec="seconds")})
+        try:
+            syslog.syslog(syslog.LOG_INFO, summary)
+        except OSError:
+            pass
+        print(summary, flush=True)
     finally:
         if gateway_thread:
             gateway_thread.close()

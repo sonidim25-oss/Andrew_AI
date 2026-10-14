@@ -27,6 +27,13 @@ bash -n scripts/enable-daily-lifecycle.sh scripts/validate-and-start-controller.
 
 `test_lifecycle.py` covers the release/owner gates, external-runtime rejection, budgets, scheduled and daily wakes, DST and clock rollback, diary delivery, sleep persistence, cycle/time ceilings, provider failure and interrupted-session recovery. Local provider/Telegram boundaries are substitutes; they do not prove live integration.
 
+The optional real-harness test starts Letta Code 0.34.13 in a separate temporary backend with an unbilled deterministic provider. It exercises an ordinary fresh reply, diary and sleep callbacks, an actual Letta/SQLite restart, preserved IDs/diary/deadline/settlements, a scheduled wake and the `wake_at` callback. It cannot access Andrew's service credentials or database. Run it with the pinned package installed, including its Node dependencies:
+
+```sh
+ANDREW_LETTA_TEST_BINARY=/tmp/andrew-letta-protocol-runtime/node_modules/@letta-ai/letta-code/letta.js \
+  python3 -m unittest discover -s scripts/tests -p test_letta_protocol.py -v
+```
+
 ## VPS commissioning
 
 Run the following from the owner's SSH terminal. The Codex shell cannot administer services because sudo requires an interactive password.
@@ -46,6 +53,8 @@ Evidence is stored privately in `/var/lib/andrew/control/lifecycle-validation.js
 The initial 2026-10-14 commissioning run installed `7595b7d` and passed startup, but its first live stage stopped with `Agent did not choose sleep`. Both the runtime launch list and input client-tool allowlist were empty. The pinned server intersects these lists and applies them to external controller tools, hiding the diary and sleep tools. The corrected runtime and input both explicitly allow only the nine approved lifecycle and memory tools, while built-in execution and external workers remain excluded.
 
 The first retry installed `a37e2fb` and reached real tool requests, but strict/headless approval rejected `check_budget` and `recent_activity`. The runtime now grants exact permission rules for the same nine controller tools. Strict mode remains enabled, with no wildcard grants; controller argument, diary, pause and budget checks still apply. Retry also restarts Letta before installation to clear failed process state. Approval recovery retains the pinned server's default of not resuming an interrupted turn; stale tool requests are not silently executed. Safe failure check names are mirrored to the journal without remote exception details.
+
+The `7b72dad` attempt then reached approved diary requests, but the client treated the intermediate model-step `stop_reason` as the end of the complete tool turn. Closing that connection interrupted the callback. The client now waits for the actual `turn_finished` event or a committed-sleep abort response, and only returns assistant messages observed in the current turn. Regression tests and the isolated real-harness test reproduced this failure before the change and passed afterward. This protocol proof uses the real pinned Letta engine and synthetic provider responses; a successful paid Qwen/Telegram commissioning run is still required before enabling the daily lifecycle.
 
 After installing this correction, the owner can retry with:
 

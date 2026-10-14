@@ -270,6 +270,61 @@ class AppServerWebSocketTests(unittest.TestCase):
             "memory_search", "memory_add_experience", "memory_propose_personality_edit",
         })
 
+    def test_model_step_stop_does_not_close_before_diary_and_sleep_callbacks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            from andrewbot.controller import Controller
+            store = Store(Path(directory) / "controller.sqlite3")
+            self.addCleanup(store.close)
+            store.set_state("active_session_id", "protocol-check")
+            controller = Controller(store, object(), 17, autonomous_enabled=True)
+            runtime = {"agent_id": "a", "conversation_id": "c"}
+
+            class Connection:
+                def __init__(self):
+                    self.sent = []
+                    self.events = [
+                        {"type": "stream_delta", "delta": {"message_type": "stop_reason", "stop_reason": "requires_approval"}},
+                        {"type": "external_tool_call_request", "request_id": "diary", "runtime": runtime,
+                         "tool_name": "save_diary_entry", "input": {"content": "I tried a small idea and will return after resting."}},
+                        {"type": "stream_delta", "delta": {"message_type": "stop_reason", "stop_reason": "requires_approval"}},
+                        {"type": "external_tool_call_request", "request_id": "sleep", "runtime": runtime,
+                         "tool_name": "sleep", "input": {"minutes": 1}},
+                    ]
+
+                def send_json(self, value):
+                    self.sent.append(value)
+                    if value["type"] == "abort_message":
+                        self.events.append({"type": "abort_message_response", "request_id": value["request_id"], "success": True})
+                    if value["type"] == "conversation_messages_list":
+                        self.events.append({"type": "conversation_messages_list_response", "request_id": value["request_id"],
+                                            "success": True, "messages": [{"message_type": "assistant_message", "id": "old", "content": "An old reply"}]})
+
+                def recv_json(self):
+                    return self.events.pop(0)
+
+            client = AppServerClient.__new__(AppServerClient)
+            client.connection = Connection()
+            result = client.send_user_turn(runtime, "save a diary and sleep", tool_handler=controller.execute_tool)
+            self.assertIn("sleep", result)
+            self.assertIsNotNone(store.diary_entry())
+            self.assertEqual(store.get_state("sleeping"), "1")
+            self.assertEqual(sum(item["type"] == "external_tool_call_response" for item in client.connection.sent), 2)
+
+    def test_finished_turn_cannot_return_a_previous_assistant_reply(self):
+        class Connection:
+            def __init__(self):
+                self.events = [{"type": "turn_finished", "stop_reason": "end_turn"}]
+            def send_json(self, value):
+                if value["type"] == "conversation_messages_list":
+                    self.events.append({"type": "conversation_messages_list_response", "request_id": value["request_id"],
+                                        "success": True, "messages": [{"message_type": "assistant_message", "id": "old", "content": "An old reply"}]})
+            def recv_json(self):
+                return self.events.pop(0)
+        client = AppServerClient.__new__(AppServerClient)
+        client.connection = Connection()
+        with self.assertRaisesRegex(RuntimeError, "without an assistant text response"):
+            client.send_user_turn({"agent_id": "a", "conversation_id": "c"}, "new question")
+
     def test_runtime_advertises_memory_tools_without_local_tools(self):
         class FakeConnection:
             def __init__(self):

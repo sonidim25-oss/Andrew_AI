@@ -297,6 +297,7 @@ class AppServerClient:
         })
         deadline = time.monotonic() + timeout
         failure = False
+        assistant_message_ids = set()
         early_reply = None
         abort_request_id = None
         while time.monotonic() < deadline:
@@ -307,10 +308,10 @@ class AppServerClient:
                 delta = event.get("delta") or {}
                 if delta.get("message_type") in {"loop_error", "error_message"}:
                     failure = True
-                if delta.get("message_type") == "stop_reason":
-                    if early_reply is not None:
-                        return early_reply
-                    break
+                if delta.get("message_type") == "assistant_message" and delta.get("id"):
+                    assistant_message_ids.add(delta["id"])
+                # A model-step stop (including requires_approval) precedes
+                # controller callbacks. Only turn_finished ends the whole turn.
             if event.get("type") == "turn_finished":
                 if event.get("stop_reason") in {"error", "error_retry_exhausted"} or event.get("error"):
                     failure = True
@@ -355,7 +356,7 @@ class AppServerClient:
             "query": {"limit": 12, "order": "desc"},
         }, "conversation_messages_list_response")
         for message in response.get("messages", []):
-            if message.get("message_type") == "assistant_message":
+            if message.get("message_type") == "assistant_message" and message.get("id") in assistant_message_ids:
                 content = message.get("content")
                 if isinstance(content, str) and content.strip():
                     return content.strip()
