@@ -142,22 +142,9 @@ else
   chmod 0600 "$ENCRYPTED_VAULT_KEY"
   shred -u "$VAULT_KEY"
 fi
-# Use an independent key for encrypted controller database snapshots. Keep only
-# the host-encrypted systemd credential at rest; the plaintext copy is temporary.
-ENCRYPTED_MEMORY_BACKUP_KEY=/etc/credstore.encrypted/andrew-memory-backup-key
-if [[ -e "$ENCRYPTED_MEMORY_BACKUP_KEY" ]]; then
-  systemd-creds decrypt "$ENCRYPTED_MEMORY_BACKUP_KEY" "$KEY_CHECK"
-  if [[ "$(stat -c %s "$KEY_CHECK")" -ne 32 ]]; then
-    echo "Encrypted memory backup credential has an invalid size; refusing to continue." >&2
-    exit 1
-  fi
-else
-  (umask 077; python3 -c 'import secrets,sys; sys.stdout.buffer.write(secrets.token_bytes(32))' > "$KEY_CHECK")
-  systemd-creds encrypt --name=andrew-memory-backup-key --with-key=host "$KEY_CHECK" "$ENCRYPTED_MEMORY_BACKUP_KEY"
-  chmod 0600 "$ENCRYPTED_MEMORY_BACKUP_KEY"
-fi
 shred -u "$KEY_CHECK"
 KEY_CHECK=
+python3 "$PROJECT_DIR/scripts/provision-controller-data-keys.py"
 install -d -o root -g andrew-control -m 0750 "$INSTALL_DIR"
 install -d -o root -g andrew-control -m 0750 "$INSTALL_DIR/andrewbot"
 cp --no-preserve=ownership,mode -R "$SOURCE_DIR/." "$INSTALL_DIR/andrewbot/"

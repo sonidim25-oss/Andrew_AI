@@ -17,29 +17,58 @@ from andrewbot.store import Store
 
 
 class AppServerWebSocketTests(unittest.TestCase):
-    def test_agent_model_update_uses_local_patch_endpoint(self):
+    def test_startup_waits_for_a_temporarily_refused_letta_connection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "controller.sqlite3")
+            self.addCleanup(store.close)
+            agent = LettaAgent(store, "gateway-token")
+            self.assertTrue(callable(getattr(agent, "_connect_for_startup", None)), "startup needs bounded connection readiness")
+            ready_client = object()
+            with patch("andrewbot.appserver.AppServerClient", side_effect=[ConnectionRefusedError(), ready_client]), patch("andrewbot.appserver.time.sleep"):
+                self.assertIs(agent._connect_for_startup(timeout=1), ready_client)
+
+    def test_startup_connection_wait_has_a_deadline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "controller.sqlite3")
+            self.addCleanup(store.close)
+            agent = LettaAgent(store, "gateway-token")
+            self.assertTrue(callable(getattr(agent, "_connect_for_startup", None)), "startup needs bounded connection readiness")
+            with patch("andrewbot.appserver.AppServerClient", side_effect=ConnectionRefusedError()), patch("andrewbot.appserver.time.monotonic", side_effect=[0, 2]):
+                with self.assertRaises(TimeoutError):
+                    agent._connect_for_startup(timeout=1)
+
+    def test_agent_model_update_uses_app_server_websocket_command(self):
         client = AppServerClient.__new__(AppServerClient)
         client.url = "ws://127.0.0.1:8283/ws"
         client.timeout = 5
 
-        class Response:
-            def __enter__(self):
-                return self
+        class Connection:
+            def __init__(self):
+                self.sent = []
 
-            def __exit__(self, *_args):
-                return False
+            def send_json(self, value):
+                self.sent.append(value)
 
-            def read(self):
-                return b'{"id":"agent-test"}'
+            def recv_json(self):
+                return {
+                    "type": "agent_update_response", "success": True,
+                    "request_id": self.sent[-1]["request_id"],
+                    "agent": {"id": "agent-test", "model": "openai-compatible/google/gemini-2.5-flash"},
+                }
 
-        with patch("andrewbot.appserver.urllib.request.urlopen", return_value=Response()) as mocked:
+        client.connection = Connection()
+
+        with patch("urllib.request.urlopen", side_effect=AssertionError("Agent management must use WebSocket")):
             client.update_agent_model(
                 "agent-test", load_model_config({"ANDREW_MODEL_ID": "google/gemini-2.5-flash", "ANDREW_MODEL_INPUT_USD_PER_MILLION": "0.15", "ANDREW_MODEL_OUTPUT_USD_PER_MILLION": "0.47"})
             )
-        request = mocked.call_args.args[0]
-        self.assertEqual(request.full_url, "http://127.0.0.1:8283/v1/agents/agent-test")
-        self.assertEqual(request.get_method(), "PATCH")
-        self.assertEqual(json.loads(request.data)["model"], "openai/google/gemini-2.5-flash")
+        self.assertEqual(len(client.connection.sent), 1, "agent updates must use the existing WebSocket")
+        command = client.connection.sent[0]
+        self.assertEqual(command["type"], "agent_update")
+        self.assertEqual(command["agent_id"], "agent-test")
+        self.assertEqual(command["body"]["model"], "openai-compatible/google/gemini-2.5-flash")
+        self.assertEqual(command["body"]["model_settings"]["provider_type"], "openai-compatible")
+        self.assertEqual(command["body"]["model_settings"]["max_tokens"], 512)
 
     def test_owner_model_change_updates_existing_agent_without_changing_memory(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -84,6 +113,43 @@ class AppServerWebSocketTests(unittest.TestCase):
         self.assertEqual(_safe_error_category({"error": 'Provider type "openai-compatible" is not supported in local mode yet.'}), "provider_type_unsupported")
         self.assertEqual(_safe_error_category({"error": "Invalid API key; authentication failed."}), "credentials_rejected")
         self.assertEqual(_safe_error_category({"error": "providerName requires OAuth credentials."}), "provider_name_requires_oauth")
+
+    def test_existing_agent_migrates_provider_handle_even_when_model_id_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / "controller.sqlite3")
+            self.addCleanup(store.close)
+            store.set_state("letta_agent_id", "agent-existing")
+            store.set_state("letta_conversation_id", "conversation-existing")
+            store.set_state("letta_model_id", "qwen/qwen3.8-flash")
+            store.add_message(123, "user", "A memory that must survive migration")
+
+            class FakeClient:
+                updated = []
+
+                def __init__(self, *_args, **_kwargs):
+                    pass
+
+                def ensure_provider(self, _token):
+                    pass
+
+                def update_agent_model(self, agent_id, config):
+                    self.updated.append((agent_id, config.model_id))
+
+                def start_runtime(self, agent_id, conversation_id=None):
+                    return {"agent_id": agent_id, "conversation_id": conversation_id}
+
+                def close(self):
+                    pass
+
+            with patch("andrewbot.appserver.AppServerClient", FakeClient):
+                agent = LettaAgent(store, "gateway-token")
+                agent.initialize()
+                agent.initialize()
+            self.assertEqual(FakeClient.updated, [("agent-existing", "qwen/qwen3.8-flash")])
+            self.assertEqual(store.get_state("letta_model_handle"), "openai-compatible/qwen/qwen3.8-flash")
+            self.assertEqual(store.get_state("letta_agent_id"), "agent-existing")
+            self.assertEqual(store.get_state("letta_conversation_id"), "conversation-existing")
+            self.assertEqual(store.connection.execute("SELECT count(*) FROM messages").fetchone()[0], 1)
 
     def test_provider_registration_uses_the_local_openai_compatible_gateway(self):
         class FakeClient(AppServerClient):

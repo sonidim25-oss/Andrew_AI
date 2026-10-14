@@ -13,3 +13,5 @@ In the owner’s private Telegram chat:
 Deletion compacts the SQLite database after removing rows. It does not delete copies made outside the service-managed history directory. No external backups should be made unless a future encrypted backup and deletion workflow is added.
 
 The store has a 256 MiB default capacity. It never evicts earlier visits. When the database reaches its limit, recording fails and the browser navigation result must be withheld; the owner needs to remove history before recording can resume. History key provisioning and service restart remain deployment steps; the service will refuse startup when its history credential is missing or invalid.
+
+The administrator setup and startup validation scripts invoke `scripts/provision-controller-data-keys.py` to provision a missing history key using systemd host-key encryption. It refuses to replace an existing credential or to create a new key when saved history records exist. Plaintext key bytes pass through process memory and pipes; only the encrypted credential is written to disk.

@@ -13,6 +13,7 @@ Environment=PYTHONPATH=/opt/andrew/prototype
 LoadCredentialEncrypted=andrew-vault-key:/etc/credstore.encrypted/andrew-vault-key
 LoadCredentialEncrypted=andrew-memory-backup-key:/etc/credstore.encrypted/andrew-memory-backup-key
 LoadCredentialEncrypted=andrew-history-key:/etc/credstore.encrypted/andrew-history-key
+LoadCredentialEncrypted=andrew-gateway-token:/etc/credstore.encrypted/andrew-gateway-token
 ExecStart=/usr/bin/python3 -m andrewbot.main
 Restart=on-failure
 RestartSec=5

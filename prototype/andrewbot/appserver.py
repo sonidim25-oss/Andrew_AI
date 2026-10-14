@@ -6,9 +6,7 @@ import socket
 import struct
 import time
 import uuid
-import urllib.error
-import urllib.request
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 from .configuration import ModelConfig, load_model_config
 
 
@@ -234,30 +232,17 @@ class AppServerClient:
     def update_agent_model(self, agent_id, model_config):
         if not isinstance(model_config, ModelConfig):
             raise ValueError("model configuration is invalid")
-        parsed = urlsplit(self.url)
-        if parsed.scheme != "ws" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
-            raise ValueError("Letta App Server must use a loopback URL")
-        host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
-        authority = f"{host}:{parsed.port or 80}"
-        endpoint = f"http://{authority}/v1/agents/{quote(str(agent_id), safe='')}"
         body = {
-            "model": f"openai/{model_config.model_id}",
+            "model": f"openai-compatible/{model_config.model_id}",
             "model_settings": {
-                "provider_type": "openai", "temperature": 0.7,
-                "max_output_tokens": 512, "parallel_tool_calls": False,
+                "provider_type": "openai-compatible", "temperature": 0.7,
+                "max_tokens": 512, "parallel_tool_calls": False,
             },
         }
-        request = urllib.request.Request(
-            endpoint, data=json.dumps(body, separators=(",", ":")).encode("utf-8"),
-            headers={"Content-Type": "application/json"}, method="PATCH",
+        self.request(
+            {"type": "agent_update", "agent_id": agent_id, "body": body},
+            "agent_update_response",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                response.read()
-        except urllib.error.HTTPError:
-            raise RuntimeError("Letta agent model update was rejected") from None
-        except (urllib.error.URLError, TimeoutError, OSError):
-            raise RuntimeError("Letta agent model update failed") from None
 
     def create_agent(self, body):
         result = self.request({"type": "agent_create", "body": body}, "agent_create_response")
@@ -417,12 +402,25 @@ class LettaAgent:
         if model_config is not None and not isinstance(model_config, ModelConfig):
             raise ValueError("model configuration is invalid")
         self.model_config = model_config or load_model_config({})
-        self.model_handle = f"openai/{self.model_config.model_id}"
+        self.model_handle = f"openai-compatible/{self.model_config.model_id}"
         self.agent_id = store.get_state("letta_agent_id", "")
         self.conversation_id = store.get_state("letta_conversation_id", "")
 
+    def _connect_for_startup(self, timeout=30):
+        # A Type=simple Letta unit is considered active before its socket opens.
+        # Retry connection refusal only, before any persistent agent operation.
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                return AppServerClient(self.url)
+            except ConnectionRefusedError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Letta App Server did not become ready") from None
+                time.sleep(min(0.25, remaining))
+
     def initialize(self):
-        client = AppServerClient(self.url)
+        client = self._startup_check("Letta App Server connection", self._connect_for_startup)
         try:
             self._startup_check("Letta provider registration", client.ensure_provider, self.gateway_token)
             if not self.agent_id:
@@ -439,7 +437,7 @@ class LettaAgent:
                     "description": "Andrew's persistent agent. Model calls are brokered through the trusted controller.",
                     "system": self.system_prompt,
                     "model": self.model_handle,
-                    "model_settings": {"provider_type": "openai", "temperature": 0.7, "max_output_tokens": 512, "parallel_tool_calls": False},
+                    "model_settings": {"provider_type": "openai-compatible", "temperature": 0.7, "max_tokens": 512, "parallel_tool_calls": False},
                     "llm_config": {"model": self.model_config.model_id, "model_endpoint_type": "openai", "model_endpoint": "http://127.0.0.1:8284/v1", "context_window": 32768, "handle": self.model_handle},
                     "context_window_limit": 32768,
                     "include_base_tools": False,
@@ -450,9 +448,12 @@ class LettaAgent:
                 })
                 self.store.set_state("founding_letter_delivered", "1")
                 self._startup_check("Letta model configuration persistence", self.store.set_state, "letta_model_id", self.model_config.model_id)
-            elif self.store.get_state("letta_model_id", "") != self.model_config.model_id:
+                self._startup_check("Letta provider handle persistence", self.store.set_state, "letta_model_handle", self.model_handle)
+            elif (self.store.get_state("letta_model_id", "") != self.model_config.model_id
+                  or self.store.get_state("letta_model_handle", "") != self.model_handle):
                 self._startup_check("Letta model update", client.update_agent_model, self.agent_id, self.model_config)
                 self._startup_check("Letta model configuration persistence", self.store.set_state, "letta_model_id", self.model_config.model_id)
+                self._startup_check("Letta provider handle persistence", self.store.set_state, "letta_model_handle", self.model_handle)
             self._startup_check("Letta agent ID persistence", self.store.set_state, "letta_agent_id", self.agent_id)
             runtime = self._startup_check("Letta runtime startup", client.start_runtime, self.agent_id, self.conversation_id or None)
             self.conversation_id = runtime["conversation_id"]

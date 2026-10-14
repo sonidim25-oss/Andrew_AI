@@ -31,8 +31,22 @@ if ! compgen -G "$SOURCE/*.py" >/dev/null; then
   exit 2
 fi
 
-# Install only Python modules from Andrew's trusted controller package.
+# Create missing data keys only when their protected data is absent or empty.
+python3 "$PROJECT/scripts/provision-controller-data-keys.py"
+
+# Install the current package and unit together; keep host configuration in drop-ins.
+install -d -o root -g andrew-control -m 0750 /opt/andrew/prototype "$TARGET"
 find "$SOURCE" -maxdepth 1 -type f -name '*.py' -exec install -o root -g andrew-control -m 0640 {} "$TARGET/" \;
+for module in "$SOURCE/"*.py; do
+  cmp -s "$module" "$TARGET/${module##*/}" || { echo "Installed module mismatch: ${module##*/}" >&2; exit 1; }
+done
+source_revision="$(git -C "$PROJECT" rev-parse --short HEAD)"
+if ! git -C "$PROJECT" diff --quiet HEAD -- prototype/andrewbot; then
+  source_revision="$source_revision + uncommitted controller changes"
+fi
+echo "Installed controller modules match checkout $source_revision."
+install -o root -g root -m 0644 "$PROJECT/systemd/andrew-control.service" /etc/systemd/system/andrew-control.service
+systemctl daemon-reload
 
 systemctl reset-failed andrew-control.service >/dev/null 2>&1 || true
 echo "Running one-shot startup validation as andrew-control; no long-running controller is started yet."
@@ -74,13 +88,15 @@ fi
 
 echo "One-shot validation passed; restarting only andrew-control.service."
 systemctl restart andrew-control.service
-for _attempt in $(seq 1 12); do
-  if systemctl is-active --quiet andrew-control.service; then
-    echo "andrew-control.service is active. Send Andrew a private Telegram message to verify the reply path."
+for _attempt in $(seq 1 60); do
+  invocation="$(systemctl show andrew-control.service -p InvocationID --value)"
+  if [[ -n "$invocation" ]] && systemctl is-active --quiet andrew-control.service &&
+     journalctl --quiet "_SYSTEMD_INVOCATION_ID=$invocation" --no-pager -o cat \
+       --grep='Andrew Telegram controller started' | grep -q 'Andrew Telegram controller started'; then
+    echo "andrew-control.service passed startup and is polling Telegram. Send Andrew a private message to verify the reply path."
     exit 0
   fi
   sleep 1
 done
-echo "The controller did not remain active. Recent Andrew-only journal output follows:" >&2
-journalctl -u andrew-control.service -n 30 --no-pager >&2
+echo "The controller did not pass startup within 60 seconds. Check the Andrew service journal for the named startup failure." >&2
 exit 1
