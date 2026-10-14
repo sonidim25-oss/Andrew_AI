@@ -284,23 +284,27 @@ class Store:
 
     @database_locked
     def process_fallback_wake(self, local_day, owner_id):
-        """Record one daily checkpoint and wake only an indefinite sleep."""
+        """Start one daily session from idle or indefinite sleep; respect timed sleep and pause."""
         with self.connection:
             state = dict(self.connection.execute(
-                "SELECT key,value FROM state WHERE key IN ('sleeping','sleep_until','fallback_wake_day')"
+                "SELECT key,value FROM state WHERE key IN ('sleeping','sleep_until','fallback_wake_day',"
+                "'paused','active_session_id','session_start_requested')"
             ).fetchall())
-            if state.get("fallback_wake_day", "") == local_day:
+            if state.get("paused", "0") == "1":
                 return False
-            asleep_indefinitely = state.get("sleeping", "0") == "1" and not state.get("sleep_until", "")
+            if state.get("fallback_wake_day", "") >= local_day:
+                return False
+            eligible = (not state.get("active_session_id", "") and not state.get("session_start_requested", "")
+                        and not (state.get("sleeping", "0") == "1" and state.get("sleep_until", "")))
             updates = {"fallback_wake_day": local_day}
-            if asleep_indefinitely:
+            if eligible:
                 updates.update({"sleeping": "0", "sleep_until": "", "session_start_requested": "fallback_wake"})
             for key, value in updates.items():
                 self.connection.execute(
                     "INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                     (key, value),
                 )
-            if asleep_indefinitely:
+            if eligible:
                 pending = self.connection.execute(
                     "SELECT COUNT(*) FROM messages WHERE owner_id=? AND role='user' AND queued IN (1,2,3)", (owner_id,)
                 ).fetchone()[0]
@@ -311,7 +315,7 @@ class Store:
                 "INSERT INTO activity(event,created_at) VALUES(?,?)",
                 (event, self.now()),
             )
-            return asleep_indefinitely
+            return eligible
 
     @database_locked
     def begin_cycle(self, session_id, cycle_id, local_day, reserved_cost_usd=0.0):

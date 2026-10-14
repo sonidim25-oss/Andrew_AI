@@ -15,7 +15,7 @@ class SessionRunner:
         "This is an autonomous session. Choose one modest, self-directed thing to think about or work on "
         "using only this conversation and your persistent memory. You have no shell, browser, or external "
         "action tools. You choose whether to continue this session, sleep for 1–1440 minutes, or request a "
-        "local wake time with your lifecycle tools. Before voluntary sleep or scheduling a wake, save one concise, shareable "
+        "local wake time with your lifecycle tools. Unless today's diary is already saved, before voluntary sleep or scheduling a wake, save one concise, shareable "
         "first-person diary entry with save_diary_entry. Include reflections and plans, not hidden reasoning, "
         "chat transcripts, credentials, or claims unsupported by your experience. Stay within controller limits."
     )
@@ -33,9 +33,10 @@ class SessionRunner:
         previous = self.store.get_state("active_session_id", "")
         if previous:
             started = self.store.get_state("active_session_started_at", "")
+            rest = {} if self.store.get_state("sleeping", "0") == "1" else {"sleeping": "1", "sleep_until": ""}
             self.store.transition_state(
                 {"active_session_id": "", "active_session_started_at": "", "active_session_status": "interrupted",
-                 "session_start_requested": ""},
+                 "session_start_requested": "", **rest},
                 "Autonomous session interrupted by controller restart",
             )
             self._record_incident(previous, "restart", started)
@@ -112,6 +113,10 @@ class SessionRunner:
             raise ValueError("session time must be timezone-aware")
         if not self.enabled:
             return False
+        if self.active_session_id and self.store.get_state("active_session_id", "") != self.active_session_id:
+            # Owner commands can cancel a session and then clear pause in one poll batch.
+            self.active_session_id = ""
+            self.started_at = None
         if self.store.get_state("paused", "0") == "1":
             self.stop("paused")
             self.store.set_state("session_start_requested", "")
@@ -151,7 +156,10 @@ class SessionRunner:
         try:
             self.store.begin_cycle(session_id, cycle_id, day)
             cycle_started = True
-            self.agent.autonomous_turn(self.SESSION_PROMPT, timeout=min(120, remaining_seconds))
+            _, diary_day = self.controller._periods(current)
+            diary_status = "already saved" if self.store.diary_entry(diary_day) else "not yet saved"
+            self.agent.autonomous_turn(self.SESSION_PROMPT + f" Today's diary is {diary_status}.",
+                                       timeout=min(120, remaining_seconds))
             self.store.finish_cycle(cycle_id, "complete")
         except Exception:
             if cycle_started:

@@ -13,6 +13,7 @@ from .model import OpenRouterModel
 from .memory import MemoryService
 from .memory_backup import PeriodicMemoryBackup
 from .configuration import load_model_config
+from .lifecycle_policy import load_lifecycle_policy
 from .sessions import SessionRunner
 from .store import Store
 from .telegram import OwnerRateLimit, TelegramAPI
@@ -66,16 +67,13 @@ def env_enabled(name, default=False):
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-# Change only in a later release after every project phase is complete and reviewed.
-ALL_PROJECT_PHASES_COMPLETE = False
-
-
 def run(validate_only=False):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
         model_config = load_model_config(os.environ)
+        lifecycle_policy = load_lifecycle_policy(os.environ)
     except ValueError as error:
-        logging.error("Startup validation failed: model configuration (%s)", str(error))
+        logging.error("Startup validation failed: model or lifecycle configuration (%s)", str(error))
         return 2
     root = data_directory()
     try:
@@ -131,9 +129,10 @@ def run(validate_only=False):
     memory_service = MemoryService(store)
     model_gateway = ModelGateway(
         provider, store, gateway_token, memory_service=memory_service, model_config=model_config,
+        **lifecycle_policy.budget_arguments(),
     )
-    autonomous_enabled = ALL_PROJECT_PHASES_COMPLETE and env_enabled("ANDREW_AUTONOMOUS_ENABLED", False)
-    fallback_enabled = env_enabled("ANDREW_FALLBACK_WAKE_ENABLED", False) and autonomous_enabled
+    autonomous_enabled = lifecycle_policy.autonomous_enabled
+    fallback_enabled = lifecycle_policy.fallback_enabled
     gateway_server = make_server(
         model_gateway,
         host="127.0.0.1",
@@ -156,9 +155,7 @@ def run(validate_only=False):
         store,
         agent,
         owner_id,
-        monthly_limit_usd=float(os.environ.get("ANDREW_MONTHLY_LIMIT_USD", "10")),
-        monthly_reserve_usd=float(os.environ.get("ANDREW_MONTHLY_RESERVE_USD", "1")),
-        daily_target_usd=float(os.environ.get("ANDREW_DAILY_TARGET_USD", "0.30")),
+        **lifecycle_policy.budget_arguments(),
         timezone_name=os.environ.get("ANDREW_TIMEZONE", "America/Toronto"),
         fallback_wake_time=os.environ.get("ANDREW_FALLBACK_WAKE", "09:00"),
         autonomous_enabled=autonomous_enabled,

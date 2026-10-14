@@ -154,6 +154,8 @@ class Controller:
                 + int(usage.get("completion_tokens", 0)) * self.model_config.output_usd_per_million) / 1_000_000
 
     def check_scheduled_wake(self, now=None):
+        if self.store.get_state("paused", "0") == "1":
+            return False
         if self.store.get_state("sleeping", "0") != "1":
             return False
         wake_at = self.store.get_state("sleep_until", "")
@@ -177,6 +179,8 @@ class Controller:
         return True
 
     def check_fallback_wake(self, now=None):
+        if self.store.get_state("paused", "0") == "1":
+            return False
         try:
             zone = ZoneInfo(self.timezone_name)
             hour_text, minute_text = self.fallback_wake_time.split(":", 1)
@@ -232,6 +236,13 @@ class Controller:
                 kind = "personality" if name == "memory_propose_personality_edit" else "experience"
                 self.memory_service.reject_edit_attempt(kind)
             raise ValueError("tool arguments must be an object")
+        if self.store.get_state("paused", "0") == "1" and name not in {"check_budget", "recent_activity", "memory_search"}:
+            raise ValueError("owner pause can only be cleared by the owner with /wake")
+        if self.store.get_state("sleeping", "0") == "1" and name not in {"check_budget", "recent_activity", "memory_search"}:
+            raise ValueError("sleep can only end at a scheduled wake or an owner wake")
+        if (name in {"sleep", "wake_at"} and self.store.get_state("active_session_id", "")
+                and not self.store.diary_entry(datetime.now(ZoneInfo("America/Toronto")).date().isoformat())):
+            raise ValueError("save today's diary before requesting autonomous sleep")
         if name in {"memory_search", "memory_add_experience", "memory_propose_personality_edit"}:
             if self.memory_service is None:
                 raise ValueError("memory service is unavailable")
@@ -294,7 +305,7 @@ class Controller:
         if name == "continue_activity":
             queued = self.store.pending_message_count(self.owner_id)
             self.store.transition_state(
-                {"sleeping": "0", "paused": "0", "sleep_until": "",
+                {"sleeping": "0", "sleep_until": "",
                  "session_start_requested": "agent_continue"}, "Andrew continued activity"
             )
             return f"Andrew is awake. {queued} queued message(s) were released."
@@ -388,6 +399,8 @@ class Controller:
             )
             if wake_at:
                 return f"I’m going to sleep and will wake in {minutes} minutes. I won’t make model requests while asleep."
+            if self.fallback_enabled:
+                return f"I’m going to sleep until you wake me or my next daily fallback at {self.fallback_wake_time} {self.timezone_name}."
             return "I’m going to sleep. I won’t make model requests until you wake me."
         if command == "/wake_at":
             pieces = text.split(maxsplit=1)
@@ -412,13 +425,15 @@ class Controller:
         if command == "/wake":
             self.store.transition_state(
                 {"sleeping": "0", "paused": "0", "sleep_until": "",
-                 "session_start_requested": ""}, "Owner woke Andrew"
+                 "session_start_requested": "", "active_session_id": "", "active_session_started_at": "",
+                 "active_session_status": "owner_wake"}, "Owner woke Andrew"
             )
             queued = self.store.pending_message_count(self.owner_id)
             return f"I’m awake. I saved {queued} message(s) while sleeping."
         if command == "/pause":
             self.store.transition_state(
-                {"paused": "1", "session_start_requested": ""}, "Owner paused Andrew"
+                {"paused": "1", "session_start_requested": "", "active_session_id": "",
+                 "active_session_started_at": "", "active_session_status": "paused"}, "Owner paused Andrew"
             )
             return "Paused. I won’t make model requests until you use /wake."
         if command == "/replay":
@@ -445,7 +460,7 @@ class Controller:
             latest_diary = self.store.diary_entry()
             diary_state = (f"{latest_diary['local_date']} ({latest_diary['delivery_state']})"
                            if latest_diary else "none")
-            schedule = "enabled" if self.autonomous_enabled else "disabled until project completion"
+            schedule = "enabled (conversation and memory only)" if self.autonomous_enabled else "disabled"
             fallback = "enabled" if self.fallback_enabled else "disabled"
             return (f"Andrew is {state}. Session: {session}. Autonomous schedule: {schedule}; fallback: {fallback}. "
                     f"Next self-scheduled wake: {wake_display}. "

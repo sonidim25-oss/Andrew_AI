@@ -1,8 +1,8 @@
 # Andrew Feature Status
 
-**Verified:** 2026-10-14 UTC, including the successful VPS restart check at 22:29 UTC.
+**Verified:** 2026-10-14 UTC. The VPS snapshot below includes the successful restart check at 22:29 UTC. The later daily-lifecycle changes have passed local checks; their VPS commissioning is pending.
 
-**Verified runtime revision:** `1be7908` (controller, service and provisioning fixes). The administrator installer compared every deployed controller module with the checkout before the live checks. These are the runtime files committed in that revision; later documentation commits do not change the installed runtime. GitHub `main` was `9f7b52d` at the start of verification; publication of these verified fixes is a separate step from VPS installation.
+**Installed runtime revision:** `1be7908` (controller, service and provisioning fixes), published through GitHub `main` at `84fa2b1`. The administrator installer compared every deployed controller module with the checkout before those live checks. New local lifecycle changes are not yet installed or published.
 
 This is the current feature-status source for Andrew. Source implementation, passing tests, installation, live behavior and autonomous enablement are separate claims. VPS state is a dated observation and must be refreshed after deployment changes.
 
@@ -18,7 +18,7 @@ This is the current feature-status source for Andrew. Source implementation, pas
 | Isolated tool runner and filtered egress | Yes, in prototype source. Worker limits and network policy are implemented. | Yes for local component behavior and policy; this does not prove VPS isolation. | No runner/egress service or socket units were found on the VPS. | No complete VPS worker or isolation proof. | No. Shell and browser execution remain disabled. |
 | Browser history and site-account primitives | Partial. Encrypted history, exact-origin policy and storage primitives exist; trusted browser control and real account workflows remain unfinished. | Yes for implemented storage and policy behavior. | Controller history storage and its independent key are initialized; browser worker execution is disabled. | No live browser or account workflow was exercised. | No. |
 | X, Gmail and other social/email actions | No current integration implementation was found in prototype source; the project description places these in a later owner-opt-in phase. | No integration tests. | No. | No. | No. |
-| Autonomous sessions and schedules | Partial. Bounded lifecycle/wake tools exist; `ALL_PROJECT_PHASES_COMPLETE` is explicitly `False`. | Yes for local lifecycle and scheduling boundaries. | The active controller logs autonomous and fallback schedules as disabled. No Andrew timer was listed. | No autonomous session or scheduled wake was exercised. | No. Owner instruction keeps unattended activity gated until all phases are complete and reviewed. |
+| Autonomous sessions and schedules | Yes for conversation/memory only. A scoped source gate and explicit owner opt-in replace the blanket all-phases gate. External-runtime autonomy is rejected. | Yes. Dedicated lifecycle tests cover wake deduplication, DST, owner pause, sleep, diary, recovery, budgets and hard limits. | New changes pending installation. Previously installed controller has autonomous/fallback schedules disabled. | Pending the two-stage real Qwen/Telegram commissioning command. | No live enablement claimed yet. The owner has now authorized this limited release; see the [lifecycle guide](DAILY_LIFECYCLE.md). |
 
 ## Verification evidence
 
@@ -31,9 +31,15 @@ bash -n scripts/admin-setup.sh scripts/validate-and-start-controller.sh
 systemd-analyze verify systemd/andrew-control.service
 ```
 
-The runtime suite ran **113 tests: 111 passed and 2 were gated/skipped**. The separate administrator suite passed **5 tests**. Total: **118 tests, 116 passed, 2 skipped**. Shell syntax and unit verification passed. Administrator tests stay outside the runtime suite copied by `activate-phase1.sh`.
+Before the lifecycle changes, the runtime suite ran **113 tests: 111 passed and 2 were gated/skipped**; the administrator suite passed **5 tests**. The new local lifecycle verification is recorded below. Administrator tests stay outside the runtime suite copied by `activate-phase1.sh`.
 
 The two default skipped tests require explicit live opt-in. A separate read-only App Server capability test passed, and a dedicated live probe exercised Qwen conversation/restart behavior described below. Default-suite skips are not used as evidence that live behavior passed.
+
+### Daily-lifecycle changes: local checks
+
+The updated runtime suite ran **133 tests: 131 passed and 2 gated/skipped**. This includes **20 dedicated lifecycle/policy tests**. The administrator suite passed **5 tests**, giving **138 total: 136 passed and 2 skipped**. Shell syntax, Python compilation of the live probe, `git diff --check`, and controller unit verification also passed. A code reviewer checked the activation and rollback paths; its three findings were corrected and reviewed again.
+
+The fixes preserve owner pause across wakes, cancel the old autonomous session on manual wake, reject late mutations after sleep, require a daily diary before voluntary autonomous sleep, protect fallback deduplication across clock rollback, rest interrupted sessions and share validated spending settings between the controller and gateway. Local tests substitute the provider and Telegram boundaries. **The new live commissioning script has not yet run; neither installation nor autonomous enablement is claimed for these changes.**
 
 ### VPS and live checks
 
@@ -52,4 +58,4 @@ See [the App Server client](../prototype/andrewbot/appserver.py), [data-key prov
 
 ## Updating this document
 
-Refresh test and VPS evidence after deployment changes. Claim installed status only after confirming deployed files and services; claim live success only for behavior actually observed. Autonomous enablement requires the owner's phase-completion gate to be satisfied and the corresponding service/session schedule to be active.
+Refresh test and VPS evidence after deployment changes. Claim installed status only after confirming deployed files and services; claim live success only for behavior actually observed. The owner's new request authorizes conversation/memory autonomy, subject to the scoped release gate, opt-in settings, preserved safety/budget gates and successful commissioning. Future external-action phases retain their separate readiness requirements.
