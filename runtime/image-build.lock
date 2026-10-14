@@ -1,0 +1,19 @@
+# Local rootless build record only. This image is not installed for andrew-runtime.
+build-date-utc=2026-10-14
+architecture=linux/amd64
+base-image=docker.io/library/node@sha256:862263c612aa437e3037674b85419622a9d93bff80aa1eee5398dfe686375532
+result-image=localhost/andrew-worker@sha256:f155abf61fa72b32e762fa7dd3b78c8b8f9deae11bd0414d372f2a5073e87d52
+result-image-digest=sha256:f155abf61fa72b32e762fa7dd3b78c8b8f9deae11bd0414d372f2a5073e87d52
+containerfile-sha256=e46af92b7284c4f0e4954333e8e47ffd0095398de83b6745ac3e8ab64df6494c
+worker-entry-sha256=4b5957d88c483dcf8bed7a8f9f1aef1e627f0fe27787a3c1c5cc8c39c0cac5b7
+node=v24.17.0
+npm=11.13.0
+python=3.11.2
+chromium=155.0.8059.39-1~deb12u1
+playwright=1.55.0
+chromium-sandbox=disabled-by-owner-approval; outer rootless networkless Podman boundary retained
+pyee=13.0.1
+greenlet=3.5.6
+typing-extensions=4.16.0
+git=2.39.5-0+deb12u3
+curl=7.88.1-10+deb12u15

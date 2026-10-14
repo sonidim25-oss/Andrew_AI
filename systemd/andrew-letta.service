@@ -1,0 +1,33 @@
+[Unit]
+Description=Andrew persistent Letta App Server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=andrew-letta
+Group=andrew-letta
+Environment=HOME=/var/lib/andrew/letta
+Environment=PATH=/var/lib/andrew/letta-app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/var/lib/andrew/letta-app/node_modules/.bin/letta server --backend local --listen ws://127.0.0.1:8283 --openai-api
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/andrew/letta
+MemoryMax=2G
+CPUQuota=200%
+TasksMax=256
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

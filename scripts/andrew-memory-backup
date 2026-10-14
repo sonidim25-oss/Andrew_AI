@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ ${EUID} -ne 0 ]]; then
+  echo "Run with sudo: sudo andrew-memory-backup snapshot|restore <snapshot-filename>" >&2
+  exit 1
+fi
+if [[ "$#" -lt 1 ]]; then
+  echo "Usage: andrew-memory-backup snapshot | restore <snapshot-filename>" >&2
+  exit 2
+fi
+
+case "$1" in
+  snapshot)
+    [[ "$#" -eq 1 ]] || { echo "Usage: andrew-memory-backup snapshot" >&2; exit 2; }
+    ;;
+  restore)
+    [[ "$#" -eq 2 ]] || { echo "Usage: andrew-memory-backup restore <snapshot-filename>" >&2; exit 2; }
+    if systemctl is-active --quiet andrew-control.service; then
+      echo "Stop andrew-control.service before restoring a snapshot." >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "Usage: andrew-memory-backup snapshot | restore <snapshot-filename>" >&2
+    exit 2
+    ;;
+esac
+
+exec systemd-run --wait --pipe --collect --quiet --unit=andrew-memory-backup-operation \
+  --uid=andrew-control --gid=andrew-control \
+  --property=Type=oneshot \
+  --property=WorkingDirectory=/opt/andrew/prototype \
+  --property=EnvironmentFile=/etc/andrew/controller.conf \
+  --property=Environment=PYTHONPATH=/opt/andrew/prototype \
+  --property=LoadCredentialEncrypted=andrew-memory-backup-key:/etc/credstore.encrypted/andrew-memory-backup-key \
+  --property=UMask=0077 \
+  --property=NoNewPrivileges=yes \
+  --property=PrivateTmp=yes \
+  --property=ProtectSystem=strict \
+  --property=ProtectHome=yes \
+  --property=ProtectKernelTunables=yes \
+  --property=ProtectKernelModules=yes \
+  --property=ProtectControlGroups=yes \
+  --property=LockPersonality=yes \
+  --property=RestrictSUIDSGID=yes \
+  --property=RestrictAddressFamilies=AF_UNIX \
+  --property=ReadWritePaths=/var/lib/andrew/control \
+  /usr/bin/python3 -m andrewbot.memory_backup_cli "$@"

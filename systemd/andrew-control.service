@@ -1,0 +1,37 @@
+[Unit]
+Description=Andrew trusted Telegram controller
+Wants=network-online.target
+After=network-online.target andrew-letta.service
+
+[Service]
+Type=simple
+User=andrew-control
+Group=andrew-control
+WorkingDirectory=/opt/andrew/prototype
+EnvironmentFile=/etc/andrew/controller.conf
+Environment=PYTHONPATH=/opt/andrew/prototype
+LoadCredentialEncrypted=andrew-vault-key:/etc/credstore.encrypted/andrew-vault-key
+LoadCredentialEncrypted=andrew-memory-backup-key:/etc/credstore.encrypted/andrew-memory-backup-key
+LoadCredentialEncrypted=andrew-history-key:/etc/credstore.encrypted/andrew-history-key
+ExecStart=/usr/bin/python3 -m andrewbot.main
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/andrew/control /var/lib/andrew/vault
+MemoryMax=512M
+CPUQuota=100%
+TasksMax=64
+LimitNOFILE=2048
+
+[Install]
+WantedBy=multi-user.target

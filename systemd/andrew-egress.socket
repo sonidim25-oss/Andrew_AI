@@ -1,0 +1,13 @@
+[Unit]
+Description=Andrew runtime egress proxy socket
+
+[Socket]
+ListenStream=/run/andrew/egress.sock
+SocketUser=andrew-runtime
+SocketGroup=andrew-runtime
+SocketMode=0600
+RemoveOnStop=yes
+Service=andrew-egress.service
+
+[Install]
+WantedBy=sockets.target

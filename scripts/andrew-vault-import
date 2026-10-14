@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ ${EUID} -ne 0 ]]; then
+  echo "Run with sudo: sudo $0 {telegram_bot|openrouter_api|x_username|x_password}" >&2
+  exit 1
+fi
+name="${1:-}"
+case "$name" in
+  telegram_bot|openrouter_api|x_username|x_password) ;;
+  *) echo "Credential name must be telegram_bot, openrouter_api, x_username, or x_password." >&2; exit 2 ;;
+esac
+
+exec systemd-run --wait --pty --collect --uid=andrew-control \
+  --property=LoadCredentialEncrypted=andrew-vault-key:/etc/credstore.encrypted/andrew-vault-key \
+  --property=WorkingDirectory=/opt/andrew/prototype \
+  --property=Environment=PYTHONPATH=/opt/andrew/prototype \
+  --property=Environment=ANDREW_DATA_DIR=/var/lib/andrew/control \
+  --property=Environment=ANDREW_VAULT_DIR=/var/lib/andrew/vault \
+  /usr/bin/python3 -m andrewbot.vault_cli put "$name"

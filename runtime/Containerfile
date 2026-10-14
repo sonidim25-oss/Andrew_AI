@@ -1,0 +1,23 @@
+ARG BASE_IMAGE=docker.io/library/node@sha256:862263c612aa437e3037674b85419622a9d93bff80aa1eee5398dfe686375532
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates chromium curl git python3 python3-pip \
+    && python3 -m pip install --break-system-packages --no-cache-dir playwright==1.55.0 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /root/.cache
+
+COPY runtime/worker_entry.py /opt/andrew/worker_entry.py
+RUN mkdir -p /workspace /tmp \
+    && chmod 1777 /tmp \
+    && chown 1000:1000 /workspace
+
+ENV CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+WORKDIR /workspace
+USER 1000:1000
+ENTRYPOINT ["python3", "/opt/andrew/worker_entry.py"]

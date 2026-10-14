@@ -1,0 +1,30 @@
+[Unit]
+Description=Andrew public HTTP(S) egress proxy
+Requires=andrew-egress.socket
+After=network-online.target
+
+[Service]
+Type=simple
+User=andrew-egress
+Group=andrew-egress
+WorkingDirectory=/opt/andrew/prototype
+Environment=PYTHONPATH=/opt/andrew/prototype
+ExecStart=/usr/bin/python3 -m andrewbot.egress_proxy
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+MemoryMax=256M
+CPUQuota=100%
+TasksMax=64
+LimitNOFILE=1024

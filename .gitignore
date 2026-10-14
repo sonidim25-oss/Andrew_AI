@@ -1,0 +1,29 @@
+# Local deployment state and credentials
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.sqlite
+*.sqlite3
+*.db
+credentials.json
+secrets/
+ROOT_SESSION_HANDOFF.md
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local runtime and build output
+workspace/
+state/
+backups/
+logs/
+*.log
+*.sock
+*.tar
+*.oci
