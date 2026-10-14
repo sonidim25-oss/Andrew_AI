@@ -2,7 +2,9 @@
 
 **Verified:** 2026-10-14 at 23:13 UTC. Both live lifecycle stages passed. The controller and Letta services are active with zero automatic restarts. Autonomous and fallback schedules are enabled for conversation/memory only; external runtime is disabled. Next saved wake: **2026-10-15 09:00 America/Toronto (13:00 UTC)**.
 
-**Installed runtime revision:** `2971be0`, confirmed by the administrator's module comparison at 23:11 UTC. Later status-only documentation does not change the installed runtime. Earlier controller/integration fixes were published through GitHub `main` at `84fa2b1`; the lifecycle commits have not yet been published.
+**Installed runtime build:** `2971be0`, confirmed by the administrator's module comparison at 23:11 UTC. Its complete file tree matches the published runtime commit [c7c94d5](https://github.com/sonidim25-oss/Andrew_AI/commit/c7c94d58d24cf5b542f3f2c2b23971c07772b97a). Later status-only documentation does not change the installed runtime.
+
+**GitHub synchronization:** The lifecycle changes and verified activation record are published on `main`. Publication through the connected GitHub app preserves each verified file tree, with different commit IDs because the app authors the published commits. Local build IDs in the commissioning history below remain the original deployment evidence; `c7c94d5` is the equivalent published runtime reference.
 
 This is the current feature-status source for Andrew. Source implementation, passing tests, installation, live behavior and autonomous enablement are separate claims. VPS state is a dated observation and must be refreshed after deployment changes.
 
