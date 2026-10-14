@@ -186,6 +186,10 @@ class AppServerConnection:
 
 
 class AppServerClient:
+    SAFE_CONTROLLER_TOOL_NAMES = frozenset({
+        "sleep", "wake_at", "continue_activity", "check_budget", "recent_activity", "save_diary_entry",
+        "memory_search", "memory_add_experience", "memory_propose_personality_edit",
+    })
     CONTROLLER_TOOLS = [{"tools": [
         {"name": "sleep", "label": "Sleep", "description": "Put Andrew to sleep for 1 to 1440 minutes. This ends the current model turn immediately.", "parameters": {"type": "object", "properties": {"minutes": {"type": "integer", "minimum": 1, "maximum": 1440}}, "required": ["minutes"], "additionalProperties": False}},
         {"name": "wake_at", "label": "Wake at", "description": "Schedule Andrew's next wake at local 24-hour HH:MM in the configured timezone. This ends the current model turn immediately.", "parameters": {"type": "object", "properties": {"time": {"type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$"}}, "required": ["time"], "additionalProperties": False}},
@@ -256,13 +260,18 @@ class AppServerClient:
             "type": "runtime_start", "agent_id": agent_id, "mode": "strict",
             "recover_approvals": True, "force_device_status": True,
             "execution_settings": {
-                "tools": [], "allowed_tools": [],
+                # Letta intersects this launch list with each input allowlist.
+                "tools": sorted(self.SAFE_CONTROLLER_TOOL_NAMES) if controller_tools else [],
+                "allowed_tools": [],
                 "disallowed_tools": ["Bash", "exec_command", "Read", "Write", "Edit", "Glob", "Grep", "LS", "WebSearch", "WebFetch", "Browser"],
                 "disable_memory_guard": False,
             },
         }
         if controller_tools:
-            command["external_tools"] = self.CONTROLLER_TOOLS
+            command["external_tools"] = [
+                {**group, "tools": [tool for tool in group["tools"] if tool["name"] in self.SAFE_CONTROLLER_TOOL_NAMES]}
+                for group in self.CONTROLLER_TOOLS
+            ]
         if conversation_id:
             command["conversation_id"] = conversation_id
         response = self.request(command, "runtime_start_response")
@@ -278,7 +287,9 @@ class AppServerClient:
             "payload": {
                 "kind": "create_message",
                 "messages": [{"role": "user", "content": text, "client_message_id": uuid.uuid4().hex}],
-                "client_tool_allowlist": [], "client_toolset": {"base": "none", "include": []},
+                # Letta applies this allowlist to external controller tools too.
+                "client_tool_allowlist": sorted(self.SAFE_CONTROLLER_TOOL_NAMES) if tool_handler else [],
+                "client_toolset": {"base": "none", "include": []},
                 "exclude_interactive_tools": True,
             },
         })

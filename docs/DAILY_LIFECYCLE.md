@@ -41,6 +41,18 @@ Only after both stages pass does the script install the owner opt-in environment
 
 Evidence is stored privately in `/var/lib/andrew/control/lifecycle-validation.json`; terminal output contains check results and cost totals, without credentials or diary bodies. Existing evidence/configuration makes the script refuse a repeated commissioning run. Inspect that evidence before retrying; do not delete it blindly.
 
+### Retrying the initial failed stage
+
+The initial 2026-10-14 commissioning run installed `7595b7d` and passed startup, but its first live stage stopped with `Agent did not choose sleep`. Both the runtime launch list and input client-tool allowlist were empty. The pinned server intersects these lists and applies them to external controller tools, hiding the diary and sleep tools. The corrected runtime and input both explicitly allow only the nine approved lifecycle and memory tools, while built-in execution and external workers remain excluded.
+
+After installing this correction, the owner can retry with:
+
+```sh
+sudo bash /home/daniel/agent/scripts/enable-daily-lifecycle.sh --retry
+```
+
+Retry requires the exact disabled configuration written by the previous failure handler, no completed-stage evidence, and stopped controller/probe units. It recovers the old session and preserves every cycle, charge and uncertain reservation. If today's fallback has already been consumed, it waits for a new one-minute scheduled wake instead of resetting the daily checkpoint. Existing owner pause or timed sleep is not overridden. A failure after a completed stage requires inspecting the saved evidence rather than this initial-stage retry.
+
 ## Operational status
 
 Use owner Telegram commands `/status`, `/budget`, `/diary` and `/activity`. Use `/pause` to suspend activity and `/wake` to clear pause. The controller's systemd service must remain running for scheduled wakes; no separate timer is needed.

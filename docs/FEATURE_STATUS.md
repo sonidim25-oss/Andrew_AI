@@ -1,8 +1,8 @@
 # Andrew Feature Status
 
-**Verified:** 2026-10-14 UTC. The VPS snapshot below includes the successful restart check at 22:29 UTC. The later daily-lifecycle changes have passed local checks; their VPS commissioning is pending.
+**Verified:** 2026-10-14 UTC. The earlier successful integration snapshot is from 22:29 UTC. Initial daily-lifecycle commissioning at 22:50 UTC passed installation/startup and failed its first live stage. The controller is now stopped with autonomous/fallback settings disabled; the corrected tool allowlist is locally verified and awaits retry.
 
-**Installed runtime revision:** `1be7908` (controller, service and provisioning fixes), published through GitHub `main` at `84fa2b1`. The administrator installer compared every deployed controller module with the checkout before those live checks. New local lifecycle changes are not yet installed or published.
+**Installed runtime revision:** `7595b7d`, confirmed by the administrator's module comparison at 22:50 UTC. Earlier controller/integration fixes were published through GitHub `main` at `84fa2b1`; lifecycle commits and the newest allowlist correction have not been published. The allowlist correction is not yet installed.
 
 This is the current feature-status source for Andrew. Source implementation, passing tests, installation, live behavior and autonomous enablement are separate claims. VPS state is a dated observation and must be refreshed after deployment changes.
 
@@ -18,7 +18,7 @@ This is the current feature-status source for Andrew. Source implementation, pas
 | Isolated tool runner and filtered egress | Yes, in prototype source. Worker limits and network policy are implemented. | Yes for local component behavior and policy; this does not prove VPS isolation. | No runner/egress service or socket units were found on the VPS. | No complete VPS worker or isolation proof. | No. Shell and browser execution remain disabled. |
 | Browser history and site-account primitives | Partial. Encrypted history, exact-origin policy and storage primitives exist; trusted browser control and real account workflows remain unfinished. | Yes for implemented storage and policy behavior. | Controller history storage and its independent key are initialized; browser worker execution is disabled. | No live browser or account workflow was exercised. | No. |
 | X, Gmail and other social/email actions | No current integration implementation was found in prototype source; the project description places these in a later owner-opt-in phase. | No integration tests. | No. | No. | No. |
-| Autonomous sessions and schedules | Yes for conversation/memory only. A scoped source gate and explicit owner opt-in replace the blanket all-phases gate. External-runtime autonomy is rejected. | Yes. Dedicated lifecycle tests cover wake deduplication, DST, owner pause, sleep, diary, recovery, budgets and hard limits. | New changes pending installation. Previously installed controller has autonomous/fallback schedules disabled. | Pending the two-stage real Qwen/Telegram commissioning command. | No live enablement claimed yet. The owner has now authorized this limited release; see the [lifecycle guide](DAILY_LIFECYCLE.md). |
+| Autonomous sessions and schedules | Yes for conversation/memory only. A scoped source gate and explicit owner opt-in replace the blanket all-phases gate. External-runtime autonomy is rejected. | Yes. Dedicated lifecycle tests cover wake deduplication, DST, owner pause, sleep, diary, recovery, budgets and hard limits. | `7595b7d` installed; controller stopped and flags disabled after failed commissioning. Corrected tool allowlist awaits installation. | Initial startup passed; first stage failed because the empty input allowlist hid the lifecycle tools. Corrected two-stage retry is pending. | No. The owner has authorized this limited release, but successful commissioning is still required; see the [lifecycle guide](DAILY_LIFECYCLE.md). |
 
 ## Verification evidence
 
@@ -37,9 +37,9 @@ The two default skipped tests require explicit live opt-in. A separate read-only
 
 ### Daily-lifecycle changes: local checks
 
-The updated runtime suite ran **133 tests: 131 passed and 2 gated/skipped**. This includes **20 dedicated lifecycle/policy tests**. The administrator suite passed **5 tests**, giving **138 total: 136 passed and 2 skipped**. Shell syntax, Python compilation of the live probe, `git diff --check`, and controller unit verification also passed. A code reviewer checked the activation and rollback paths; its three findings were corrected and reviewed again.
+The updated runtime suite ran **133 tests: 131 passed and 2 gated/skipped**. This includes **20 dedicated lifecycle/policy tests** and regression assertions for the explicit controller-tool allowlist. The administrator suite passed **7 tests**, including retry-ledger preservation and owner-control rejection, giving **140 total: 138 passed and 2 skipped**. Shell syntax, Python compilation of the live probe, `git diff --check`, and controller unit verification also passed. A code reviewer checked the activation and rollback paths; its three findings were corrected and reviewed again.
 
-The fixes preserve owner pause across wakes, cancel the old autonomous session on manual wake, reject late mutations after sleep, require a daily diary before voluntary autonomous sleep, protect fallback deduplication across clock rollback, rest interrupted sessions and share validated spending settings between the controller and gateway. Local tests substitute the provider and Telegram boundaries. **The new live commissioning script has not yet run; neither installation nor autonomous enablement is claimed for these changes.**
+The fixes preserve owner pause across wakes, cancel the old autonomous session on manual wake, reject late mutations after sleep, require a daily diary before voluntary autonomous sleep, protect fallback deduplication across clock rollback, rest interrupted sessions and share validated spending settings between the controller and gateway. Local tests substitute the provider and Telegram boundaries. **Initial live commissioning failed safely before activation. The corrected allowlist and initial-stage retry have not yet been exercised live.**
 
 ### VPS and live checks
 

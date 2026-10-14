@@ -265,6 +265,10 @@ class AppServerWebSocketTests(unittest.TestCase):
         self.assertEqual(result, "slept 5")
         self.assertEqual(client.connection.sent[1]["type"], "external_tool_call_response")
         self.assertEqual(client.connection.sent[2]["type"], "abort_message")
+        self.assertEqual(set(client.connection.sent[0]["payload"]["client_tool_allowlist"]), {
+            "sleep", "wake_at", "continue_activity", "check_budget", "recent_activity", "save_diary_entry",
+            "memory_search", "memory_add_experience", "memory_propose_personality_edit",
+        })
 
     def test_runtime_advertises_memory_tools_without_local_tools(self):
         class FakeConnection:
@@ -290,7 +294,6 @@ class AppServerWebSocketTests(unittest.TestCase):
         self.assertEqual(set(names), {
             "sleep", "wake_at", "continue_activity", "check_budget", "recent_activity", "save_diary_entry",
             "memory_search", "memory_add_experience", "memory_propose_personality_edit",
-            "python.run", "node.run", "shell.run", "browser.open",
         })
         schemas = {tool["name"]: tool["parameters"] for group in start["external_tools"] for tool in group["tools"]}
         self.assertEqual(schemas["memory_search"]["properties"]["limit"]["maximum"], 20)
@@ -298,7 +301,8 @@ class AppServerWebSocketTests(unittest.TestCase):
         self.assertNotIn("edit_founding_letter", names)
         self.assertNotIn("edit_safety_policy", names)
         self.assertEqual(start["mode"], "strict")
-        self.assertEqual(start["execution_settings"]["tools"], [])
+        self.assertEqual(set(start["execution_settings"]["tools"]), set(names))
+        self.assertEqual(start["execution_settings"]["allowed_tools"], [])
         self.assertIn("Bash", start["execution_settings"]["disallowed_tools"])
         self.assertEqual(client.connection.sent[1]["toolset_preference"], "none")
         self.assertEqual(runtime["agent_id"], "a")

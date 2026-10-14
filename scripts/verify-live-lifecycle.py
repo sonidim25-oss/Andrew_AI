@@ -52,15 +52,38 @@ def write_evidence(report):
     os.replace(temporary, EVIDENCE)
 
 
+def prepare_wake(controller, now, retry=False):
+    require(controller.store.get_state("paused", "0") != "1", "Owner pause is active; retry refused")
+    controller.fallback_wake_time = now.astimezone(ZoneInfo("America/Toronto")).strftime("%H:%M")
+    if controller.check_fallback_wake(now):
+        require(not controller.check_fallback_wake(now), "Fallback wake was duplicated")
+        return "fallback_wake"
+    require(retry, "Existing lifecycle state prevents a fallback wake")
+    require(not (controller.store.get_state("sleeping", "0") == "1" and controller.store.get_state("sleep_until", "")),
+            "Existing timed sleep must not be overridden by commissioning")
+    # Preserve today's fallback checkpoint and every prior cycle/charge. The
+    # owner's retry authorizes a fresh timed wake, not replay of an uncertain call.
+    controller._command("/sleep", "/sleep 1")
+    due = datetime.fromisoformat(controller.store.get_state("sleep_until"))
+    logging.info("Retry: preserving today's fallback checkpoint; waiting for a fresh one-minute scheduled wake")
+    while datetime.now(timezone.utc) < due:
+        time.sleep(min(1, max(0.01, (due - datetime.now(timezone.utc)).total_seconds())))
+    require(controller.check_scheduled_wake(), "Retry timed wake did not fire")
+    require(not controller.check_scheduled_wake(), "Retry timed wake fired twice")
+    return "scheduled_wake"
+
+
 def run(stage):
     require(stage in {"prepare", "resume"}, "Expected prepare or resume")
+    logging.info("Live lifecycle stage %s: loading the persistent agent and guarded gateway", stage)
     policy = load_lifecycle_policy(os.environ)
     require(policy.autonomous_enabled and policy.fallback_enabled, "Lifecycle opt-in is missing")
     store = Store(ROOT / "controller.sqlite3")
+    retry = os.environ.get("ANDREW_LIFECYCLE_RETRY", "0") == "1" and stage == "prepare"
     gateway_thread = None
     try:
         require(store.get_state("paused", "0") != "1", "Owner pause is active; activation refused")
-        require(not store.get_state("active_session_id", ""), "An existing session needs controller recovery first")
+        require(retry or not store.get_state("active_session_id", ""), "An existing session needs controller recovery first")
         require(store.connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok", "SQLite integrity failed")
         require(store.connection.execute("SELECT count(*) FROM budget_reservations").fetchone()[0] == 0,
                 "Uncertain spending reservations require review before commissioning")
@@ -89,12 +112,10 @@ def run(stage):
         if stage == "prepare":
             require(not EVIDENCE.exists(), "Commissioning evidence already exists; inspect it before repeating")
             # Exercise the real fallback code at the current minute; production remains 09:00 Toronto.
-            controller.fallback_wake_time = now.astimezone(ZoneInfo("America/Toronto")).strftime("%H:%M")
             report = {"started_at": now.isoformat(), "usage_before": ledger(store),
                       "agent_id": agent.agent_id, "conversation_id": agent.conversation_id,
                       "cycles_before": store.cycle_count(day)}
-            require(controller.check_fallback_wake(now), "Existing lifecycle state prevents a fallback wake")
-            require(not controller.check_fallback_wake(now), "Fallback wake was duplicated")
+            report["initial_wake_trigger"] = prepare_wake(controller, now, retry=retry)
             runner.SESSION_PROMPT += (
                 " The owner is commissioning this lifecycle. For this first validation session, save today's diary "
                 "if missing, then call sleep with minutes=1. Use the tools to complete these actions now."
@@ -118,7 +139,8 @@ def run(stage):
                 " This is the second and last commissioning session. Today's diary is already saved. "
                 "Call wake_at with time=09:00 now, so your next independent session is tomorrow morning in Toronto."
             )
-        for _ in range(3):
+        for attempt in range(3):
+            logging.info("Live lifecycle stage %s: bounded autonomous turn %s/3", stage, attempt + 1)
             require(runner.tick(), "Autonomous cycle failed or was blocked")
             if store.get_state("sleeping") == "1":
                 break

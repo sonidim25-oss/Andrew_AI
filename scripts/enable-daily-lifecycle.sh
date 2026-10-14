@@ -7,16 +7,31 @@ DROPIN=/etc/systemd/system/andrew-control.service.d/40-daily-lifecycle.conf
 LIFECYCLE_ENV=/etc/andrew/daily-lifecycle.conf
 PROBE_ENV=/run/andrew-lifecycle-probe.conf
 EVIDENCE=/var/lib/andrew/control/lifecycle-validation.json
+RETRY=0
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Run from SSH: sudo bash $PROJECT/scripts/enable-daily-lifecycle.sh" >&2
   exit 2
 fi
-if [ "$#" -ne 0 ]; then
-  echo "Usage: $0" >&2
+if [ "$#" -eq 1 ] && [ "$1" = "--retry" ]; then
+  RETRY=1
+elif [ "$#" -ne 0 ]; then
+  echo "Usage: $0 [--retry]" >&2
   exit 2
 fi
-if [ -e "$DROPIN" ] || [ -e "$LIFECYCLE_ENV" ] || [ -e "$EVIDENCE" ]; then
+if [ "$RETRY" -eq 1 ]; then
+  if [ -e "$EVIDENCE" ] || ! cmp -s "$LIFECYCLE_ENV" <(printf '%s\n' 'ANDREW_AUTONOMOUS_ENABLED=0' 'ANDREW_FALLBACK_WAKE_ENABLED=0' 'ANDREW_ISOLATED_RUNTIME_ENABLED=0') ||
+     ! cmp -s "$DROPIN" <(printf '%s\n' '[Service]' "EnvironmentFile=$LIFECYCLE_ENV"); then
+    echo "Retry requires the previous disabled configuration and no completed-stage evidence; inspect before proceeding." >&2
+    exit 2
+  fi
+  for unit in andrew-control.service andrew-lifecycle-prepare.service andrew-lifecycle-resume.service; do
+    if systemctl is-active --quiet "$unit"; then
+      echo "Retry refused while $unit is active." >&2
+      exit 2
+    fi
+  done
+elif [ -e "$DROPIN" ] || [ -e "$LIFECYCLE_ENV" ] || [ -e "$EVIDENCE" ]; then
   echo "Existing lifecycle configuration or commissioning evidence found; inspect before repeating." >&2
   exit 2
 fi
@@ -45,13 +60,13 @@ install -d -o root -g andrew-control -m 0750 /opt/andrew/admin
 install -o root -g andrew-control -m 0640 "$PROJECT/scripts/verify-live-lifecycle.py" /opt/andrew/admin/verify-live-lifecycle.py
 cat /etc/andrew/controller.conf > "$PROBE_ENV"
 printf '\n%s\n' 'ANDREW_AUTONOMOUS_ENABLED=1' 'ANDREW_FALLBACK_WAKE_ENABLED=1' 'ANDREW_ISOLATED_RUNTIME_ENABLED=0' \
-  'ANDREW_TIMEZONE=America/Toronto' 'ANDREW_FALLBACK_WAKE=09:00' >> "$PROBE_ENV"
+  'ANDREW_TIMEZONE=America/Toronto' 'ANDREW_FALLBACK_WAKE=09:00' "ANDREW_LIFECYCLE_RETRY=$RETRY" >> "$PROBE_ENV"
 chmod 0600 "$PROBE_ENV"
 
 probe() {
   systemd-run --wait --pipe --collect --quiet --unit="andrew-lifecycle-$1" \
     --uid=andrew-control --gid=andrew-control \
-    --property=Type=oneshot --property=TimeoutStartSec=8min --property=RuntimeMaxSec=8min \
+    --property=Type=oneshot --property=TimeoutStartSec=8min \
     --property=WorkingDirectory=/opt/andrew/prototype \
     --property="EnvironmentFile=$PROBE_ENV" \
     --property='Environment=PYTHONPATH=/opt/andrew/prototype' \
