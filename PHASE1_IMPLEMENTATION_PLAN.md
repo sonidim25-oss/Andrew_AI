@@ -1,10 +1,10 @@
 # Phase 1 Implementation Plan
 
-> **Status (updated 2026-10-14):** Workspace prototype implementation is in progress. The controller and tool runtime are not activated by this repository. No production credentials, host inventory, or live firewall snapshot belong in this public plan. See README.md for verified local checks and remaining deployment gates.
+> **Status:** This document describes the target architecture and acceptance checks. For verified source, test, VPS, live-integration, and autonomy status, see [the feature status](docs/FEATURE_STATUS.md). No production credentials, host inventory, or live firewall snapshot belong in this public plan.
 
 **Goal:** Establish a persistent Letta-based Andrew runtime with trusted control services, an encrypted credential vault, and an isolated rootless tool worker, without changing the existing website or Telegram bots.
 
-**Architecture:** The target architecture uses a trusted controller for Telegram, the credential vault, model gateway, budget ledger, audit log and lifecycle APIs. Letta is installed as the persistent agent layer, without shell tools. A separate rootless Podman worker remains disabled until its network and filesystem isolation can be demonstrated. The current prototype controller uses SQLite conversation memory and direct OpenRouter requests; its Letta agent/gateway integration remains unfinished.
+**Architecture:** The target architecture uses a trusted controller for Telegram, the credential vault, model gateway, budget ledger, audit log and lifecycle APIs. Letta is the persistent agent layer, without general-purpose Letta tools. A separate rootless Podman worker remains disabled until its network and filesystem isolation can be demonstrated. The implementation and deployment state of the Letta agent/gateway integration is recorded in [the feature status](docs/FEATURE_STATUS.md).
 
 **Tech stack:** Ubuntu 24.04 systemd, rootless Podman, Letta App Server, SQLite with per-record AEAD encryption, systemd encrypted credentials/TPM2 where supported, a controller-owned OpenAI-compatible model gateway, Unix domain sockets, and nftables rules scoped to the new service identities.
 
