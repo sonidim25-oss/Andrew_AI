@@ -1,7 +1,7 @@
 # Phase 0 Findings and Proposed Install Plan
 
 **Date:** 2026-10-13
-**Status:** Phase 0 complete; awaiting owner review before any system changes.
+**Status:** Initial design complete; implementation and deployment status are tracked in README.md. Recheck every host-specific requirement during private deployment.
 
 ## Decision requested
 
