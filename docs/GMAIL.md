@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented in source; not installed, connected, locally tested or proved against a live mailbox. No OAuth credentials or Gmail messages were accessed during implementation. Google project setup and owner consent are required before use. The existing browser commissioning checks do not prove this Gmail integration.
+Installed from `d64872e` on 2026-10-15 at 01:44 UTC. Browser/runtime commissioning and controller startup passed; controller and Letta are active. Gmail-specific tests and live mailbox checks have not run. Google consent and connection are pending; the Gmail permission file has not yet been created. The uploaded Desktop client JSON was validated without displaying secrets and restricted to mode 0600. Existing browser commissioning checks do not prove Gmail behavior. Evidence: `/var/lib/andrew/runtime-commissioning/20261015T014059Z`.
 
 ## Permissions
 

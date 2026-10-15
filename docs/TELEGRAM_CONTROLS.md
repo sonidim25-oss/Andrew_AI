@@ -2,7 +2,7 @@
 
 ## Deployment status
 
-The command keyboard is implemented in source and awaits installation. The running controller last verified on 2026-10-15 uses `f410a21`, which predates these buttons. No automated tests or live Telegram checks were run for this UI change.
+The command keyboard and Gmail status button were installed with `d64872e` on 2026-10-15 at 01:44 UTC. Controller startup and Telegram authentication passed. No dedicated automated keyboard tests or live button-interaction checks were run for this UI change.
 
 ## Owner menu
 
