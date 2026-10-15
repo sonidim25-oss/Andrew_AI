@@ -11,6 +11,8 @@ POLICY_FILES = [Path('/etc/andrew/runner.conf'),Path('/etc/andrew/egress.conf'),
                 Path('/etc/systemd/system/andrew-runtime-firewall.service')]
 POLICY_FILES += [Path('/etc/systemd/system')/('andrew-'+name+suffix)
                  for name in ('runner','browser','egress') for suffix in ('.service','.socket')]
+POLICY_FILES += [Path('/etc/systemd/system')/('andrew-'+role+'.service.d/50-rootless-runtime.conf')
+                 for role in ('runner','browser')]
 CHECKS = frozenset({'network','limits','browser','accounts','letta'})
 
 def code_digest(directory):

@@ -8,7 +8,7 @@ PROJECT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 if [ "$(id -u)" -ne 0 ]; then
   echo "Run from SSH: sudo bash $PROJECT/scripts/enable-browser-runtime.sh" >&2; exit 2
 fi
-for binary in podman nft ip mkfs.ext4 mount findmnt systemd-run loginctl python3 curl; do command -v "$binary" >/dev/null; done
+for binary in podman nft ip mkfs.ext4 mount findmnt systemd-run loginctl python3 curl crun; do command -v "$binary" >/dev/null; done
 if ! command -v setfacl >/dev/null; then apt-get update -qq; apt-get install -y --no-install-recommends acl; fi
 for unit in andrew-control.service andrew-letta.service; do systemctl is-active --quiet "$unit"; done
 MANIFEST="$PROJECT/runtime/browser-release.json"
@@ -32,6 +32,8 @@ install -d -o root -g root -m 0700 "$BACKUP"
 # Preserve only Andrew-owned files; never restore a whole host ruleset.
 managed=(/etc/andrew/runner.conf /etc/andrew/egress.conf /etc/andrew/runtime-proof.json
  /etc/andrew/runner-environment.conf /etc/andrew/browser-environment.conf /etc/andrew/browser-runtime.conf
+ /etc/systemd/system/andrew-runner.service.d/50-rootless-runtime.conf
+ /etc/systemd/system/andrew-browser.service.d/50-rootless-runtime.conf
  /etc/nftables.d/andrew-runtime.nft /etc/systemd/system/andrew-control.service
  /etc/systemd/system/andrew-control.service.d/99-browser-runtime.conf)
 for name in runner browser egress; do
@@ -105,6 +107,11 @@ ensure_identity andrew-egress /var/lib/andrew/egress
 getent group andrew-egress-access >/dev/null || groupadd --system andrew-egress-access
 usermod -aG andrew-egress-access andrew-runtime
 usermod -aG andrew-egress-access andrew-browser
+for name in andrew-runtime andrew-browser; do
+ for task_group in $(id -Gn "$name"); do
+  case "$task_group" in "$name"|andrew-egress-access) ;; *) echo 'Unexpected launcher group; refusing to inherit it.' >&2; exit 1;; esac
+ done
+done
 # Reserve non-overlapping subordinate maps only for the two Andrew launchers.
 python3 - <<'PY'
 from pathlib import Path
@@ -159,6 +166,9 @@ printf 'IMAGE=%s\nWORKSPACE=/srv/andrew/workspace/projects\nPROXY_SOCKET=/run/an
 for role in runner browser; do
   name=andrew-runtime; [ "$role" = browser ] && name=andrew-browser
   task_uid="$(id -u "$name")"
+  install -d -o root -g root -m 0755 "/etc/systemd/system/andrew-$role.service.d"
+  printf '[Service]\nReadWritePaths=/run/user/%s\n' "$task_uid" > "/etc/systemd/system/andrew-$role.service.d/50-rootless-runtime.conf"
+  chmod 0644 "/etc/systemd/system/andrew-$role.service.d/50-rootless-runtime.conf"
   printf 'XDG_RUNTIME_DIR=/run/user/%s\nDBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%s/bus\n' "$task_uid" "$task_uid" > "/etc/andrew/$role-environment.conf"
 done
 ip -j address show > "$BACKUP/addresses.json"
@@ -195,7 +205,7 @@ systemd-run --wait --pipe --collect --quiet --unit=andrew-runtime-acceptance --u
 browser_uid="$(id -u andrew-browser)"
 runuser -u andrew-browser -- env HOME=/var/lib/andrew/browser XDG_RUNTIME_DIR="/run/user/$browser_uid" \
  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$browser_uid/bus" \
- podman run --rm --network=none --sysctl net.ipv4.ip_unprivileged_port_start=0 --read-only \
+ podman --runtime=/usr/bin/crun run --rm --timeout=120 --log-driver=none --pull=never --network=none --sysctl net.ipv4.ip_unprivileged_port_start=0 --read-only \
  --user=1000:1000 --cap-drop=ALL --security-opt=no-new-privileges --memory=2g --cpus=2 --pids-limit=256 \
  --env HOME=/tmp --tmpfs /tmp:rw,nosuid,nodev,size=256m \
  --mount type=bind,src=/opt/andrew/runtime-services/checks/verify-browser-fixture.py,dst=/opt/andrew/verify-browser-fixture.py,ro=true \

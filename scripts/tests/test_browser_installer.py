@@ -35,3 +35,13 @@ nft() { printf 'nft %s\\n' "$*" >> "$CALLS"; }
                 self.assertIn('cp -a '+str(path)+'/etc/andrew/runner.conf /etc/andrew/runner.conf',calls)
                 self.assertEqual('restart andrew-control.service' in calls,bool(stopped))
                 self.assertNotIn('flush ruleset',calls)
+
+    def test_runroot_paths_are_scoped_and_bound_to_proof(self):
+        self.assertIn('50-rootless-runtime.conf',SCRIPT)
+        self.assertIn('ReadWritePaths=/run/user/%s',SCRIPT)
+        readiness=(PROJECT/'prototype/andrewbot/runtime_readiness.py').read_text()
+        self.assertIn('50-rootless-runtime.conf',readiness)
+    def test_validation_environment_files_use_distinct_properties(self):
+        text=(PROJECT/'scripts/validate-and-start-controller.sh').read_text()
+        self.assertIn('--property=EnvironmentFile=/etc/andrew/controller.conf',text)
+        self.assertIn('--property=EnvironmentFile=-/etc/andrew/browser-runtime.conf',text)

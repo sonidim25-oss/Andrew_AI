@@ -23,7 +23,7 @@ from worker_entry import UnixProxyBridge
 from browser_protocol import redact
 from playwright.sync_api import sync_playwright
 
-JSON_PAGE = b'''<html><body><input id="user" type="email"><input id="pass" type="password"><button id="submit" onclick="fetch('/json-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:document.querySelector('#user').value,pass:document.querySelector('#pass').value})}).then(r=>r.text()).then(t=>document.body.innerText=t)">Login</button></body></html>'''
+JSON_PAGE = b'''<html><body><input id="user" type="email"><input id="pass" type="password"><button id="submit" onclick="fetch('/json-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:document.querySelector('#user').value,pass:document.querySelector('#pass').value})}).then(r=>r.json()).then(v=>document.body.innerText=JSON.stringify(v))">Login</button></body></html>'''
 
 PAGE = b'''<html><head><title>Andrew controlled fixture</title></head><body>
 <form method="POST" action="/signup"><input id="user" name="user"><input id="pass" name="pass" type="password">
@@ -34,7 +34,7 @@ PAGE = b'''<html><head><title>Andrew controlled fixture</title></head><body>
 </body></html>'''
 
 class Fixture(http.server.BaseHTTPRequestHandler):
-    accounts={}; seen=[]; stolen=[]; session_token=secrets.token_urlsafe(24)
+    accounts={}; seen=[]; stolen=[]; evil_cookie=False; encoded_echo=False; encoded_json=False; session_token=secrets.token_urlsafe(24)
     def log_message(self,*a): pass
     def send(self,body,kind='text/html',cookie=None):
         self.send_response(200); self.send_header('Content-Type',kind)
@@ -65,8 +65,10 @@ class Fixture(http.server.BaseHTTPRequestHandler):
         if self.path=='/signup': self.accounts[user]=digest
         ok=self.accounts.get(user)==digest
         # Deliberately hostile echo: it must be redacted from the tool output.
-        self.send(('ACCEPTED '+password if ok else 'REJECTED').encode(),
-                  cookie='andrew-session='+self.session_token+'; Secure; HttpOnly; SameSite=Strict' if ok else None)
+        text=('ACCEPTED '+(''.join('&#'+str(ord(c))+';' for c in password) if self.encoded_echo else password)) if ok else 'REJECTED'
+        if self.encoded_json: text='{"echo":"'+''.join('\\u%04x'%ord(c) for c in password)+'"}'
+        cookie=('leaked='+password+'; Domain=example.org; Secure; Path=/') if self.evil_cookie else ('andrew-session='+self.session_token+'; Secure; HttpOnly; SameSite=Strict' if ok else None)
+        self.send(text.encode(),cookie=cookie)
 
 
 class FixtureProxy(socketserver.BaseRequestHandler):
@@ -113,7 +115,7 @@ def main():
             with sync_playwright() as p:
                 browser=p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,proxy={'server':proxy_url,'bypass':'<-loopback>'},
                     args=['--no-sandbox','--ignore-certificate-errors','--host-resolver-rules=MAP fixture.example.org 127.0.0.1,MAP other.example.org 127.0.0.1'])
-                engine=BrowserEngine(browser,context_options={'ignore_https_errors':True,'proxy':{'server':proxy_url,'bypass':'<-loopback>'}})
+                engine=BrowserEngine(browser,request_factory=p.request.new_context,context_options={'ignore_https_errors':True,'proxy':{'server':proxy_url,'bypass':'<-loopback>'}})
                 url='https://fixture.example.org'
                 def action(**request): return engine.execute(request)
                 assert action(action='open',url=url)['title']=='Andrew controlled fixture'
@@ -130,7 +132,7 @@ def main():
                 request=dict(action='account_submit',url=url,username='andrew-test',secret=secret,
                     username_selector='#user',password_selector='#pass',submit_selector='#submit')
                 result=redact(action(**request),engine.secrets)
-                assert result['submitted'] and 'ACCEPTED' in result['text']
+                assert result['submitted'] and result['http_status']==200
                 assert secret not in json.dumps(result)
                 assert secret not in ''.join(Fixture.seen)
                 try: action(action='screenshot')
@@ -140,10 +142,10 @@ def main():
                 action(action='open',url=url+'/logout')
                 assert 'SESSION MISSING' in action(action='open',url=url+'/private')['text']
                 engine.context.close()
-                engine=BrowserEngine(browser,context_options={'ignore_https_errors':True,'proxy':{'server':proxy_url,'bypass':'<-loopback>'}})  # Fresh context simulates browser restart.
+                engine=BrowserEngine(browser,request_factory=p.request.new_context,context_options={'ignore_https_errors':True,'proxy':{'server':proxy_url,'bypass':'<-loopback>'}})  # Fresh context simulates browser restart.
                 action(action='open',url=url+'/login')
                 result=redact(action(**request),engine.secrets)
-                assert result['submitted'] and 'ACCEPTED' in result['text']
+                assert result['submitted'] and result['http_status']==200
                 assert secret not in json.dumps(result)
                 assert 'ACCOUNT SESSION VERIFIED' in action(action='open',url=url+'/private')['text']
                 assert 'SESSION MISSING' in action(action='new_tab',url='https://other.example.org/private')['text']
@@ -156,7 +158,7 @@ def main():
                 else: raise AssertionError('cross-origin credential submission allowed')
                 action(action='reset'); action(action='open',url=url+'/json')
                 result=redact(action(**{**request,'submit_url':url+'/json-login'}),engine.secrets)
-                assert result['submitted'] and 'ACCEPTED' in result['text']
+                assert result['submitted'] and result['http_status']==200
                 assert secret not in json.dumps(result)
                 assert 'ACCOUNT SESSION VERIFIED' in action(action='open',url=url+'/private')['text']
                 action(action='reset')
@@ -175,11 +177,28 @@ def main():
                 engine.page.locator('form').evaluate("f=>f.action='/redirect-local'")
                 result=action(**request)
                 assert result['submitted'] and 'ACCOUNT SESSION VERIFIED' in result['text']
+                action(action='reset'); action(action='open',url=url)
+                Fixture.evil_cookie=True
+                try: action(**request)
+                except ValueError: pass
+                assert not any(secret in c['value'] for c in engine.context.cookies()),'rejected cookie retained password'
+                Fixture.evil_cookie=False
+                action(action='reset'); action(action='open',url=url)
+                Fixture.encoded_echo=True
+                action(**request)
+                assert secret not in engine.page.locator('body').inner_text(),'HTML entities exposed password to renderer'
+                Fixture.encoded_echo=False
+                action(action='reset'); action(action='open',url=url+'/json')
+                Fixture.encoded_json=True
+                result=action(**{**request,'submit_url':url+'/json-login'})
+                assert result['submitted'] and secret not in engine.page.locator('body').inner_text()
+                assert 'ACCOUNT SESSION VERIFIED' in action(action='open',url=url+'/private')['text']
+                Fixture.encoded_json=False
                 browser.close()
             assert FixtureProxy.connections>0
             print(json.dumps({'browser_operations':'passed','account_signup_login_fresh_context':'passed',
                 'javascript_json_login':'passed','dom_password_isolation':'passed','hostile_echo_redaction':'passed',
-                'cookie_login_logout_reset':'passed','human_verification':'blocked','same_origin_302_login':'passed','credential_307_replay':'blocked','cross_origin_submission':'blocked','external_network':'not used (component fixture only)'}))
+                'cookie_login_logout_reset':'passed','human_verification':'blocked','same_origin_302_login':'passed','rejected_cookie_isolation':'passed','encoded_response_isolation':'passed','credential_307_replay':'blocked','cross_origin_submission':'blocked','external_network':'not used (component fixture only)'}))
         finally:
             bridge.close(); proxy_server.shutdown(); proxy_server.server_close(); server.shutdown(); server.server_close()
 

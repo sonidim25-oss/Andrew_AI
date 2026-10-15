@@ -36,6 +36,8 @@ class RunnerServiceTests(unittest.TestCase):
         self.assertIn("--timeout=120", args)
         self.assertIn("--log-driver=none", args)
         self.assertIn("--pull=never", args)
+        self.assertIn("--group-add=keep-groups", args)
+        self.assertIn("--runtime=/usr/bin/crun", args)
         self.assertIn("--userns=keep-id:uid=1000,gid=1000", args)
         self.assertIn("--user=1000:1000", args)
         self.assertIn("--read-only", args)

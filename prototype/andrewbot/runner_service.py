@@ -47,9 +47,9 @@ class RunnerService:
 
     def _podman_args(self, container_name):
         return [
-            self.config.podman_binary, "run", "--rm", "--name", container_name, "-i",
+            self.config.podman_binary, "--runtime=/usr/bin/crun", "run", "--rm", "--name", container_name, "-i",
             "--timeout=120", "--log-driver=none", "--pull=never", "--label=org.andrew.runtime=managed",
-            "--network=none", "--userns=keep-id:uid=1000,gid=1000", "--read-only", "--user=1000:1000", "--cap-drop=ALL",
+            "--group-add=keep-groups", "--network=none", "--userns=keep-id:uid=1000,gid=1000", "--read-only", "--user=1000:1000", "--cap-drop=ALL",
             "--security-opt=no-new-privileges", "--pids-limit=256", "--memory=2g", "--cpus=2",
             "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=256m",
             "--mount", f"type=bind,src={self.config.workspace},dst=/workspace,rw=true",

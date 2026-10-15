@@ -1,5 +1,6 @@
 """Trusted, ephemeral browser process. Only private controller RPC reaches stdin."""
 import base64
+from http.cookies import SimpleCookie
 import json
 import os
 import secrets
@@ -10,8 +11,9 @@ from browser_protocol import MAX_WIRE, MAX_FILE, origin, safe_url, validate_acti
 from worker_entry import UnixProxyBridge
 
 class BrowserEngine:
-    def __init__(self, browser, context_options=None):
+    def __init__(self, browser, request_factory, context_options=None):
         self.browser = browser
+        self.request_factory = request_factory
         self.context_options = context_options or {}
         self.secrets = []
         self.pending = None
@@ -26,6 +28,7 @@ class BrowserEngine:
         self.context.route_web_socket('**/*', lambda route: route.close())
         self.page = self.context.new_page()
         self.secrets = []
+        self.passwords = []
         self.pending = None
         self.authenticated = False
         self.redirect_url = None
@@ -38,7 +41,8 @@ class BrowserEngine:
             # Reject credential replay, including redirect bodies. Ordinary
             # public subresources/tabs use the browser's origin-bound cookie jar.
             body = request.post_data or ''
-            if redact(request.url,self.secrets) != request.url or redact(body,self.secrets) != body:
+            headers = request.all_headers()
+            if any(redact(v,self.passwords) != v for v in [request.url,body,*headers.values()]):
                 return route.abort()
             pending = self.pending
             if pending and request.url == pending['target'] and request.method == 'POST':
@@ -64,32 +68,46 @@ class BrowserEngine:
                 self.authenticated = True
                 self.account_origin = request_origin
                 # Browser never receives actual credentials in its DOM.
-                # Chromium can replay an overridden POST on a 307 without
-                # routing it again. Fetch privately with redirects disabled;
-                # the renderer retains placeholders, never the private body.
-                response = route.fetch(post_data=outgoing,max_redirects=0,timeout=15000)
-                headers = dict(response.headers)
-                secret = pending['password']
-                if any(redact(v,[secret]) != v for v in headers.values()):
-                    self.credential_blocked = True
-                    return route.fulfill(status=409,body='Credential response header blocked')
-                if 300 <= response.status < 400:
-                    target = urljoin(request.url,headers.get('location',''))
-                    if response.status in {301,302,303} and origin(target) == pending['origin']:
-                        self.redirect_url = target
-                    else:
+                # Use a fresh cookie jar: rejected Set-Cookie values must never
+                # reach the renderer's shared jar, even briefly.
+                options = {k:v for k,v in self.context_options.items() if k in {'proxy','ignore_https_errors'}}
+                private = self.request_factory(**options)
+                try:
+                    outgoing_headers = {k:v for k,v in headers.items() if k.lower() not in {'host','content-length'}}
+                    response = private.fetch(request.url,method='POST',data=outgoing,headers=outgoing_headers,
+                                             max_redirects=0,timeout=15000)
+                    response_headers = dict(response.headers)
+                    if any(redact(v,self.passwords) != v for v in response_headers.values()):
                         self.credential_blocked = True
-                    # Preserve cookies, suppress redirect and private body replay.
-                    headers.pop('location',None)
-                    headers.pop('content-length',None)
-                    headers['content-type'] = 'text/plain'
-                    return route.fulfill(status=200,headers=headers,body='Credential POST submitted; redirect checked.')
-                body = response.body()
-                if len(body)>MAX_FILE: return route.abort()
-                headers.pop('content-length',None)
-                headers.pop('content-encoding',None)
-                return route.fulfill(status=response.status,headers=headers,
-                    body=redact(body.decode('utf-8',errors='replace'),[secret]))
+                        return route.fulfill(status=409,content_type='text/plain',body='Credential response blocked')
+                    # Cookies are installed only after all validation, scoped to
+                    # this exact HTTPS host and hidden from page JavaScript.
+                    cookies=[]
+                    for header in response.headers_array:
+                        if header['name'].lower() != 'set-cookie': continue
+                        parsed=SimpleCookie(); parsed.load(header['value'])
+                        if not parsed: raise ValueError('unsupported cookie')
+                        for name,morsel in parsed.items():
+                            path=morsel['path'] or '/'
+                            if not path.startswith('/') or len(path)>2048: raise ValueError('invalid cookie path')
+                            if morsel['max-age'] == '0':
+                                self.context.clear_cookies(name=name,domain=request_origin.removeprefix('https://'),path=path)
+                            else:
+                                cookies.append({'name':name,'value':morsel.value,'url':request_origin+path,
+                                                'httpOnly':True,'secure':True,'sameSite':'Lax'})
+                    if 300 <= response.status < 400:
+                        target=urljoin(request.url,response_headers.get('location',''))
+                        if response.status in {301,302,303} and origin(target)==pending['origin']:
+                            self.redirect_url=target
+                        else: self.credential_blocked=True
+                    if not self.credential_blocked: self.context.add_cookies(cookies)
+                    self.credential_status=response.status
+                    # No remote credential response body or scripts enter the
+                    # page. This also blocks HTML entities/JSON escape echoes.
+                    safe=json.dumps({'credential_request_submitted':True,'http_status':response.status,
+                                     'verification_required':True})
+                    return route.fulfill(status=200,content_type='application/json',body=safe)
+                finally: private.dispose()
             return route.continue_()
         except Exception:
             self.credential_blocked = True
@@ -164,6 +182,7 @@ class BrowserEngine:
             raise ValueError('human verification required')
         tokens = {secrets.token_urlsafe(20)+'@example.invalid':request['username'],secrets.token_urlsafe(24):request['secret']}
         self.secrets.extend([request['username'],request['secret']])
+        self.passwords.append(request['secret'])
         self.pending = {'target':target,'origin':expected,'tokens':tokens,'password':request['secret']}
         self.redirect_url = None
         self.credential_blocked = False
@@ -179,7 +198,7 @@ class BrowserEngine:
             if self.redirect_url:
                 self.page.goto(self.redirect_url,wait_until='domcontentloaded',timeout=15000)
             if origin(self.page.url) != expected: raise ValueError('account redirect rejected')
-            return {'submitted':True, **self.snapshot()}
+            return {'submitted':True,'http_status':self.credential_status,'verification_required':True, **self.snapshot()}
         finally: self.pending = None
 
 
@@ -193,7 +212,7 @@ def main():
                 proxy={'server':proxy,'bypass':'<-loopback>'},
                 args=['--no-sandbox','--disable-crash-reporter','--disable-breakpad','--disable-quic',
                       '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'])
-            engine = BrowserEngine(browser,context_options={'proxy':{'server':proxy,'bypass':'<-loopback>'}})
+            engine = BrowserEngine(browser,request_factory=p.request.new_context,context_options={'proxy':{'server':proxy,'bypass':'<-loopback>'}})
             while True:
                 raw = sys.stdin.buffer.readline(MAX_WIRE + 1)
                 if not raw: break

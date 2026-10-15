@@ -1,9 +1,9 @@
 {
-  "image": "localhost/andrew-browser@sha256:ceb82d9cf3041e6df752087cca1c530dcd383015648a648ee647b81dd6bbb290",
-  "archive_sha256": "967f3885ab86bb7d7f91809303e3d27034d027f871e840a13fed5831fd0edb6a",
+  "image": "localhost/andrew-browser@sha256:a03a18620a23d9fcf2659d0d4bcf02c1d10deeb75f233111dc82be8af84c6a31",
+  "archive_sha256": "be3ca9a770f3e9961162d97d8313bbaf30ba134008e16885a3ecbd7adc5582fa",
   "sources": {
     "runtime/Containerfile.release": "83733cccd2c202896a2a76ae325ed2c33f71d9181841a49b69935b5b41a76d0b",
-    "runtime/browser_entry.py": "63c43ece54fc62b0762a3644dcebea55cdb6e0841d30e8ba666e5bacf3f9ebd4",
+    "runtime/browser_entry.py": "65b5d4cf532ea53b82e885d1a9d02e7a8adcb63d8fd511b14dca05ffe3fa7dcd",
     "runtime/worker_entry.py": "4b5957d88c483dcf8bed7a8f9f1aef1e627f0fe27787a3c1c5cc8c39c0cac5b7",
     "prototype/andrewbot/browser_protocol.py": "6cb6a714933dcb17df48d4e68d1a058e3a99e72d11f608507de3ac717c229aeb"
   },
