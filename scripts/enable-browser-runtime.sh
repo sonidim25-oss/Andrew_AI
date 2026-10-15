@@ -184,7 +184,7 @@ for role in runner browser; do
   name=andrew-runtime; [ "$role" = browser ] && name=andrew-browser
   task_uid="$(id -u "$name")"
   install -d -o root -g root -m 0755 "/etc/systemd/system/andrew-$role.service.d"
-  printf '[Service]\nReadWritePaths=/run/user/%s\n' "$task_uid" > "/etc/systemd/system/andrew-$role.service.d/50-rootless-runtime.conf"
+  printf '[Service]\nBindPaths=/run/user/%s\nReadWritePaths=/run/user/%s\n' "$task_uid" "$task_uid" > "/etc/systemd/system/andrew-$role.service.d/50-rootless-runtime.conf"
   chmod 0644 "/etc/systemd/system/andrew-$role.service.d/50-rootless-runtime.conf"
   printf 'XDG_RUNTIME_DIR=/run/user/%s\nDBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%s/bus\n' "$task_uid" "$task_uid" > "/etc/andrew/$role-environment.conf"
 done
@@ -214,6 +214,8 @@ systemctl daemon-reload
 check='dedicated firewall activation'
 systemctl restart andrew-runtime-firewall.service
 systemctl restart andrew-runner.socket andrew-browser.socket andrew-egress.socket
+check='protected rootless startup inspection'
+bash "$PROJECT/scripts/diagnose-browser-runtime.sh" | tee "$BACKUP/startup-results.json"
 # Run kernel, network, OOM, PID, CPU and 120-second wall-clock proofs through
 # the actual protected sockets, which launch as the installed service identities.
 check='live kernel and browser acceptance'

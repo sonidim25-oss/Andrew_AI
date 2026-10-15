@@ -1,4 +1,5 @@
 """Installer ordering and real rollback control flow with mocked OS mutations."""
+import configparser
 import json
 from pathlib import Path
 import subprocess
@@ -42,6 +43,26 @@ nft() { printf 'nft %s\\n' "$*" >> "$CALLS"; }
         self.assertIn('ReadWritePaths=/run/user/%s',SCRIPT)
         readiness=(PROJECT/'prototype/andrewbot/runtime_readiness.py').read_text()
         self.assertIn('50-rootless-runtime.conf',readiness)
+
+    def test_generated_profiles_expose_only_their_own_runroot_under_hidden_homes(self):
+        # Regression: ProtectHome=yes hides the /run/user parent even when the
+        # child is named in ReadWritePaths. Exercise the actual drop-in writer.
+        block=SCRIPT[SCRIPT.index('for role in runner browser; do'):SCRIPT.index("check='public network exclusions'")]
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)
+            (path/'etc/andrew').mkdir(parents=True)
+            code='''id() { if [ "$2" = andrew-runtime ]; then echo 994; else echo 990; fi; }
+install() { mkdir -p "${@: -1}"; }
+'''+block.replace('/etc/',str(path)+'/etc/')
+            result=subprocess.run(['bash','-euc',code],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            for role,uid in (('runner',994),('browser',990)):
+                profile=configparser.ConfigParser(interpolation=None,strict=False)
+                profile.read([PROJECT/f'systemd/andrew-{role}.service',
+                    path/f'etc/systemd/system/andrew-{role}.service.d/50-rootless-runtime.conf'])
+                self.assertEqual(profile['Service']['ProtectHome'],'tmpfs')
+                self.assertEqual(profile['Service'].get('BindPaths'),f'/run/user/{uid}')
+                self.assertEqual(profile['Service']['ReadWritePaths'],f'/run/user/{uid}')
     def test_validation_environment_files_use_distinct_properties(self):
         text=(PROJECT/'scripts/validate-and-start-controller.sh').read_text()
         self.assertIn('--property=EnvironmentFile=/etc/andrew/controller.conf',text)

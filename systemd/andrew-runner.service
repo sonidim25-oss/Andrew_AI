@@ -18,7 +18,8 @@ RestartSec=3
 UMask=0077
 PrivateTmp=yes
 ProtectSystem=strict
-ProtectHome=yes
+# Hide other homes while the UID-specific drop-in exposes only our runroot.
+ProtectHome=tmpfs
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 LockPersonality=yes
