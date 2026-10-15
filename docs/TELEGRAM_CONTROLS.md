@@ -16,12 +16,15 @@ After installation, send `/start`, `/menu` or any existing command. Andrew's rep
 | ☀️ Wake up | 🌙 Sleep |
 | ⏸ Pause | ⏰ Set wake time |
 | ❓ Help | 👋 Start |
+| 📬 Gmail | |
 
 Buttons use the existing commands and owner/private-chat checks. They do not invoke the model. Wake up clears owner pause; Sleep and Pause retain their existing behavior. Start opens the menu without waking Andrew. Retry messages retains its existing duplicate-delivery semantics.
 
 Set wake time asks for a local 24-hour time, such as `09:00`, using Andrew's configured timezone. The prompt lasts ten minutes and survives a controller restart. Invalid time input asks again. `/cancel` or any command button exits time entry; otherwise ordinary text is treated as the time response until the prompt expires. The prompt itself does not change Andrew's wake state. Setting a time preserves an existing owner pause.
 
 Typed slash commands remain supported, including history searches/deletion and diary dates/retries. Help lists their syntax. Telegram clients can hide the keyboard; use the keyboard icon to reopen it.
+
+The subsequent Gmail source update adds `/gmail` to show connection status and separate read/draft/send/delete permissions. Permission changes use the administrator command described in [GMAIL.md](GMAIL.md).
 
 ## Install
 

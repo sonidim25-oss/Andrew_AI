@@ -9,6 +9,9 @@
 *.sqlite3
 *.db
 credentials.json
+client_secret*.json
+gmail-client*.json
+token.json
 secrets/
 ROOT_SESSION_HANDOFF.md
 

@@ -7,6 +7,7 @@ BUTTON_ROWS = (
     (("☀️ Wake up", "/wake"), ("🌙 Sleep", "/sleep")),
     (("⏸ Pause", "/pause"), ("⏰ Set wake time", "/wake_at")),
     (("❓ Help", "/help"), ("👋 Start", "/start")),
+    (("📬 Gmail", "/gmail"),),
 )
 BUTTON_COMMANDS = {label: command for row in BUTTON_ROWS for label, command in row}
 
@@ -29,6 +30,7 @@ HELP_TEXT = (
     "🌐 /history — recent browsing; /history example.com to search\n"
     "📖 /diary — latest entry; /diary YYYY-MM-DD for a date\n"
     "📋 /activity — recent actions\n\n"
+    "📬 /gmail — connection and separate Gmail permissions\n\n"
     "☀️ /wake — wake up and clear pause\n"
     "🌙 /sleep — sleep until the next scheduled wake; /sleep 30 for 30 minutes\n"
     "⏰ /wake_at — choose a local wake time\n"

@@ -52,6 +52,25 @@ class ModelGateway:
             return 400, {"error": {"message": "messages are required", "type": "invalid_request_error"}}
         outbound = dict(payload)
         outbound["messages"] = [dict(message) if isinstance(message, dict) else message for message in messages]
+        now = datetime.now(timezone.utc)
+        snapshot = budget_snapshot(
+            self.store, now=now, monthly_limit_usd=self.monthly_limit_usd,
+            monthly_reserve_usd=self.monthly_reserve_usd, daily_target_usd=self.daily_target_usd,
+        )
+        position = 0
+        while (position < len(outbound['messages'])
+               and isinstance(outbound['messages'][position], dict)
+               and outbound['messages'][position].get('role') == 'system'):
+            position += 1
+        outbound['messages'].insert(position, {
+            'role': 'system',
+            'content': ('Current controller budget in USD, before reserving this request: '
+                        + json.dumps({k: round(v, 6) if isinstance(v, float) else v
+                                      for k, v in snapshot.items()}, sort_keys=True)
+                        + '. Totals include unsettled reservations. check_budget is a local read-only '
+                          'tool with no approval requirement or provider call of its own. '
+                          'Budget limits remain enforced; never infer current permissions from an old diary.'),
+        })
         if self.memory_service is not None:
             try:
                 memory_context = self.memory_service.current_personality_context()
@@ -76,11 +95,6 @@ class ModelGateway:
             return 400, {"error": {"message": "invalid output token limit", "type": "invalid_request_error"}}
         input_tokens_bound = max(1, input_bytes)
         reserved = input_tokens_bound * self.input_rate + max_tokens * self.output_rate
-        now = datetime.now(timezone.utc)
-        snapshot = budget_snapshot(
-            self.store, now=now, monthly_limit_usd=self.monthly_limit_usd,
-            monthly_reserve_usd=self.monthly_reserve_usd, daily_target_usd=self.daily_target_usd,
-        )
         if reserved > snapshot["remaining_ordinary"]:
             return 429, {"error": {"message": "monthly model budget reached", "type": "rate_limit_error"}}
 

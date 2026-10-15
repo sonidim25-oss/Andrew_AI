@@ -24,6 +24,7 @@ from .tool_runtime import ToolPolicy, ToolRuntime
 from .browser_client import BrowserClient
 from .browser_tools import BrowserTools
 from .account_broker import StoredAccountBroker
+from .gmail_tools import GmailTools
 
 
 def data_directory():
@@ -171,6 +172,7 @@ def run(validate_only=False):
         model_config=model_config,
         visit_history=history,
         tool_runtime=tool_runtime,
+        gmail_tools=GmailTools(vault_directory(), store),
     )
     agent.tool_handler = controller.execute_tool
     check = "Letta provider and persistent agent initialization"

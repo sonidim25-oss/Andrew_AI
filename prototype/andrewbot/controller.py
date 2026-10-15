@@ -11,7 +11,7 @@ class Controller:
                  monthly_reserve_usd=1.0, daily_target_usd=0.30,
                  timezone_name="America/Toronto", fallback_wake_time="09:00",
                  autonomous_enabled=False, fallback_enabled=False, memory_service=None, model_config=None,
-                 tool_runtime=None, visit_history=None):
+                 tool_runtime=None, visit_history=None, gmail_tools=None):
         self.store = store
         self.model = model
         self.owner_id = int(owner_id)
@@ -25,6 +25,7 @@ class Controller:
         self.memory_service = memory_service
         self.tool_runtime = tool_runtime
         self.visit_history = visit_history
+        self.gmail_tools = gmail_tools
         if model_config is not None and not isinstance(model_config, ModelConfig):
             raise ValueError("model configuration is invalid")
         self.model_config = model_config or load_model_config({})
@@ -256,9 +257,9 @@ class Controller:
                 kind = "personality" if name == "memory_propose_personality_edit" else "experience"
                 self.memory_service.reject_edit_attempt(kind)
             raise ValueError("tool arguments must be an object")
-        if self.store.get_state("paused", "0") == "1" and name not in {"check_budget", "recent_activity", "memory_search"}:
+        if self.store.get_state("paused", "0") == "1" and name not in {"check_budget", "recent_activity", "memory_search", "gmail.status"}:
             raise ValueError("owner pause can only be cleared by the owner with /wake")
-        if self.store.get_state("sleeping", "0") == "1" and name not in {"check_budget", "recent_activity", "memory_search"}:
+        if self.store.get_state("sleeping", "0") == "1" and name not in {"check_budget", "recent_activity", "memory_search", "gmail.status"}:
             raise ValueError("sleep can only end at a scheduled wake or an owner wake")
         if (name in {"sleep", "wake_at"} and self.store.get_state("active_session_id", "")
                 and not self.store.diary_entry(datetime.now(ZoneInfo("America/Toronto")).date().isoformat())):
@@ -330,7 +331,17 @@ class Controller:
             )
             return f"Andrew is awake. {queued} queued message(s) were released."
         if name == "check_budget":
+            if arguments:
+                raise ValueError("check_budget takes no arguments")
             return self._command("/budget")
+        if name in {"gmail.status", "gmail.read", "gmail.draft", "gmail.send", "gmail.delete"}:
+            if self.gmail_tools is None:
+                raise ValueError("Gmail is not configured")
+            if name != "gmail.status":
+                allowed, reason = self.budget_allows(0)
+                if not allowed:
+                    raise ValueError(f"Gmail action blocked by {reason} budget gate")
+            return self.gmail_tools.execute(name, arguments)
         if name == "recent_activity":
             limit = arguments.get("limit", 8)
             if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 8:
@@ -378,6 +389,24 @@ class Controller:
         if command == "/cancel":
             self.store.set_state("telegram_wake_prompt_until", "")
             return "Time entry cancelled. Choose a button or send me a message."
+        if command == "/gmail":
+            if self.gmail_tools is None:
+                return "Gmail is not configured. Connect it using the administrator OAuth command."
+            if len(text.split()) > 1:
+                return "Use /gmail to view permissions. Permission changes require the administrator command; never paste OAuth credentials in chat."
+            try:
+                status = self.gmail_tools.status()
+            except ValueError:
+                return "Gmail configuration could not be read. Check the administrator setup."
+            lines = ["📬 Gmail", "Connected: " + ("yes" if status['connected'] else "no"),
+                     "Enabled: " + ("yes" if status['enabled'] else "no")]
+            for name, flags in status['permissions'].items():
+                state = "enabled" if flags['effective'] else "disabled"
+                if flags['allowed_by_owner'] and not flags['oauth_scope_present']:
+                    state += " — OAuth consent required"
+                lines.append(f"{name.capitalize()}: {state}")
+            lines.append("Delete moves mail to Trash. Permanent deletion is unavailable.")
+            return "\n".join(lines)
         if command == "/history":
             if self.visit_history is None:
                 return "Browser history is unavailable."
@@ -494,7 +523,7 @@ class Controller:
             latest_diary = self.store.diary_entry()
             diary_state = (f"{latest_diary['local_date']} ({latest_diary['delivery_state']})"
                            if latest_diary else "none")
-            schedule = "enabled (conversation and memory only)" if self.autonomous_enabled else "disabled"
+            schedule = "enabled" if self.autonomous_enabled else "disabled"
             fallback = "enabled" if self.fallback_enabled else "disabled"
             return (f"Andrew is {state}. Session: {session}. Autonomous schedule: {schedule}; fallback: {fallback}. "
                     f"Next self-scheduled wake: {wake_display}. "
