@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from .budget import budget_snapshot
 from .configuration import ModelConfig, load_model_config
 from .diary import format_diary_entry, parse_diary_command, validate_diary_content
+from .telegram_menu import BUTTON_COMMANDS, HELP_TEXT
 
 
 class Controller:
@@ -89,9 +90,28 @@ class Controller:
         if not isinstance(text, str) or not text.strip():
             return None
         text = text.strip()
+        text = BUTTON_COMMANDS.get(text, text)
         command = text.split(maxsplit=1)[0].split("@", 1)[0].lower()
         if command.startswith("/"):
+            self.store.set_state("telegram_wake_prompt_until", "")
             return self._command(command, text)
+        prompt_until = self.store.get_state("telegram_wake_prompt_until", "")
+        if prompt_until:
+            try:
+                pending = datetime.now(timezone.utc) < datetime.fromisoformat(prompt_until)
+            except (ValueError, TypeError):
+                pending = False
+            if pending:
+                # Restrict input to a time so text cannot become another command.
+                parts = text.split(":")
+                if (len(parts) != 2 or not all(part.isascii() and part.isdigit() for part in parts)
+                        or len(parts[0]) not in (1, 2) or len(parts[1]) != 2
+                        or not 0 <= int(parts[0]) <= 23 or not 0 <= int(parts[1]) <= 59):
+                    return "Enter a 24-hour time such as 09:00, or send /cancel to return to chat."
+                self.store.set_state("telegram_wake_prompt_until", "")
+                return self._command("/wake_at", "/wake_at " + text)
+            self.store.set_state("telegram_wake_prompt_until", "")
+            return "Time entry expired. Tap ⏰ Set wake time again, or resend your message to chat."
         sleeping = self.store.get_state("sleeping", "0") == "1"
         paused = self.store.get_state("paused", "0") == "1"
         if sleeping or paused:
@@ -348,10 +368,16 @@ class Controller:
         raise ValueError("unsupported controller action")
 
     def _command(self, command, text=""):
-        if command in {"/help", "/start"}:
-            if command == "/start":
-                return "Hello, I’m Andrew. I’m an AI, and this is my first persistent Telegram prototype. Use /help to see commands."
-            return "Commands: /status /wake /sleep /wake_at HH:MM /pause /replay /activity /diary [YYYY-MM-DD] or /diary retry YYYY-MM-DD /history [query] /history delete <id> /history delete all /history confirm DELETE ALL HISTORY /budget /help"
+        if command in {"/help", "/start", "/menu"}:
+            if command in {"/start", "/menu"}:
+                return ("Hello, I’m Andrew, your AI assistant.\n\n"
+                        "Choose a button below to check my activity, browsing history or budget, "
+                        "or manage when I’m awake. You can also send me a message.\n\n"
+                        "Tap ❓ Help for command details. Opening this menu does not wake me.")
+            return HELP_TEXT
+        if command == "/cancel":
+            self.store.set_state("telegram_wake_prompt_until", "")
+            return "Time entry cancelled. Choose a button or send me a message."
         if command == "/history":
             if self.visit_history is None:
                 return "Browser history is unavailable."
@@ -408,7 +434,12 @@ class Controller:
         if command == "/wake_at":
             pieces = text.split(maxsplit=1)
             if len(pieces) != 2:
-                return "Use /wake_at followed by a local 24-hour time, such as /wake_at 09:00."
+                self.store.set_state("telegram_wake_prompt_until", (
+                    datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat())
+                return (f"⏰ What time should I wake up?\n\n"
+                        f"Send a 24-hour time, such as 09:00 ({self.timezone_name}). "
+                        "This will put me to sleep until that time; an owner pause stays in place.\n\n"
+                        "Send /cancel to return to chat. This prompt expires in 10 minutes.")
             try:
                 hour_text, minute_text = pieces[1].split(":", 1)
                 hour, minute = int(hour_text), int(minute_text)

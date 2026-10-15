@@ -3,6 +3,7 @@ import time
 from collections import deque
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from .telegram_menu import command_keyboard
 
 
 class TelegramAPI:
@@ -30,7 +31,8 @@ class TelegramAPI:
 
     def send_message(self, chat_id, text):
         text = text[:4000]
-        return self.call("sendMessage", {"chat_id": chat_id, "text": text})
+        return self.call("sendMessage", {"chat_id": chat_id, "text": text,
+                                         "reply_markup": command_keyboard()})
 
     def get_me(self):
         return self.call("getMe", {})

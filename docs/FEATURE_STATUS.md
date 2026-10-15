@@ -2,7 +2,7 @@
 
 **Production observation:** 2026-10-15 at 01:07 UTC. Browser/code runtime commissioning passed and external tools are enabled. The controller and Letta are active with zero automatic restarts; the three runtime sockets and dedicated firewall service are active and enabled. Autonomous and fallback schedules remain enabled, with **09:00 America/Toronto (13:00 UTC)** as the fallback. Saved owner pause/sleep, cycles, IDs, memory and spending state were preserved.
 
-**Installed runtime build:** `f410a21`, confirmed by the administrator's module comparison at 01:06 UTC. The checkout code digest matches the root-owned acceptance record; installed service code, policy and immutable image reference also match that record. Documentation-only updates do not change the installed runtime.
+**Installed runtime build:** `f410a21`, confirmed by the administrator's module comparison at 01:06 UTC. At that observation the checkout code digest matched the root-owned acceptance record; installed service code, policy and immutable image reference also matched that record. The subsequent [Telegram command keyboard](TELEGRAM_CONTROLS.md) is implemented in source but has not been installed or tested. Its controller changes require renewed acceptance before deployment.
 
 **GitHub synchronization:** The earlier lifecycle release is published on `main` as [c7c94d5](https://github.com/sonidim25-oss/Andrew_AI/commit/c7c94d58d24cf5b542f3f2c2b23971c07772b97a). The newly installed browser integration is committed locally on `codex/browser-sandbox-integration`; publication of that branch has not been verified. Do not treat the installed browser build as a confirmed GitHub match yet.
 
