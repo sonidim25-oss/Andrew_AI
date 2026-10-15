@@ -2,16 +2,16 @@
 
 ## Release scope
 
-The owner's 2026-10-14 request authorizes enabling Andrew's existing conversation and memory lifecycle. It supersedes the earlier requirement to finish every future project phase before activating any autonomy. It does not approve autonomous shell, browser, site-account, social or email actions.
+The owner's 2026-10-14 request authorized Andrew's conversation and memory lifecycle without waiting for every future project phase. Subsequent owner instructions authorized the [browser/code runtime](BROWSER_RUNTIME.md) and separately controlled [Gmail integration](GMAIL.md). See [feature status](FEATURE_STATUS.md) for installed versions and evidence.
 
-`TEXT_MEMORY_LIFECYCLE_READY` is the source release gate. `ANDREW_AUTONOMOUS_ENABLED=1` is still required; the fallback additionally requires `ANDREW_FALLBACK_WAKE_ENABLED=1`. Both settings default off. Startup refuses autonomous operation with `ANDREW_ISOLATED_RUNTIME_ENABLED=1`. This release does not mark other project phases complete.
+`TEXT_MEMORY_LIFECYCLE_READY` is the source release gate. `ANDREW_AUTONOMOUS_ENABLED=1` is still required; the fallback additionally requires `ANDREW_FALLBACK_WAKE_ENABLED=1`. Both settings default off. Enabling `ANDREW_ISOLATED_RUNTIME_ENABLED=1` requires a current administrator-owned code/image/policy acceptance record. Gmail uses its separate owner permissions and OAuth scopes.
 
 ## Preserved limits and owner controls
 
 - At most 150 started autonomous cycles per Toronto calendar day and 180 minutes per session.
 - At most $10 per calendar month, with at least $1 protected reserve. The daily allowance is at most $0.30, accumulating within the month. Lower configured limits are shared by the controller and gateway.
 - Each provider call still needs gateway authentication, the allowed model, bounded input/output and a durable budget reservation. Failed or uncertain requests keep their reservations.
-- `/pause` blocks model requests and agent mutations once consumed from Telegram; commands are processed between bounded turns. Only the owner's `/wake` clears pause. Manual wake cancels the previous autonomous session and permits interactive conversation; it does not resume that session. Late agent actions cannot cancel committed sleep.
+- `/pause` blocks model requests and agent mutations once consumed from Telegram; commands are processed between bounded turns. Only the owner's `/wake` clears pause. Manual wake cancels the previous autonomous session and, when autonomy is enabled, requests a fresh independent session. The scheduler applies the existing budget and daily cycle limits before starting it. Andrew can choose what to do and request sleep or a timed wake himself. When autonomy is disabled, manual wake permits interactive conversation only. Late agent actions cannot cancel committed sleep.
 - Timed sleep persists in UTC. Daily fallback at 09:00 America/Toronto starts idle work or wakes indefinite sleep; it respects explicit timed sleep, pause and an active session. Each day's checkpoint runs once, including repeated DST hours and clock rollback.
 - During an autonomous session Andrew must save today's diary before voluntarily sleeping. There is one immutable diary per local date, with content checks and validated event references. A confirmed Telegram send is not repeated. An uncertain send requires explicit `/diary retry YYYY-MM-DD` and may duplicate the earlier message.
 - Restart marks unfinished cycles interrupted, retains spending reservations and rests an interrupted session. It preserves an existing timed sleep and never silently replays an uncertain model call. A safe, labeled incident summary can be recorded without another model call.

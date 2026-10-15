@@ -62,7 +62,7 @@ class SessionRunner:
 
     def start(self, trigger, now):
         if not self.enabled or trigger not in {
-            "fallback_wake", "scheduled_wake", "agent_continue",
+            "fallback_wake", "scheduled_wake", "agent_continue", "owner_wake",
         }:
             return None
         if self.store.get_state("sleeping", "0") == "1" or self.store.get_state("paused", "0") == "1":

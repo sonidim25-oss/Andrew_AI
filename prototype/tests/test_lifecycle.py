@@ -76,13 +76,13 @@ class LifecycleTests(unittest.TestCase):
         self.assertFalse(self.runner.tick(self.now))
         self.assertEqual(self.calls, [])
 
-    def test_pause_then_manual_wake_cannot_resume_the_previous_autonomous_session(self):
-        self.runner.start("scheduled_wake", self.now)
+    def test_pause_then_manual_wake_starts_a_fresh_autonomous_session(self):
+        previous_session = self.runner.start("scheduled_wake", self.now)
         self.controller._command("/pause")
         self.controller._command("/wake")
-        self.assertFalse(self.runner.tick(self.now))
-        self.assertEqual(self.calls, [])
-        self.assertEqual(self.store.get_state("active_session_id"), "")
+        self.assertTrue(self.runner.tick(self.now))
+        self.assertEqual(len(self.calls), 1)
+        self.assertNotEqual(self.store.get_state("active_session_id"), previous_session)
 
     def test_late_agent_action_cannot_cancel_committed_sleep(self):
         self.controller.execute_tool("sleep", {"minutes": 1})

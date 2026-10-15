@@ -488,7 +488,8 @@ class Controller:
         if command == "/wake":
             self.store.transition_state(
                 {"sleeping": "0", "paused": "0", "sleep_until": "",
-                 "session_start_requested": "", "active_session_id": "", "active_session_started_at": "",
+                 "session_start_requested": "owner_wake" if self.autonomous_enabled else "",
+                 "active_session_id": "", "active_session_started_at": "",
                  "active_session_status": "owner_wake"}, "Owner woke Andrew"
             )
             queued = self.store.pending_message_count(self.owner_id)

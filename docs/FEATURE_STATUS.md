@@ -8,6 +8,8 @@
 
 This is the current feature-status source for Andrew. Source implementation, passing tests, installation, live behavior and autonomous enablement are separate claims. VPS state is a dated observation and must be refreshed after deployment changes.
 
+**Subsequent manual-wake fix:** `/wake` now requests a fresh autonomous session when autonomy is enabled. It still clears owner pause, cancels the old session and preserves existing budget/cycle limits and Andrew's ability to choose sleep. This fix has not been installed or tested; the dated installed build above predates it.
+
 ## Status matrix
 
 | Feature area | Implemented in source | Passed local tests | Installed on VPS | Passed live integration tests | Enabled for autonomous use |
