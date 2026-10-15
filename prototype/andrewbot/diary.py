@@ -45,8 +45,10 @@ def format_diary_entry(entry):
     event_ids = entry.get("event_ids") or []
     if event_ids:
         rendered += "\n\nObjective activity event IDs: " + ", ".join(str(item) for item in event_ids)
-    if entry.get("delivery_state") == "uncertain" or int(entry.get("delivery_attempts", 0)) > 0:
+    if entry.get("delivery_state") == "uncertain":
         rendered += "\n\nTelegram delivery is uncertain; a retry may send this entry twice."
+    elif entry.get("delivery_state") == "pending" and int(entry.get("delivery_attempts", 0)) > 0:
+        rendered += "\n\nRetry requested after an uncertain Telegram delivery; this may produce a duplicate."
     return rendered
 
 
