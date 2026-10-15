@@ -1,5 +1,6 @@
 import hmac
 import json
+import math
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -87,11 +88,13 @@ class ModelGateway:
                 })
         input_bytes = len(json.dumps(outbound, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
         if input_bytes > 64_000:
-            return 413, {"error": {"message": "request exceeds the configured context limit", "type": "invalid_request_error"}}
+            # The pinned Letta runtime recognizes this category and compacts
+            # saved history before retrying. A generic 413 ends the session.
+            return 413, {"error": {"message": "request too large: controller context window limit exceeded", "type": "invalid_request_error", "code": "context_length_exceeded"}}
         requested_output = payload.get("max_tokens", payload.get("max_completion_tokens", 512))
         try:
             max_tokens = min(512, max(1, int(requested_output)))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return 400, {"error": {"message": "invalid output token limit", "type": "invalid_request_error"}}
         input_tokens_bound = max(1, input_bytes)
         reserved = input_tokens_bound * self.input_rate + max_tokens * self.output_rate
@@ -113,25 +116,41 @@ class ModelGateway:
             # Keep the reservation: the request may have reached the provider
             # even though its response was lost.
             return 502, {"error": {"message": "model provider request failed", "type": "server_error"}}
+        if not isinstance(result, dict) or not isinstance(result.get('choices'), list) or not result['choices']:
+            self.store.add_activity('Letta model gateway received an invalid provider response; reservation retained')
+            return 502, {"error": {"message": "invalid model provider response", "type": "server_error"}}
         usage = result.get("usage") or {}
+        invalid_usage = False
         try:
+            if not isinstance(usage, dict):
+                raise ValueError('invalid usage')
             input_tokens = max(0, int(usage.get("prompt_tokens", usage.get("input_tokens", 0))))
             output_tokens = max(0, int(usage.get("completion_tokens", usage.get("output_tokens", 0))))
+            if input_tokens > 2**63 - 1 or output_tokens > 2**63 - 1:
+                raise ValueError('usage exceeds SQLite integer range')
             actual = usage.get("cost")
             if actual is None:
                 actual = (
                     (input_tokens or input_tokens_bound) * self.input_rate
                     + (output_tokens or max_tokens) * self.output_rate
                 )
-            cost = max(float(actual), 0.0)
-        except (TypeError, ValueError):
+            cost = float(actual)
+            if not math.isfinite(cost) or cost < 0:
+                raise ValueError('invalid provider cost')
+        except (TypeError, ValueError, OverflowError):
+            invalid_usage = True
             input_tokens = input_tokens_bound
             output_tokens = max_tokens
             cost = reserved
-        # If the provider omits billing details, charge the full reservation. Otherwise
-        # never record less than the locally bounded estimate.
+        # Missing or malformed billing details consume the full reservation.
         if not usage:
             cost = reserved
+        if invalid_usage or not usage:
+            # Do not forward NaN/Infinity to Letta's strict JSON parser after
+            # settling the ledger: that would still abort the model turn.
+            result = {**result, 'usage': {'prompt_tokens': input_tokens,
+                      'completion_tokens': output_tokens,
+                      'total_tokens': input_tokens + output_tokens, 'cost': cost}}
         self.store.settle_usage(
             reservation_id, month, day, max(cost, reserved if not usage else 0.0),
             input_tokens or input_tokens_bound, output_tokens,
@@ -142,6 +161,10 @@ class ModelGateway:
 def make_server(gateway, host="127.0.0.1", port=8284):
     class Handler(BaseHTTPRequestHandler):
         server_version = "AndrewModelGateway"
+
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(60)
 
         def log_message(self, _format, *_args):
             # Request bodies and authorization headers are deliberately excluded.
@@ -168,14 +191,20 @@ def make_server(gateway, host="127.0.0.1", port=8284):
             if self.path != "/v1/chat/completions":
                 self._json(404, {"error": {"message": "not found"}})
                 return
+            if not hmac.compare_digest(self.headers.get("Authorization", ""), f"Bearer {gateway.gateway_token}"):
+                self._json(401, {"error": {"message": "unauthorized"}})
+                return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 1 <= length <= 256_000:
-                    self._json(413, {"error": {"message": "request size is not allowed"}})
+                    self._json(413, {"error": {"message": "request too large: controller request size limit", "code": "context_length_exceeded"}})
                     return
                 payload = json.loads(self.rfile.read(length))
             except (ValueError, json.JSONDecodeError):
                 self._json(400, {"error": {"message": "invalid JSON"}})
+                return
+            if not isinstance(payload, dict) or not isinstance(payload.get('stream_options', {}), dict):
+                self._json(400, {"error": {"message": "request must be an object with valid stream options"}})
                 return
             wants_stream = payload.get("stream") is True
             status, result = gateway.complete(self.headers.get("Authorization"), payload)

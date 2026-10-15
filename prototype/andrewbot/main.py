@@ -25,6 +25,7 @@ from .browser_client import BrowserClient
 from .browser_tools import BrowserTools
 from .account_broker import StoredAccountBroker
 from .gmail_tools import GmailTools
+from .dispatch import ControllerDispatch
 
 
 def data_directory():
@@ -208,6 +209,7 @@ def run(validate_only=False):
     sessions = SessionRunner(store, controller, agent, enabled=autonomous_enabled)
     sessions.recover()
     store.recover_queued_claims()
+    store.recover_update_claims(owner_id)
     if not autonomous_enabled:
         store.set_state("session_start_requested", "")
     logging.info(
@@ -224,10 +226,6 @@ def run(validate_only=False):
         nonlocal stopping
         stopping = True
 
-    def send_owner_text(text):
-        if text:
-            telegram.send_message(owner_id, text)
-
     def deliver_diary_outbox():
         try:
             return deliver_pending_diary(telegram, store, owner_id)
@@ -235,29 +233,10 @@ def run(validate_only=False):
             logging.warning("Diary delivery processing stopped (%s)", type(error).__name__)
             return 0
 
-    def process_update(update_id, update):
-        message = update.get("message") or {}
-        sender = (message.get("from") or {}).get("id")
-        if sender == owner_id and not limiter.allow():
-            store.add_activity("Owner message dropped by notification rate limit")
-            store.complete_update(update_id)
-            return
-        reply = controller.handle_update(update)
-        chat_id = (message.get("chat") or {}).get("id")
-        if chat_id == owner_id:
-            queued_reply = controller.flush_queued()
-            if reply and queued_reply:
-                reply = reply + "\n\n" + queued_reply
-            elif queued_reply:
-                reply = queued_reply
-            if reply:
-                telegram.send_message(chat_id, reply)
-        store.complete_update(update_id)
-        deliver_diary_outbox()
-
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    offset = store.last_update_id()
+    dispatch = ControllerDispatch(store, controller, telegram, sessions, limiter,
+                                  owner_id, autonomous_enabled, fallback_enabled, lambda: stopping)
     logging.info("Andrew Telegram controller started; secrets are loaded from the encrypted vault")
     try:
         while not stopping:
@@ -268,28 +247,14 @@ def run(validate_only=False):
                 except Exception as error:
                     logging.warning("Encrypted memory backup failed (%s)", type(error).__name__)
                 deliver_diary_outbox()
-                scheduled = autonomous_enabled and controller.check_scheduled_wake()
-                fallback = fallback_enabled and controller.check_fallback_wake()
-                if scheduled or fallback:
-                    send_owner_text(controller.flush_queued())
-                updates = telegram.get_updates(offset=None if offset is None else offset + 1)
-                for update in updates:
-                    store.enqueue_update(update)
-                offset = store.last_update_id()
-                scheduled = autonomous_enabled and controller.check_scheduled_wake()
-                fallback = fallback_enabled and controller.check_fallback_wake()
-                if scheduled or fallback:
-                    send_owner_text(controller.flush_queued())
-                for update_id, update in store.pending_updates():
-                    process_update(update_id, update)
-                offset = store.last_update_id()
-                sessions.tick()
+                if not dispatch.step():
+                    time.sleep(5)
                 deliver_diary_outbox()
             except RuntimeError as error:
-                logging.warning("A remote request failed (%s)", str(error))
+                logging.warning("A remote request failed (%s)", type(error).__name__)
                 time.sleep(5)
-            except Exception:
-                logging.exception("Controller iteration failed")
+            except Exception as error:
+                logging.warning("Controller iteration failed (%s)", type(error).__name__)
                 time.sleep(5)
     finally:
         gateway_thread.close()

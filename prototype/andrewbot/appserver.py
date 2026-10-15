@@ -83,8 +83,15 @@ class AppServerConnection:
         if parsed.scheme != "ws" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
             raise ValueError("Letta App Server must use a loopback ws:// URL")
         self.socket = socket.create_connection((parsed.hostname, parsed.port or 80), timeout=timeout)
+        self.read_timeout = timeout
+        self.deadline = time.monotonic() + timeout
         self.socket.settimeout(timeout)
-        self._handshake(parsed.path or "/ws")
+        try:
+            self._handshake(parsed.path or "/ws")
+        except Exception:
+            self.socket.close()
+            raise
+        self.deadline = None
 
     def _handshake(self, path):
         key = base64.b64encode(os.urandom(16)).decode("ascii")
@@ -97,7 +104,7 @@ class AppServerConnection:
         self.socket.sendall(request)
         response = bytearray()
         while not response.endswith(b"\r\n\r\n"):
-            chunk = self.socket.recv(1)
+            chunk = self._read_exactly(1)
             if not chunk or len(response) > 16_384:
                 raise RuntimeError("Letta WebSocket handshake failed")
             response.extend(chunk)
@@ -127,6 +134,11 @@ class AppServerConnection:
     def _read_exactly(self, count):
         result = bytearray()
         while len(result) < count:
+            if getattr(self, 'deadline', None) is not None:
+                remaining = self.deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('Letta response deadline reached')
+                self.socket.settimeout(min(self.read_timeout, remaining))
             chunk = self.socket.recv(count - len(result))
             if not chunk:
                 raise RuntimeError("Letta WebSocket closed unexpectedly")
@@ -151,6 +163,7 @@ class AppServerConnection:
 
     def recv_json(self):
         chunks = []
+        total = 0
         while True:
             final, opcode, payload = self._read_frame()
             if opcode == 0x9:
@@ -162,10 +175,14 @@ class AppServerConnection:
                 continue
             if opcode == 0x1:
                 chunks = [payload]
+                total = len(payload)
             elif opcode == 0x0 and chunks:
                 chunks.append(payload)
+                total += len(payload)
             else:
                 continue
+            if total > 2_000_000:
+                raise RuntimeError('Letta WebSocket message exceeds the size limit')
             if final:
                 try:
                     return json.loads(b"".join(chunks).decode("utf-8"))
@@ -230,6 +247,7 @@ class AppServerClient:
         self.connection.send_json(command)
         deadline = time.monotonic() + (timeout or getattr(self, "timeout", 120))
         while time.monotonic() < deadline:
+            self.connection.deadline = deadline
             message = self.connection.recv_json()
             if message.get("request_id") == request_id:
                 if message.get("type") != response_type or not message.get("success", False):
@@ -314,6 +332,7 @@ class AppServerClient:
         early_reply = None
         abort_request_id = None
         while time.monotonic() < deadline:
+            self.connection.deadline = deadline
             event = self.connection.recv_json()
             if event.get("runtime") and event["runtime"] != runtime:
                 continue

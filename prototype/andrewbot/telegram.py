@@ -30,7 +30,8 @@ class TelegramAPI:
         return data.get("result")
 
     def send_message(self, chat_id, text):
-        text = text[:4000]
+        # Telegram counts UTF-16 units; astral emoji use two, unlike len(str).
+        text = text.encode('utf-16-le')[:8000].decode('utf-16-le', errors='ignore')
         return self.call("sendMessage", {"chat_id": chat_id, "text": text,
                                          "reply_markup": command_keyboard()})
 

@@ -17,6 +17,26 @@ from andrewbot.store import Store
 
 
 class AppServerWebSocketTests(unittest.TestCase):
+    def test_fragmented_websocket_message_has_an_aggregate_limit(self):
+        connection = AppServerConnection.__new__(AppServerConnection)
+        with patch.object(connection, '_read_frame', side_effect=[
+                (False, 1, b'x' * 1_100_000), (True, 0, b'x' * 1_100_000)]):
+            with self.assertRaisesRegex(RuntimeError, 'message exceeds'):
+                connection.recv_json()
+
+    def test_websocket_reads_obey_total_deadline_despite_partial_frames(self):
+        from unittest.mock import Mock
+        connection = AppServerConnection.__new__(AppServerConnection)
+        connection.socket = Mock()
+        connection.socket.recv.return_value = b'x'
+        connection.read_timeout = 120
+        connection.deadline = 10
+        with patch('andrewbot.appserver.time.monotonic', side_effect=[9, 11]):
+            with self.assertRaises(TimeoutError):
+                connection._read_exactly(2)
+        connection.socket.recv.assert_called_once()
+        connection.socket.settimeout.assert_called_once_with(1)
+
     def test_startup_waits_for_a_temporarily_refused_letta_connection(self):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / "controller.sqlite3")
@@ -89,6 +109,11 @@ class AppServerWebSocketTests(unittest.TestCase):
                 def ensure_provider(self, _token):
                     pass
 
+                def request(self, command, response_type):
+                    assert command['type'] == 'agent_update'
+                    assert response_type == 'agent_update_response'
+                    return {'success': True}
+
                 def update_agent_model(self, agent_id, model_config):
                     self.updated_model = (agent_id, model_config.model_id)
 
@@ -131,6 +156,11 @@ class AppServerWebSocketTests(unittest.TestCase):
 
                 def ensure_provider(self, _token):
                     pass
+
+                def request(self, command, response_type):
+                    assert command['type'] == 'agent_update'
+                    assert response_type == 'agent_update_response'
+                    return {'success': True}
 
                 def update_agent_model(self, agent_id, config):
                     self.updated.append((agent_id, config.model_id))

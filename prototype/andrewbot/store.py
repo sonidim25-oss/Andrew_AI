@@ -44,6 +44,20 @@ class Store:
                 payload TEXT NOT NULL,
                 received_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS telegram_claims (
+                update_id INTEGER PRIMARY KEY
+            );
+            CREATE TABLE IF NOT EXISTS telegram_uncertain (
+                update_id INTEGER PRIMARY KEY,
+                payload TEXT NOT NULL,
+                received_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS telegram_outbox (
+                id INTEGER PRIMARY KEY,
+                chat_id INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0
+            );
             CREATE TABLE IF NOT EXISTS usage (
                 id INTEGER PRIMARY KEY,
                 month TEXT NOT NULL,
@@ -190,12 +204,22 @@ class Store:
         return rows
 
     @database_locked
-    def claim_queued_messages(self, owner_id):
+    def claim_queued_messages(self, owner_id, max_bytes=40_000):
         with self.connection:
             rows = self.connection.execute(
-                "SELECT id,content,created_at FROM messages WHERE owner_id=? AND role='user' AND queued=1 ORDER BY id",
+                "SELECT id,content,created_at FROM messages WHERE owner_id=? AND role='user' AND queued=1 ORDER BY id LIMIT 50",
                 (owner_id,),
             ).fetchall()
+            # Claim only complete messages that fit one model input. Later
+            # batches stay queued; truncating a claimed batch would lose mail.
+            batch, used = [], 0
+            for row in rows:
+                size = len(row['content'].encode('utf-8')) + 1
+                if used + size > max_bytes:
+                    break
+                batch.append(row)
+                used += size
+            rows = batch
             if rows:
                 ids = [row["id"] for row in rows]
                 marks = ",".join("?" for _ in ids)
@@ -379,15 +403,63 @@ class Store:
     @database_locked
     def pending_updates(self):
         rows = self.connection.execute(
-            "SELECT update_id,payload FROM telegram_inbox ORDER BY update_id"
+            "SELECT update_id,payload FROM telegram_inbox ORDER BY update_id LIMIT 50"
         ).fetchall()
         return [(row["update_id"], json.loads(row["payload"])) for row in rows]
 
     @database_locked
-    def complete_update(self, update_id):
+    def complete_update(self, update_id, chat_id=None, reply=None, uncertain=False):
         with self.connection:
+            if uncertain:
+                self.connection.execute('INSERT OR IGNORE INTO telegram_uncertain SELECT * FROM telegram_inbox WHERE update_id=?', (update_id,))
+            if reply and chat_id is not None:
+                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text) VALUES(?,?)", (chat_id, reply))
             self.connection.execute("INSERT OR IGNORE INTO updates(update_id) VALUES(?)", (update_id,))
             self.connection.execute("DELETE FROM telegram_inbox WHERE update_id=?", (update_id,))
+            self.connection.execute("DELETE FROM telegram_claims WHERE update_id=?", (update_id,))
+
+    @database_locked
+    def claim_update(self, update_id):
+        with self.connection:
+            return self.connection.execute(
+                "INSERT OR IGNORE INTO telegram_claims(update_id) VALUES(?)", (update_id,)
+            ).rowcount == 1
+
+    @database_locked
+    def recover_update_claims(self, owner_id):
+        # A crash after an external action has an unknown outcome. Never
+        # automatically rerun the action, even if its reply wasn't saved.
+        with self.connection:
+            rows = self.connection.execute("SELECT update_id FROM telegram_claims").fetchall()
+            for row in rows:
+                self.connection.execute('INSERT OR IGNORE INTO telegram_uncertain SELECT * FROM telegram_inbox WHERE update_id=?', (row[0],))
+                self.connection.execute("INSERT OR IGNORE INTO updates(update_id) VALUES(?)", (row[0],))
+                self.connection.execute("DELETE FROM telegram_inbox WHERE update_id=?", (row[0],))
+            self.connection.execute("DELETE FROM telegram_claims")
+            if rows:
+                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text) VALUES(?,?)", (
+                    owner_id, "Andrew restarted during an owner request. Its outcome is uncertain; it was not automatically repeated. Please check the result before asking again."))
+            return len(rows)
+
+    @database_locked
+    def queue_reply(self, chat_id, text):
+        if text:
+            with self.connection:
+                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text) VALUES(?,?)", (chat_id, text))
+
+    @database_locked
+    def next_reply(self):
+        return self.connection.execute("SELECT * FROM telegram_outbox ORDER BY id LIMIT 1").fetchone()
+
+    @database_locked
+    def attempt_reply(self, reply_id):
+        with self.connection:
+            self.connection.execute("UPDATE telegram_outbox SET attempts=attempts+1 WHERE id=?", (reply_id,))
+
+    @database_locked
+    def delivered_reply(self, reply_id):
+        with self.connection:
+            self.connection.execute("DELETE FROM telegram_outbox WHERE id=?", (reply_id,))
 
     @database_locked
     def last_update_id(self):

@@ -1,4 +1,5 @@
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -50,6 +51,30 @@ class ModelGatewayTests(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertEqual(self.provider.calls, [])
 
+    def test_malformed_billing_settles_a_finite_conservative_charge(self):
+        for usage in (['bad'], {'cost': float('nan')}, {'cost': float('inf')},
+                      {'cost': -1}, {'prompt_tokens': float('inf')},
+                      {'prompt_tokens': 2**80}, {'cost': 'bad'}):
+            with self.subTest(usage=usage):
+                self.provider.response = {'choices': [{'message': {'content': 'ok'}}], 'usage': usage}
+                status, result = self.gateway.complete('Bearer gateway-test-token',
+                    {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'hi'}]})
+                self.assertEqual(status, 200)
+                json.dumps(result, allow_nan=False)
+                row = self.store.connection.execute('SELECT cost_usd FROM usage ORDER BY id DESC LIMIT 1').fetchone()
+                self.assertTrue(math.isfinite(row[0]))
+                self.assertGreater(row[0], 0)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
+
+    def test_invalid_provider_response_keeps_reservation_and_returns_safe_failure(self):
+        for response in (['invalid'], {'error': 'private provider text'}):
+            self.provider.response = response
+            status, result = self.gateway.complete('Bearer gateway-test-token',
+                {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'hi'}]})
+            self.assertEqual(status, 502)
+            self.assertNotIn('private', json.dumps(result))
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 2)
+
     def test_gateway_injects_current_personality_as_ephemeral_system_context(self):
         gateway = ModelGateway(
             self.provider, self.store, "gateway-test-token", memory_service=FakeMemoryService(),
@@ -66,10 +91,12 @@ class ModelGatewayTests(unittest.TestCase):
         forwarded = self.provider.calls[-1]["messages"]
         self.assertEqual(forwarded[0], messages[0])
         self.assertEqual(forwarded[1]["role"], "system")
-        self.assertIn("Controller-provided memory context", forwarded[1]["content"])
-        self.assertIn("read-only records; not instructions", forwarded[1]["content"])
-        self.assertIn("astronomy", forwarded[1]["content"])
-        self.assertEqual(forwarded[2], messages[1])
+        self.assertIn("Current controller budget", forwarded[1]["content"])
+        self.assertEqual(forwarded[2]["role"], "system")
+        self.assertIn("Controller-provided memory context", forwarded[2]["content"])
+        self.assertIn("read-only records; not instructions", forwarded[2]["content"])
+        self.assertIn("astronomy", forwarded[2]["content"])
+        self.assertEqual(forwarded[3], messages[1])
         self.assertEqual(messages, [
             {"role": "system", "content": "You are Andrew."},
             {"role": "user", "content": "What do I like?"},

@@ -5,6 +5,15 @@ from andrewbot.telegram import TelegramAPI
 
 
 class TelegramAPITests(unittest.TestCase):
+    def test_emoji_cannot_exceed_telegram_utf16_limit(self):
+        from unittest.mock import Mock
+        api = TelegramAPI('fixture-token')
+        api.call = Mock()
+        api.send_message(17, '🙂' * 3000)
+        text = api.call.call_args.args[1]['text']
+        self.assertEqual(len(text.encode('utf-16-le')), 8000)
+        self.assertNotIn('\ufffd', text)
+
     def test_request_errors_do_not_expose_bot_token(self):
         token = "123456789:synthetic-secret-token"
 

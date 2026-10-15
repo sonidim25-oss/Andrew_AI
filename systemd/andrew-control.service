@@ -17,6 +17,8 @@ LoadCredentialEncrypted=andrew-gateway-token:/etc/credstore.encrypted/andrew-gat
 ExecStart=/usr/bin/python3 -m andrewbot.main
 Restart=on-failure
 RestartSec=5
+# Allow an in-flight bounded turn/tool and cleanup to finish during shutdown.
+TimeoutStopSec=300
 UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes

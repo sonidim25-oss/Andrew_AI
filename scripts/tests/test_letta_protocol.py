@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from datetime import datetime
 from pathlib import Path
 
@@ -20,7 +21,8 @@ from andrewbot.store import Store
 
 @unittest.skipUnless(os.environ.get("ANDREW_LETTA_TEST_BINARY"), "set the pinned Letta JS path for isolated protocol integration")
 class LettaProtocolTests(unittest.TestCase):
-    def test_real_harness_completes_diary_and_sleep_callbacks_before_returning(self):
+    @patch('andrewbot.appserver.gmail_permissions', return_value={'enabled': False})
+    def test_real_harness_completes_diary_and_sleep_callbacks_before_returning(self, _permissions):
         with tempfile.TemporaryDirectory(prefix="andrew-protocol-") as directory:
             root = Path(directory)
             with socket.socket() as listener:

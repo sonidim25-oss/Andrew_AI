@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'prototype'))
 from andrewbot.appserver import AppServerClient, LettaAgent
@@ -16,10 +17,19 @@ from andrewbot.controller import Controller
 from andrewbot.vault import Vault
 from andrewbot.store import Store
 from andrewbot.gateway import GatewayThread,ModelGateway,make_server
+from andrewbot.gmail_tools import GMAIL_TOOL_NAMES
 
 @unittest.skipUnless(os.environ.get('ANDREW_LETTA_TEST_BINARY'),'requires isolated pinned Letta harness')
 class BrowserProtocolTests(unittest.TestCase):
-    def test_real_harness_browser_account_callbacks(self):
+    @patch('andrewbot.appserver.gmail_permissions', return_value={'enabled': False})
+    def test_real_harness_browser_account_callbacks(self, _permissions):
+        self.exercise_callbacks(False)
+
+    @patch('andrewbot.appserver.gmail_permissions', return_value={'enabled': True})
+    def test_real_harness_browser_budget_and_gmail_callbacks(self, _permissions):
+        self.exercise_callbacks(True)
+
+    def exercise_callbacks(self, gmail_enabled):
         with tempfile.TemporaryDirectory(prefix='andrew-browser-protocol-') as directory:
             root=Path(directory)
             with socket.socket() as sock: sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
@@ -34,7 +44,11 @@ class BrowserProtocolTests(unittest.TestCase):
                         try: client=AppServerClient(f'ws://127.0.0.1:{port}/ws'); break
                         except ConnectionRefusedError:
                             self.assertIsNone(process.poll()); self.assertLess(time.monotonic(),deadline); time.sleep(.1)
-                    calls=[]; browser_calls=[]
+                    calls=[]; browser_calls=[]; gmail_calls=[]; callback_results={}
+                    class Gmail:
+                        def execute(self, name, args):
+                            gmail_calls.append((name, args))
+                            return 'Fixture Gmail connection status; no network call.'
                     class Browser:
                         def run(self,request):
                             browser_calls.append(request)
@@ -45,10 +59,12 @@ class BrowserProtocolTests(unittest.TestCase):
                     class Provider:
                         def complete(self,payload):
                             calls.append(payload)
-                            test.assertEqual({t['function']['name'] for t in payload['tools']},
-                                             AppServerClient.SAFE_CONTROLLER_TOOL_NAMES|AppServerClient.EXTERNAL_TOOL_NAMES)
+                            expected = AppServerClient.SAFE_CONTROLLER_TOOL_NAMES|AppServerClient.EXTERNAL_TOOL_NAMES
+                            if gmail_enabled: expected |= GMAIL_TOOL_NAMES
+                            test.assertEqual({t['function']['name'] for t in payload['tools']}, expected)
                             steps=[('browser.control','{"action":"open","url":"https://example.com/"}'),
-                                   ('browser.account','{"operation":"list"}')]
+                                   ('browser.account','{"operation":"list"}'), ('check_budget','{}')]
+                            if gmail_enabled: steps.append(('gmail.status','{}'))
                             if len(calls)<=len(steps):
                                 name,args=steps[len(calls)-1]
                                 message={'role':'assistant','content':None,'tool_calls':[{'id':f'call-{len(calls)}','type':'function','function':{'name':name,'arguments':args}}]}
@@ -65,12 +81,19 @@ class BrowserProtocolTests(unittest.TestCase):
                     client.close()
                     agent=LettaAgent(store,'fixture-token',url=f'ws://127.0.0.1:{port}/ws'); agent.agent_id=agent_id
                     agent.external_tools_enabled=True
-                    controller=Controller(store,agent,17,tool_runtime=ToolRuntime(None,ToolPolicy(True),browser_tools=tools))
-                    agent.tool_handler=controller.execute_tool
+                    controller=Controller(store,agent,17,tool_runtime=ToolRuntime(None,ToolPolicy(True),browser_tools=tools), gmail_tools=Gmail())
+                    def handle(name, args):
+                        result = controller.execute_tool(name, args)
+                        callback_results[name] = result
+                        return result
+                    agent.tool_handler=handle
                     reply,_=agent.reply([{'role':'user','content':'Use browser.control then browser.account list, then report completion.'}])
                     self.assertEqual(reply,'Browser and account callbacks completed.')
-                    self.assertEqual(len(browser_calls),1); self.assertEqual(len(calls),3)
-                    self.assertEqual(store.connection.execute('SELECT count(*) FROM usage').fetchone()[0],3)
+                    expected_calls = 5 if gmail_enabled else 4
+                    self.assertEqual(len(browser_calls),1); self.assertEqual(len(calls),expected_calls)
+                    self.assertEqual(store.connection.execute('SELECT count(*) FROM usage').fetchone()[0],expected_calls)
+                    self.assertIn('check_budget', callback_results)
+                    self.assertEqual(gmail_calls, [('gmail.status', {})] if gmail_enabled else [])
                     store.set_state('paused','1')
                     with self.assertRaises(ValueError): controller.execute_tool('browser.control',{'action':'snapshot'})
                     self.assertEqual(len(browser_calls),1)
