@@ -4,7 +4,7 @@
 
 **Installed runtime build:** `f410a21`, confirmed by the administrator's module comparison at 01:06 UTC. At that observation the checkout code digest matched the root-owned acceptance record; installed service code, policy and immutable image reference also matched that record. The subsequent [Telegram command keyboard](TELEGRAM_CONTROLS.md) is implemented in source but has not been installed or tested. Its controller changes require renewed acceptance before deployment.
 
-**GitHub synchronization:** The earlier lifecycle release is published on `main` as [c7c94d5](https://github.com/sonidim25-oss/Andrew_AI/commit/c7c94d58d24cf5b542f3f2c2b23971c07772b97a). The newly installed browser integration is committed locally on `codex/browser-sandbox-integration`; publication of that branch has not been verified. Do not treat the installed browser build as a confirmed GitHub match yet.
+**GitHub synchronization:** The browser integration, commissioning fixes, documentation and Telegram keyboard are published on both `main` and `codex/browser-sandbox-integration` through [44347ca](https://github.com/sonidim25-oss/Andrew_AI/commit/44347ca775ffc52c092d86b35989d71b6a487e27). Both remote branch references were verified after the push. The installed browser build `f410a21` is included in that published history; the newer Telegram keyboard still awaits installation. Publishing source does not update the running VPS controller.
 
 This is the current feature-status source for Andrew. Source implementation, passing tests, installation, live behavior and autonomous enablement are separate claims. VPS state is a dated observation and must be refreshed after deployment changes.
 
