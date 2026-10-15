@@ -56,6 +56,7 @@ Screenshots require a reset after credential use because a hostile site could re
 PYTHONPATH=prototype python3 -m unittest discover -s prototype/tests -q
 ANDREW_LETTA_TEST_BINARY=/path/to/pinned/letta.js python3 -m unittest discover -s scripts/tests -q
 python3 scripts/test-isolated-runtime.py "$(python3 -c 'import json; print(json.load(open("runtime/browser-release.json"))["image"])')"
+python3 scripts/test-socket-activation.py "$(python3 -c 'import json; print(json.load(open("runtime/browser-release.json"))["image"])')" --full
 ```
 
-The last command uses temporary sockets and the invoking user's rootless engine. It cannot establish the production UID firewall or 10 GiB mount proof. The real Chromium fixture runs inside a networkless disposable container and creates only temporary test accounts; no third-party account was created as a test artifact.
+The runtime commands use temporary sockets and the invoking user's rootless engine. The socket-activation test creates temporary native user units for the runner, browser and proxy, exercises the actual runner entrypoint, and removes its units afterward. The `--full` option additionally runs the full 120-second kernel/resource proof. Activation variables belong to the launcher listener and are removed from Podman child environments. These checks cannot establish the production UID firewall or 10 GiB mount proof. The real Chromium fixture runs inside a networkless disposable container and creates only temporary test accounts; no third-party account was created as a test artifact.

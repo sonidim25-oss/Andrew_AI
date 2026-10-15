@@ -16,9 +16,15 @@ class ProcessResult:
     output_exceeded: bool = False
 
 
+def child_environment():
+    """Activation belongs to our listener, never a spawned tool or Podman."""
+    return {key:value for key,value in os.environ.items()
+            if key not in {'LISTEN_PID','LISTEN_FDS','LISTEN_FDNAMES'}}
+
+
 def run_bounded(argv, payload=b"", timeout=120, output_limit=40 * 1024, stderr_limit=4096):
     process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               start_new_session=True, close_fds=True)
+                               start_new_session=True, close_fds=True, env=child_environment())
     outputs = {process.stdout: bytearray(), process.stderr: bytearray()}
     limits = {process.stdout: output_limit, process.stderr: stderr_limit}
     pending = memoryview(payload)

@@ -11,6 +11,7 @@ import time
 import uuid
 from .browser_protocol import MAX_WIRE, validate_action
 from .runner_service import WorkerConfig, RunnerService
+from .process_limits import child_environment
 
 class BrowserProcess:
     def __init__(self, config):
@@ -44,7 +45,7 @@ class BrowserProcess:
             args[-1:-1] = ['--entrypoint','python3','--workdir','/tmp','--env','HOME=/tmp']
             args += ['/opt/andrew/browser_entry.py']
             self.process = subprocess.Popen(args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
-                                            stderr=subprocess.DEVNULL,close_fds=True)
+                                            stderr=subprocess.DEVNULL,close_fds=True,env=child_environment())
             self.deadline = time.monotonic() + 120
         p = self.process
         payload = json.dumps(request,separators=(',',':')).encode() + b'\n'

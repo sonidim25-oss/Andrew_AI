@@ -3,9 +3,20 @@ import importlib.util
 import sys
 import time
 import unittest
+import json
+import os
+from unittest.mock import patch
 
 
 class BoundedProcessTests(unittest.TestCase):
+    def test_activation_metadata_is_not_forwarded_to_worker_processes(self):
+        activation={'LISTEN_PID':str(os.getpid()),'LISTEN_FDS':'1','LISTEN_FDNAMES':'runner'}
+        with patch.dict(os.environ,{**activation,'ANDREW_PROBE_VALUE':'preserved'}):
+            result=self.run_child("import json,os; print(json.dumps({k:os.environ.get(k) for k in ['LISTEN_PID','LISTEN_FDS','LISTEN_FDNAMES','ANDREW_PROBE_VALUE']}))")
+            self.assertEqual(json.loads(result.stdout),{'LISTEN_PID':None,'LISTEN_FDS':None,
+                'LISTEN_FDNAMES':None,'ANDREW_PROBE_VALUE':'preserved'})
+            self.assertEqual({k:os.environ[k] for k in activation},activation)
+
     def run_child(self, code, **kwargs):
         self.assertIsNotNone(importlib.util.find_spec("andrewbot.process_limits"), "host capture must be bounded")
         module = importlib.import_module("andrewbot.process_limits")

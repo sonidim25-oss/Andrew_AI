@@ -11,7 +11,7 @@ import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from .process_limits import run_bounded
+from .process_limits import run_bounded, child_environment
 
 
 MAX_REQUEST_BYTES = 64 * 1024
@@ -134,7 +134,7 @@ class RunnerService:
         try:
             result = subprocess.run([self.config.podman_binary, "rm", "--force", "--ignore", container_name],
                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                           timeout=10, check=False)
+                           timeout=10, check=False, env=child_environment())
             return result.returncode == 0
         except (OSError, subprocess.TimeoutExpired):
             return False
