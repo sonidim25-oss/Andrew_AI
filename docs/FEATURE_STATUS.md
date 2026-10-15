@@ -57,7 +57,7 @@ The fixes preserve owner pause across wakes, cancel the old autonomous session o
 
 ### Browser integration: 2026-10-15 local checks; deployment pending
 
-The runtime suite passed **158 tests: 156 passed and 2 opt-in skips**. The administrator suite passed **19 tests with both real pinned Letta harnesses enabled**, for **177 tests total: 175 passed and 2 skipped**. Shell syntax, Python compilation, unit verification and whitespace checks passed.
+The runtime suite passed **158 tests: 156 passed and 2 opt-in skips**. The administrator suite passed **20 tests with both real pinned Letta harnesses enabled**, for **178 tests total: 176 passed and 2 skipped**. Shell syntax, Python compilation, unit verification and whitespace checks passed.
 
 The implementation includes a [single commissioning command](BROWSER_RUNTIME.md), a pinned release manifest, a locally exported OCI archive, private acceptance evidence and rollback. The owner explicitly authorizes browser navigation, login and signup without per-site/action approval. Previous per-site approval language is superseded for these actions; budget, pause/sleep, credential and sandbox boundaries remain.
 
@@ -66,6 +66,8 @@ Actual rootless workers passed loopback-only interfaces, zero effective capabili
 Real Chromium exercised navigation, DOM interactions, tabs, screenshots, bounded file upload/download, generated signup and login from a fresh context, real cookie sessions/logout/reset, JSON login, exact-origin rejection, challenge blocking, DOM password isolation and hostile credential-echo redaction. The fixture used only ephemeral localhost test accounts. A separate real pinned Letta harness exercised browser/account callbacks with exact permissions and guarded deterministic provider settlement; it did not charge the live provider.
 
 A fresh code review identified credential-cookie/encoded-response leaks and service setup blockers. Fixes use a separate private credential cookie jar, inert credential responses, exact-host HttpOnly cookies, outgoing header guards, fixed crun group inheritance, proof-bound per-role runtime-directory access and separate validation environment properties. Real Chromium malicious-cookie/encoded-HTML/JSON regressions passed, as did a real supplementary-group socket test and a harmless systemd environment-property test. The reviewer confirmed the reported findings are addressed. Authentication requiring response-body-only tokens is explicitly unsupported.
+
+The first administrator attempt verified the pinned archive, then stopped before controller installation because a service identity inherited the owner's inaccessible home working directory. Rollback preserved the existing controller. The installer now changes to `/` before switching identities; a regression test reproduced the old behavior and passed after the fix. Administrator commissioning still requires a retry.
 
 The production UID firewall, dedicated service hardening, actual projects capacity and controller autonomous browser path remain unproved until the sudo installer succeeds. Both existing Andrew services were still active and external runtime remained disabled during local development. No production credentials, memory rows, spending rows or daily-lifecycle state were changed by these local tests.
 

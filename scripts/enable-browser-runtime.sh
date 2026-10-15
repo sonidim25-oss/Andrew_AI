@@ -5,6 +5,9 @@ set -Eeuo pipefail
 umask 077
 if [ "$#" -ne 0 ]; then echo "No arguments accepted." >&2; exit 2; fi
 PROJECT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# Service identities cannot traverse the invoking owner's private home. Keep
+# their inherited cwd accessible; every checkout reference below is absolute.
+cd -- /
 if [ "$(id -u)" -ne 0 ]; then
   echo "Run from SSH: sudo bash $PROJECT/scripts/enable-browser-runtime.sh" >&2; exit 2
 fi

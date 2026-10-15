@@ -45,3 +45,12 @@ nft() { printf 'nft %s\\n' "$*" >> "$CALLS"; }
         text=(PROJECT/'scripts/validate-and-start-controller.sh').read_text()
         self.assertIn('--property=EnvironmentFile=/etc/andrew/controller.conf',text)
         self.assertIn('--property=EnvironmentFile=-/etc/andrew/browser-runtime.conf',text)
+
+    def test_installer_preamble_sets_accessible_cwd_before_switching_identity(self):
+        preamble=SCRIPT[:SCRIPT.index('if [ "$(id -u)" -ne 0 ]; then')]
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root); private=path/'private'; private.mkdir(mode=0o700)
+            probe=path/'probe.sh'; probe.write_text(preamble+'printf "%s\\n" "$PWD"\n')
+            result=subprocess.run(['bash',str(probe)],cwd=private,capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(result.stdout.strip(),'/')
