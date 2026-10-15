@@ -4,7 +4,7 @@
 
 The owner authorizes Andrew to browse public sites, log in and sign up without per-site or per-action approval prompts. This replaces the approval flow in the earlier browser design. Credential import supplies missing secrets; it is not an approval gate.
 
-Source and local proofs are available. A fresh whole-branch review found credential-response and service setup defects; the fixes passed focused regressions and review. The existing controller still runs the previous conversation/memory release with external tools disabled. Dedicated service identities, the UID firewall, production workspace capacity and autonomous browser enablement remain **pending administrator commissioning**. Check [FEATURE_STATUS](FEATURE_STATUS.md) for evidence.
+Browser/code runtime was installed and enabled from `f410a21` on **2026-10-15 at 01:06 UTC**. Dedicated service identities passed network isolation, resource limits, production workspace capacity, public browser control and controlled signup/login fixtures. The controller is active with the daily schedule and external tools enabled; owner pause/sleep, memory and spending state were preserved. Real third-party accounts and a live Qwen-directed browser task were not commissioning tests. Check [FEATURE_STATUS](FEATURE_STATUS.md) for the dated evidence and publication status.
 
 ## Commission this server
 
