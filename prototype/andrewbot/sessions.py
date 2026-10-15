@@ -1,8 +1,11 @@
+import logging
+import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from .budget import budget_snapshot
+from .appserver import LettaTurnError
 from .diary import incident_summary
 
 
@@ -154,22 +157,39 @@ class SessionRunner:
         remaining_seconds = max(1, int((deadline - current.astimezone(timezone.utc)).total_seconds()))
         cycle_id = uuid.uuid4().hex
         cycle_started = False
+        stage = "begin_cycle"
         try:
             self.store.begin_cycle(session_id, cycle_id, day)
             cycle_started = True
+            stage = "diary_lookup"
             _, diary_day = self.controller._periods(current)
             diary_status = "already saved" if self.store.diary_entry(diary_day) else "not yet saved"
+            stage = "agent_turn"
             self.agent.autonomous_turn(self.SESSION_PROMPT + f" Today's diary is {diary_status}.",
                                        timeout=min(120, remaining_seconds))
+            stage = "finish_cycle"
             self.store.finish_cycle(cycle_id, "complete")
-        except Exception:
+        except Exception as error:
+            # Use fixed categories: exception messages can contain credentials,
+            # provider payloads, or private conversation content.
+            category = "unexpected_error"
+            for error_type, label in ((TimeoutError, "timeout"), (sqlite3.Error, "database_error"),
+                                      (ConnectionError, "connection_error"), (OSError, "io_error"),
+                                      (ValueError, "invalid_value"), (RuntimeError, "runtime_error")):
+                if isinstance(error, error_type):
+                    category = label
+                    break
+            if isinstance(error, LettaTurnError) and error.safe_category in LettaTurnError.CATEGORIES:
+                category = error.safe_category
+            detail = f"Autonomous cycle failed (stage={stage}, category={category})"
+            logging.error("%s", detail)
             if cycle_started:
                 try:
                     self.store.finish_cycle(cycle_id, "failed")
                 except Exception:
                     pass
             try:
-                self.store.add_activity("Autonomous Letta turn or ledger update failed")
+                self.store.add_activity(detail)
             except Exception:
                 pass
             try:

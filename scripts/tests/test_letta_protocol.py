@@ -88,6 +88,9 @@ class LettaProtocolTests(unittest.TestCase):
                             "model": "openai-compatible/qwen/qwen3.8-flash",
                             "model_settings": {"provider_type": "openai-compatible", "max_tokens": 512, "parallel_tool_calls": False},
                             "include_base_tools": False, "memory_blocks": []})
+                        # Upgrade an existing agent's old output cap through the real protocol.
+                        from andrewbot.configuration import load_model_config, MAX_LETTA_OUTPUT_TOKENS
+                        client.update_agent_model(agent_id, load_model_config({}))
                         runtime = client.start_runtime(agent_id)
                     finally:
                         client.close()
@@ -111,6 +114,7 @@ class LettaProtocolTests(unittest.TestCase):
                     self.assertTrue(store.get_state("sleep_until"), "the sleep callback must save a deadline")
                     self.assertEqual(store.get_state("active_session_status"), "agent_sleep")
                     self.assertEqual(len(calls), 3)
+                    self.assertTrue(all(call['max_tokens'] == MAX_LETTA_OUTPUT_TOKENS for call in calls))
                     self.assertEqual(store.connection.execute("SELECT count(*) FROM budget_reservations").fetchone()[0], 0)
                     diary_id = store.diary_entry()["entry_id"]
                     due = store.get_state("sleep_until")

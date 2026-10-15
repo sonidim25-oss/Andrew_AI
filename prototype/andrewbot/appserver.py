@@ -7,7 +7,7 @@ import struct
 import time
 import uuid
 from urllib.parse import urlsplit
-from .configuration import ModelConfig, load_model_config
+from .configuration import MAX_LETTA_OUTPUT_TOKENS, ModelConfig, load_model_config
 from .gmail_tools import GMAIL_TOOLS, GMAIL_TOOL_NAMES
 from .gmail_policy import load_permissions as gmail_permissions
 
@@ -28,6 +28,16 @@ class LettaCommandError(RuntimeError):
     def __init__(self, command_type, safe_category):
         self.safe_category = safe_category
         super().__init__(f"Letta command failed: {command_type} ({safe_category})")
+
+
+class LettaTurnError(RuntimeError):
+    CATEGORIES = frozenset({"output_token_limit", "turn_failed", "missing_assistant_text"})
+
+    def __init__(self, category):
+        self.safe_category = category if category in self.CATEGORIES else "turn_failed"
+        message = ("Letta completed the turn without an assistant text response"
+                   if self.safe_category == "missing_assistant_text" else "Letta agent turn failed")
+        super().__init__(f"{message} ({self.safe_category})")
 
 
 def _safe_error_category(response):
@@ -271,7 +281,7 @@ class AppServerClient:
             "model": f"openai-compatible/{model_config.model_id}",
             "model_settings": {
                 "provider_type": "openai-compatible", "temperature": 0.7,
-                "max_tokens": 512, "parallel_tool_calls": False,
+                "max_tokens": MAX_LETTA_OUTPUT_TOKENS, "parallel_tool_calls": False,
             },
         }
         self.request(
@@ -328,6 +338,7 @@ class AppServerClient:
         })
         deadline = time.monotonic() + timeout
         failure = False
+        output_limit = False
         assistant_message_ids = set()
         early_reply = None
         abort_request_id = None
@@ -338,6 +349,8 @@ class AppServerClient:
                 continue
             if event.get("type") == "stream_delta":
                 delta = event.get("delta") or {}
+                if delta.get("stop_reason") == "max_tokens_exceeded":
+                    output_limit = True
                 if delta.get("message_type") in {"loop_error", "error_message"}:
                     failure = True
                 if delta.get("message_type") == "assistant_message" and delta.get("id"):
@@ -345,6 +358,8 @@ class AppServerClient:
                 # A model-step stop (including requires_approval) precedes
                 # controller callbacks. Only turn_finished ends the whole turn.
             if event.get("type") == "turn_finished":
+                if event.get("stop_reason") == "max_tokens_exceeded":
+                    output_limit = True
                 if event.get("stop_reason") in {"error", "error_retry_exhausted"} or event.get("error"):
                     failure = True
                 if early_reply is not None:
@@ -381,8 +396,10 @@ class AppServerClient:
                 break
         else:
             raise TimeoutError("Letta agent turn timed out")
+        if output_limit:
+            raise LettaTurnError("output_token_limit")
         if failure:
-            raise RuntimeError("Letta agent turn failed")
+            raise LettaTurnError("turn_failed")
         response = self.request({
             "type": "conversation_messages_list", "conversation_id": runtime["conversation_id"],
             "query": {"limit": 12, "order": "desc"},
@@ -397,7 +414,7 @@ class AppServerClient:
                     joined = "".join(text_parts).strip()
                     if joined:
                         return joined
-        raise RuntimeError("Letta completed the turn without an assistant text response")
+        raise LettaTurnError("missing_assistant_text")
 
     def close(self):
         self.connection.close()
@@ -492,7 +509,7 @@ class LettaAgent:
                     "description": "Andrew's persistent agent. Model calls are brokered through the trusted controller.",
                     "system": self.system_prompt,
                     "model": self.model_handle,
-                    "model_settings": {"provider_type": "openai-compatible", "temperature": 0.7, "max_tokens": 512, "parallel_tool_calls": False},
+                    "model_settings": {"provider_type": "openai-compatible", "temperature": 0.7, "max_tokens": MAX_LETTA_OUTPUT_TOKENS, "parallel_tool_calls": False},
                     "llm_config": {"model": self.model_config.model_id, "model_endpoint_type": "openai", "model_endpoint": "http://127.0.0.1:8284/v1", "context_window": 32768, "handle": self.model_handle},
                     "context_window_limit": 32768,
                     "include_base_tools": False,
@@ -513,7 +530,9 @@ class LettaAgent:
             client.external_tools_enabled = getattr(self, "external_tools_enabled", False)
             client.gmail_tools_enabled = gmail_permissions()['enabled']
             self._startup_check("Letta capability instructions", client.request,
-                {"type":"agent_update", "agent_id":self.agent_id,"body":{"system":self.system_prompt}},
+                {"type":"agent_update", "agent_id":self.agent_id,"body":{"system":self.system_prompt,
+                 "model_settings": {"provider_type": "openai-compatible", "temperature": 0.7,
+                                    "max_tokens": MAX_LETTA_OUTPUT_TOKENS, "parallel_tool_calls": False}}},
                 "agent_update_response")
             runtime = self._startup_check("Letta runtime startup", client.start_runtime, self.agent_id, self.conversation_id or None)
             self.conversation_id = runtime["conversation_id"]

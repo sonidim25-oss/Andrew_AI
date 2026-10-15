@@ -11,12 +11,30 @@ from pathlib import Path
 from unittest.mock import patch
 
 from andrewbot.appserver import AppServerConnection
-from andrewbot.appserver import AppServerClient, LettaAgent, LettaCommandError, StartupValidationError, _safe_error_category
-from andrewbot.configuration import load_model_config
+from andrewbot.appserver import AppServerClient, LettaAgent, LettaCommandError, LettaTurnError, StartupValidationError, _safe_error_category
+from andrewbot.configuration import MAX_LETTA_OUTPUT_TOKENS, load_model_config
 from andrewbot.store import Store
 
 
 class AppServerWebSocketTests(unittest.TestCase):
+    def test_token_limit_stop_has_explicit_safe_category(self):
+        class Connection:
+            def __init__(self):
+                self.events = [
+                    {'type': 'stream_delta', 'delta': {'message_type': 'stop_reason', 'stop_reason': 'max_tokens_exceeded'}},
+                    {'type': 'turn_finished', 'stop_reason': 'max_tokens_exceeded', 'error': 'secret payload'},
+                ]
+            def send_json(self, value):
+                pass
+            def recv_json(self):
+                return self.events.pop(0)
+        client = AppServerClient.__new__(AppServerClient)
+        client.connection = Connection()
+        with self.assertRaises(LettaTurnError) as caught:
+            client.send_user_turn({'agent_id': 'a', 'conversation_id': 'c'}, 'hello')
+        self.assertEqual(caught.exception.safe_category, 'output_token_limit')
+        self.assertNotIn('secret payload', str(caught.exception))
+
     def test_fragmented_websocket_message_has_an_aggregate_limit(self):
         connection = AppServerConnection.__new__(AppServerConnection)
         with patch.object(connection, '_read_frame', side_effect=[
@@ -88,7 +106,7 @@ class AppServerWebSocketTests(unittest.TestCase):
         self.assertEqual(command["agent_id"], "agent-test")
         self.assertEqual(command["body"]["model"], "openai-compatible/google/gemini-2.5-flash")
         self.assertEqual(command["body"]["model_settings"]["provider_type"], "openai-compatible")
-        self.assertEqual(command["body"]["model_settings"]["max_tokens"], 512)
+        self.assertEqual(command["body"]["model_settings"]["max_tokens"], MAX_LETTA_OUTPUT_TOKENS)
 
     def test_owner_model_change_updates_existing_agent_without_changing_memory(self):
         with tempfile.TemporaryDirectory() as directory:

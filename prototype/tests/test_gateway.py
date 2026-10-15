@@ -7,7 +7,7 @@ from urllib.request import Request, urlopen
 from unittest.mock import patch
 
 from andrewbot.gateway import GatewayThread, ModelGateway, make_server
-from andrewbot.configuration import load_model_config
+from andrewbot.configuration import MAX_LETTA_OUTPUT_TOKENS, load_model_config
 from andrewbot.store import Store
 
 
@@ -50,6 +50,33 @@ class ModelGatewayTests(unittest.TestCase):
         status, _ = self.gateway.complete("Bearer wrong", {"model": "openai/qwen/qwen3.8-flash", "messages": []})
         self.assertEqual(status, 401)
         self.assertEqual(self.provider.calls, [])
+
+    def test_larger_output_allowance_is_capped_and_reserved_before_provider_call(self):
+        original = self.provider.complete
+        def check_reservation(payload):
+            self.assertEqual(payload['max_tokens'], MAX_LETTA_OUTPUT_TOKENS)
+            row = self.store.connection.execute('SELECT cost_usd FROM budget_reservations').fetchone()
+            self.assertGreaterEqual(row[0], MAX_LETTA_OUTPUT_TOKENS * self.gateway.output_rate)
+            return original(payload)
+        with patch.object(self.provider, 'complete', side_effect=check_reservation):
+            status, _ = self.gateway.complete('Bearer gateway-test-token',
+                {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'hi'}], 'max_tokens': 10000})
+        self.assertEqual(status, 200)
+        self.assertEqual(len(self.provider.calls), 1)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
+
+    def test_truncation_is_logged_after_settlement_without_retry_or_content_exposure(self):
+        self.provider.response = {'choices': [{'finish_reason': 'length', 'message': {'content': 'secret payload'}}],
+                                 'usage': {'prompt_tokens': 10, 'completion_tokens': 2048, 'cost': 0.001}}
+        with self.assertLogs(level='WARNING') as logs:
+            status, result = self.gateway.complete('Bearer gateway-test-token',
+                {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'hi'}]})
+        self.assertEqual(status, 200)
+        self.assertEqual(result['choices'][0]['finish_reason'], 'length')
+        self.assertEqual(len(self.provider.calls), 1)
+        self.assertNotIn('secret payload', ' '.join(logs.output))
+        self.assertIn('output token limit', self.store.recent_activity(1)[0]['event'])
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
 
     def test_malformed_billing_settles_a_finite_conservative_charge(self):
         for usage in (['bad'], {'cost': float('nan')}, {'cost': float('inf')},

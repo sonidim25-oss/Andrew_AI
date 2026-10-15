@@ -1,12 +1,13 @@
 import hmac
 import json
+import logging
 import math
 import threading
 import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .budget import TORONTO, budget_snapshot
-from .configuration import ModelConfig, load_model_config
+from .configuration import MAX_LETTA_OUTPUT_TOKENS, ModelConfig, load_model_config
 
 
 class ModelGateway:
@@ -91,9 +92,9 @@ class ModelGateway:
             # The pinned Letta runtime recognizes this category and compacts
             # saved history before retrying. A generic 413 ends the session.
             return 413, {"error": {"message": "request too large: controller context window limit exceeded", "type": "invalid_request_error", "code": "context_length_exceeded"}}
-        requested_output = payload.get("max_tokens", payload.get("max_completion_tokens", 512))
+        requested_output = payload.get("max_tokens", payload.get("max_completion_tokens", MAX_LETTA_OUTPUT_TOKENS))
         try:
-            max_tokens = min(512, max(1, int(requested_output)))
+            max_tokens = min(MAX_LETTA_OUTPUT_TOKENS, max(1, int(requested_output)))
         except (TypeError, ValueError, OverflowError):
             return 400, {"error": {"message": "invalid output token limit", "type": "invalid_request_error"}}
         input_tokens_bound = max(1, input_bytes)
@@ -155,6 +156,14 @@ class ModelGateway:
             reservation_id, month, day, max(cost, reserved if not usage else 0.0),
             input_tokens or input_tokens_bound, output_tokens,
         )
+        if any(isinstance(choice, dict) and choice.get("finish_reason") == "length" for choice in result["choices"]):
+            # Preserve provider truth and billing; never silently replay a paid request.
+            event = "Letta model gateway response reached output token limit"
+            logging.warning("%s", event)
+            try:
+                self.store.add_activity(event)
+            except Exception:
+                logging.error("Could not persist model output token limit diagnostic")
         return 200, result
 
 

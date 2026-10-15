@@ -196,6 +196,46 @@ class LifecycleTests(unittest.TestCase):
                 self.store.set_state(key, "0")
         self.assertEqual(self.store.connection.execute("SELECT count(*) FROM budget_reservations").fetchone()[0], 0)
 
+    def test_timeout_diagnostic_excludes_exception_text_and_does_not_retry(self):
+        def fail():
+            raise TimeoutError("private provider payload and secret-token")
+        self.action = fail
+        self.store.set_state("session_start_requested", "scheduled_wake")
+        with self.assertLogs(level="ERROR") as logs:
+            self.assertFalse(self.runner.tick(self.now))
+        self.assertIn("stage=agent_turn, category=timeout", " ".join(logs.output))
+        incident = self.store.pending_diary_deliveries()[0]["content"]
+        self.assertIn("stage=agent_turn, category=timeout", incident)
+        self.assertNotIn("secret-token", incident + " ".join(logs.output))
+        self.assertFalse(self.runner.tick(self.now))
+        self.assertEqual(len(self.calls), 1)
+
+    def test_database_failure_is_logged_even_when_activity_storage_fails(self):
+        import sqlite3
+        self.runner.start("scheduled_wake", self.now)
+        with patch.object(self.store, "begin_cycle", side_effect=sqlite3.OperationalError("secret-token")), \
+                patch.object(self.store, "add_activity", side_effect=sqlite3.OperationalError("secret-token")), \
+                self.assertLogs(level="ERROR") as logs:
+            self.assertFalse(self.runner.tick(self.now))
+        self.assertIn("stage=begin_cycle, category=database_error", " ".join(logs.output))
+        self.assertNotIn("secret-token", " ".join(logs.output))
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.store.get_state("sleeping"), "1")
+
+    def test_finish_cycle_failure_is_distinguished_from_agent_failure(self):
+        import sqlite3
+        finish = self.store.finish_cycle
+        def fail_completion(cycle_id, status):
+            if status == "complete":
+                raise sqlite3.OperationalError("database unavailable")
+            return finish(cycle_id, status)
+        self.store.set_state("session_start_requested", "scheduled_wake")
+        with patch.object(self.store, "finish_cycle", side_effect=fail_completion), self.assertLogs(level="ERROR") as logs:
+            self.assertFalse(self.runner.tick(self.now))
+        self.assertIn("stage=finish_cycle, category=database_error", " ".join(logs.output))
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.store.get_state("sleeping"), "1")
+
     def test_budget_exhaustion_blocks_session(self):
         self.store.record_usage("2026-10", "2026-10-14", 9, 1, 1)
         self.assertIsNone(self.runner.start("scheduled_wake", self.now))

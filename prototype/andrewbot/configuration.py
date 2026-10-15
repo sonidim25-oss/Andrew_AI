@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from typing import Mapping
 
 
+MAX_LETTA_OUTPUT_TOKENS = 2048
+
+
 _MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}/[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}")
 
 
