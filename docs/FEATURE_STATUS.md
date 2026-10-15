@@ -57,7 +57,7 @@ The fixes preserve owner pause across wakes, cancel the old autonomous session o
 
 ### Browser integration: 2026-10-15 local checks; deployment pending
 
-The runtime suite passed **158 tests: 156 passed and 2 opt-in skips**. The administrator suite passed **20 tests with both real pinned Letta harnesses enabled**, for **178 tests total: 176 passed and 2 skipped**. Shell syntax, Python compilation, unit verification and whitespace checks passed.
+The runtime suite passed **158 tests: 156 passed and 2 opt-in skips**. The administrator suite passed **22 tests with both real pinned Letta harnesses enabled**, for **180 tests total: 178 passed and 2 skipped**. Shell syntax, Python compilation, unit verification and whitespace checks passed.
 
 The implementation includes a [single commissioning command](BROWSER_RUNTIME.md), a pinned release manifest, a locally exported OCI archive, private acceptance evidence and rollback. The owner explicitly authorizes browser navigation, login and signup without per-site/action approval. Previous per-site approval language is superseded for these actions; budget, pause/sleep, credential and sandbox boundaries remain.
 
@@ -68,6 +68,8 @@ Real Chromium exercised navigation, DOM interactions, tabs, screenshots, bounded
 A fresh code review identified credential-cookie/encoded-response leaks and service setup blockers. Fixes use a separate private credential cookie jar, inert credential responses, exact-host HttpOnly cookies, outgoing header guards, fixed crun group inheritance, proof-bound per-role runtime-directory access and separate validation environment properties. Real Chromium malicious-cookie/encoded-HTML/JSON regressions passed, as did a real supplementary-group socket test and a harmless systemd environment-property test. The reviewer confirmed the reported findings are addressed. Authentication requiring response-body-only tokens is explicitly unsupported.
 
 The first administrator attempt verified the pinned archive, then stopped before controller installation because a service identity inherited the owner's inaccessible home working directory. Rollback preserved the existing controller. The installer now changes to `/` before switching identities; a regression test reproduced the old behavior and passed after the fix. Administrator commissioning still requires a retry.
+
+The second administrator attempt imported the image, then failed the original manifest-digest lookup. A fresh isolated Podman store reproduced OCI import normalization: the config/content identity stayed the same while the manifest digest changed. The installer now verifies the archive-derived config ID, resolves and pins the imported immutable digest, and requires both service stores to agree. A fresh-store import, immutable container launch and browser source-hash check passed. Safe commissioning labels now identify the failed check without printing commands or credentials.
 
 The production UID firewall, dedicated service hardening, actual projects capacity and controller autonomous browser path remain unproved until the sudo installer succeeds. Both existing Andrew services were still active and external runtime remained disabled during local development. No production credentials, memory rows, spending rows or daily-lifecycle state were changed by these local tests.
 

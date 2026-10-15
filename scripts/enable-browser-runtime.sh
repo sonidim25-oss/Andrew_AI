@@ -57,12 +57,14 @@ for unit in andrew-runner.socket andrew-browser.socket andrew-egress.socket andr
 done
 controller_stopped=0
 success=0
+check='identity provisioning'
 rollback() {
   code=$?
   trap - EXIT
   set +e
   restore_failed=0
   if [ "$success" -eq 0 ]; then
+    printf 'Commissioning failed at safe check: %s (status %s).\n' "${check:-unspecified}" "$code" >&2
     systemctl stop andrew-runner.socket andrew-browser.socket andrew-egress.socket \
       andrew-runner.service andrew-browser.service andrew-egress.service andrew-runtime-firewall.service >/dev/null 2>&1 || true
     if [ "$controller_stopped" -eq 1 ]; then systemctl stop andrew-control.service >/dev/null 2>&1 || true; fi
@@ -131,18 +133,30 @@ if [ -d /opt/andrew/runtime-services/andrewbot ]; then cp -a /opt/andrew/runtime
 install -d -o root -g root -m 0755 /opt/andrew/runtime-services/andrewbot /opt/andrew/runtime-services/checks
 for file in "$PROJECT"/prototype/andrewbot/*.py; do install -o root -g root -m 0644 "$file" /opt/andrew/runtime-services/andrewbot/; done
 for file in verify-runtime.py verify-browser-fixture.py; do install -o root -g root -m 0644 "$PROJECT/scripts/$file" /opt/andrew/runtime-services/checks/; done
+IMPORTED_IMAGE=''
 for name in andrew-runtime andrew-browser; do
   task_uid="$(id -u "$name")"
+  check="rootless user manager: $name"
   loginctl enable-linger "$name"
   systemctl start "user@$task_uid.service"
   # Import with the proper rootless identity, HOME and runtime bus.
   task_home="$(getent passwd "$name" | cut -d: -f6)"
   # runuser cannot traverse the private checkout; root streams the pinned archive.
+  check="pinned image import: $name"
   cat "$ARCHIVE" | runuser -u "$name" -- env HOME="$task_home" XDG_RUNTIME_DIR="/run/user/$task_uid" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$task_uid/bus" podman load >/dev/null
+  check="imported image content identity: $name"
+  imported_reference="$(runuser -u "$name" -- env HOME="$task_home" XDG_RUNTIME_DIR="/run/user/$task_uid" \
+    podman image inspect localhost/andrew-browser:integration | python3 "$PROJECT/scripts/verify-imported-image.py" "$MANIFEST")"
   runuser -u "$name" -- env HOME="$task_home" XDG_RUNTIME_DIR="/run/user/$task_uid" \
-    podman image exists "$IMAGE"
+    podman image exists "$imported_reference"
+  if [ -n "$IMPORTED_IMAGE" ] && [ "$IMPORTED_IMAGE" != "$imported_reference" ]; then
+    echo 'Dedicated stores disagree on the imported immutable image reference.' >&2; exit 1
+  fi
+  IMPORTED_IMAGE="$imported_reference"
 done
+IMAGE="$IMPORTED_IMAGE"
+check='dedicated projects filesystem'
 [ "$(df --output=avail -B1 /var/lib/andrew | tail -1)" -gt 12884901888 ]
 # A real filesystem capacity limit; never cover a populated directory.
 install -d -o root -g root -m 0755 /srv/andrew /srv/andrew/workspace /srv/andrew/workspace/projects
@@ -174,6 +188,7 @@ for role in runner browser; do
   chmod 0644 "/etc/systemd/system/andrew-$role.service.d/50-rootless-runtime.conf"
   printf 'XDG_RUNTIME_DIR=/run/user/%s\nDBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%s/bus\n' "$task_uid" "$task_uid" > "/etc/andrew/$role-environment.conf"
 done
+check='public network exclusions'
 ip -j address show > "$BACKUP/addresses.json"
 # Include this host's public NAT address, which may not appear on an interface.
 curl -fsS --max-time 15 --max-filesize 1024 https://api.ipify.org > "$BACKUP/public-address"
@@ -190,21 +205,25 @@ python3 "$PROJECT/scripts/build-runtime-policy.py" --runtime-uid "$(id -u andrew
  --firewall /etc/nftables.d/andrew-runtime.nft --proxy /etc/andrew/egress.conf
 chmod 0644 /etc/andrew/{runner,egress,runner-environment,browser-environment}.conf /etc/nftables.d/andrew-runtime.nft
 nft add table inet andrew_runtime 2>/dev/null || true
+check='dedicated firewall syntax'
 nft -c -f /etc/nftables.d/andrew-runtime.nft
 for unit in andrew-runner.service andrew-runner.socket andrew-browser.service andrew-browser.socket andrew-egress.service andrew-egress.socket andrew-runtime-firewall.service; do
  install -o root -g root -m 0644 "$PROJECT/systemd/$unit" /etc/systemd/system/
 done
 systemctl daemon-reload
+check='dedicated firewall activation'
 systemctl restart andrew-runtime-firewall.service
 systemctl restart andrew-runner.socket andrew-browser.socket andrew-egress.socket
 # Run kernel, network, OOM, PID, CPU and 120-second wall-clock proofs through
 # the actual protected sockets, which launch as the installed service identities.
+check='live kernel and browser acceptance'
 echo 'Running bounded kernel/browser commissioning; the wall-clock check takes 120 seconds...'
 systemd-run --wait --pipe --collect --quiet --unit=andrew-runtime-acceptance --uid=andrew-control --gid=andrew-control \
  --property=WorkingDirectory=/opt/andrew/runtime-services --property=Environment=PYTHONPATH=/opt/andrew/runtime-services \
  /usr/bin/python3 /opt/andrew/runtime-services/checks/verify-runtime.py | tee "$BACKUP/kernel-results.json"
 # Account/component fixture has its own ephemeral self-signed loopback server.
 # The certificate exception and privileged test port sysctl never enter production.
+check='controlled browser and account fixture'
 browser_uid="$(id -u andrew-browser)"
 runuser -u andrew-browser -- env HOME=/var/lib/andrew/browser XDG_RUNTIME_DIR="/run/user/$browser_uid" \
  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$browser_uid/bus" \
@@ -214,6 +233,7 @@ runuser -u andrew-browser -- env HOME=/var/lib/andrew/browser XDG_RUNTIME_DIR="/
  --mount type=bind,src=/opt/andrew/runtime-services/checks/verify-browser-fixture.py,dst=/opt/andrew/verify-browser-fixture.py,ro=true \
  --entrypoint python3 "$IMAGE" /opt/andrew/verify-browser-fixture.py | tee "$BACKUP/browser-fixture.json"
 # Dedicated host UIDs must fail direct host-network connections independently of namespaces.
+check='dedicated UID network isolation'
 for name in andrew-runtime andrew-browser; do
  runuser -u "$name" -- python3 -c 'import socket
 try: socket.create_connection(("1.1.1.1",443),2)
@@ -221,11 +241,13 @@ except OSError: raise SystemExit(0)
 raise SystemExit("UID firewall did not block direct networking")'
 done
 # Real pinned SDK harness, isolated temporary backend, deterministic unbilled provider.
+check='isolated Letta browser callbacks'
 ANDREW_LETTA_TEST_BINARY=/var/lib/andrew/letta-app/node_modules/@letta-ai/letta-code/letta.js \
  python3 -m unittest discover -s "$PROJECT/scripts/tests" -p test_browser_protocol.py -q
 # Require every installed module and every browser-image source to match this checkout.
 for file in "$PROJECT"/prototype/andrewbot/*.py; do cmp -s "$file" "/opt/andrew/runtime-services/andrewbot/${file##*/}"; done
 # Snapshot and briefly stop only the controller; do not restart Letta or reset state.
+check='controller installation and persistent state'
 cp -a /opt/andrew/prototype/andrewbot "$BACKUP/controller-package"
 controller_stopped=1
 systemctl stop andrew-control.service
@@ -233,6 +255,7 @@ python3 "$PROJECT/scripts/verify-runtime-state.py" capture "$BACKUP/controller-s
 install -d -o root -g andrew-control -m 0750 /opt/andrew/prototype /opt/andrew/prototype/andrewbot
 for file in "$PROJECT"/prototype/andrewbot/*.py; do install -o root -g andrew-control -m 0640 "$file" /opt/andrew/prototype/andrewbot/; done
 # Root-owned, code/image/policy-bound proof written only after all acceptance commands succeed.
+check='administrator acceptance proof'
 PYTHONPATH=/opt/andrew/prototype python3 - "$BACKUP" <<'PY'
 import json,os,sys
 from datetime import datetime,timezone
@@ -247,6 +270,7 @@ chmod 0644 /etc/andrew/browser-runtime.conf
 install -d -o root -g root -m 0755 /etc/systemd/system/andrew-control.service.d
 printf '[Service]\nEnvironmentFile=/etc/andrew/browser-runtime.conf\nReadOnlyPaths=/srv/andrew/workspace/projects\n' > /etc/systemd/system/andrew-control.service.d/99-browser-runtime.conf
 chmod 0644 /etc/systemd/system/andrew-control.service.d/99-browser-runtime.conf
+check='controller startup validation'
 bash "$PROJECT/scripts/validate-and-start-controller.sh" --validate-only
 python3 "$PROJECT/scripts/verify-runtime-state.py" verify "$BACKUP/controller-state.json"
 systemctl daemon-reload
@@ -259,6 +283,7 @@ done
 systemctl is-active --quiet andrew-control.service
 journalctl --quiet "_SYSTEMD_INVOCATION_ID=$invocation" --no-pager -o cat --grep='Andrew Telegram controller started' | grep -q 'Andrew Telegram controller started'
 # Compare all unrelated firewall objects, omitting volatile counters/handles.
+check='unrelated firewall preservation'
 nft -s -j list ruleset > "$BACKUP/firewall-after.json"
 python3 - "$BACKUP" <<'PY'
 import json,sys

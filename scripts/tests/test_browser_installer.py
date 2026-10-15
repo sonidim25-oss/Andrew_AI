@@ -28,9 +28,10 @@ rm() { printf 'rm %s\\n' "$*" >> "$CALLS"; }
 systemctl() { printf 'systemctl %s\\n' "$*" >> "$CALLS"; }
 nft() { printf 'nft %s\\n' "$*" >> "$CALLS"; }
 '''
-                code=prelude+f'BACKUP={json.dumps(str(path))}\nCALLS={json.dumps(str(log))}\ncontroller_stopped={stopped}\nsuccess=0\nmanaged=(/etc/andrew/runner.conf /etc/andrew/runtime-proof.json)\n'+function+'\nfalse\nrollback\n'
+                code=prelude+f'BACKUP={json.dumps(str(path))}\nCALLS={json.dumps(str(log))}\ncontroller_stopped={stopped}\nsuccess=0\ncheck="imported image identity"\nmanaged=(/etc/andrew/runner.conf /etc/andrew/runtime-proof.json)\n'+function+'\nfalse\nrollback\n'
                 result=subprocess.run(['bash','-c',code],capture_output=True,text=True)
                 self.assertEqual(result.returncode,1)
+                self.assertIn('safe check: imported image identity',result.stderr)
                 calls=log.read_text()
                 self.assertIn('cp -a '+str(path)+'/etc/andrew/runner.conf /etc/andrew/runner.conf',calls)
                 self.assertEqual('restart andrew-control.service' in calls,bool(stopped))

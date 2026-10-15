@@ -7,5 +7,6 @@
     "runtime/worker_entry.py": "4b5957d88c483dcf8bed7a8f9f1aef1e627f0fe27787a3c1c5cc8c39c0cac5b7",
     "prototype/andrewbot/browser_protocol.py": "6cb6a714933dcb17df48d4e68d1a058e3a99e72d11f608507de3ac717c229aeb"
   },
-  "build": "podman build --network=none -t localhost/andrew-browser:integration -f runtime/Containerfile.release ."
+  "build": "podman build --network=none -t localhost/andrew-browser:integration -f runtime/Containerfile.release .",
+  "image_config_id": "sha256:79845fb4e1050ae2e0d6f8fd8df86eb6fd6c660e8b7b443cad5e6ce6ca0c4021"
 }
