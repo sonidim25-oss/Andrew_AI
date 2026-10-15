@@ -2,7 +2,7 @@
 
 ## Status
 
-Installed from `d64872e` on 2026-10-15 at 01:44 UTC. Browser/runtime commissioning and controller startup passed; controller and Letta are active. The owner subsequently completed Google OAuth; the helper confirmed the Gmail profile and encrypted token storage. The administrator-owned permission file was independently read: enabled/read are true, draft/send/delete are false. Message search/read, token refresh, model-directed Gmail use and mutations have not been tested. The uploaded Desktop client JSON was validated without displaying secrets and restricted to mode 0600. Browser commissioning does not prove Gmail behavior. Installation evidence: `/var/lib/andrew/runtime-commissioning/20261015T014059Z`.
+Installed from `d64872e` on 2026-10-15 at 01:44 UTC. Browser/runtime commissioning and controller startup passed; controller and Letta are active. The owner subsequently completed Google OAuth; the helper confirmed the Gmail profile and encrypted token storage. After a separate owner request, draft/send/delete were enabled and the owner completed a new OAuth flow. The helper confirmed connection again; it requires the granted scopes to match the requested permission set before saving tokens. The administrator-owned file was independently read again: enabled/read/draft/send/delete are all true. Deletion remains limited to moving messages to Trash. Message search/read, token refresh, model-directed Gmail use and mutations have not been tested. The uploaded Desktop client JSON was validated without displaying secrets and restricted to mode 0600. Browser commissioning does not prove Gmail behavior. Installation evidence: `/var/lib/andrew/runtime-commissioning/20261015T014059Z`.
 
 ## Permissions
 

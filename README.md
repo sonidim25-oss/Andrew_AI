@@ -6,7 +6,7 @@ Andrew is a self-hosted persistent AI agent prototype with a trusted Python cont
 
 See [the verified feature status](docs/FEATURE_STATUS.md) for the dated distinction between source implementation, local test results, VPS installation, live integration checks, and autonomous enablement. Treat VPS state as a point-in-time snapshot and refresh it before deployment.
 
-[Gmail setup](docs/GMAIL.md) covers the OAuth integration: installed and connected with read-only access, plus separate owner controls for drafts, sending and moving messages to Trash. All three write permissions remain disabled. Message reading, token refresh and model-directed Gmail use still await verification.
+[Gmail setup](docs/GMAIL.md) covers the OAuth integration: installed and connected, with read access and separately owner-enabled permissions for drafts, sending and moving messages to Trash. Expanded OAuth consent completed; permanent deletion is unavailable. Message reading, token refresh and model-directed Gmail use still await verification.
 
 The [daily lifecycle guide](docs/DAILY_LIFECYCLE.md) describes the conversation-and-memory release gate, preserved safety/budget limits, local tests and VPS commissioning command. Autonomous enablement is recorded separately from source readiness.
 
