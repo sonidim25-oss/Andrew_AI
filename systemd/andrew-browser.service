@@ -10,6 +10,7 @@ Group=andrew-browser
 WorkingDirectory=/opt/andrew/runtime-services
 Environment=PYTHONPATH=/opt/andrew/runtime-services
 Environment=HOME=/var/lib/andrew/browser
+Environment=ANDREW_CGROUP_PARENT=/system.slice/%n
 EnvironmentFile=/etc/andrew/browser-environment.conf
 ExecStart=/usr/bin/python3 -m andrewbot.browser_service
 Restart=on-failure
@@ -23,6 +24,7 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 LockPersonality=yes
 Delegate=yes
+DelegateSubgroup=supervisor
 ReadWritePaths=/var/lib/andrew/browser /sys/fs/cgroup
 MemoryMax=3G
 CPUQuota=250%

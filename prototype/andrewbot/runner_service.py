@@ -27,6 +27,7 @@ class WorkerConfig:
     proxy_socket: str
     podman_binary: str = "/usr/bin/podman"
     timeout_seconds: int = 120
+    cgroup_parent: str | None = None
 
     def __post_init__(self):
         if not re.search(r"@sha256:[0-9a-f]{64}$", self.image):
@@ -38,6 +39,10 @@ class WorkerConfig:
             raise ValueError("proxy socket path must be absolute")
         if self.timeout_seconds != 120:
             raise ValueError("worker timeout must remain at 120 seconds")
+        if self.cgroup_parent is not None and (not isinstance(self.cgroup_parent,str)
+                or not self.cgroup_parent.startswith('/') or not self.cgroup_parent.endswith('.service')
+                or any(p in {'.','..',''} for p in self.cgroup_parent[1:].split('/'))):
+            raise ValueError('worker cgroup parent must be an absolute service cgroup')
 
 
 class RunnerService:
@@ -46,7 +51,7 @@ class RunnerService:
         self.healthy = True
 
     def _podman_args(self, container_name):
-        return [
+        args = [
             self.config.podman_binary, "--runtime=/usr/bin/crun", "run", "--rm", "--name", container_name, "-i",
             "--timeout=120", "--log-driver=none", "--pull=never", "--label=org.andrew.runtime=managed",
             "--group-add=keep-groups", "--network=none", "--userns=keep-id:uid=1000,gid=1000", "--read-only", "--user=1000:1000", "--cap-drop=ALL",
@@ -56,6 +61,15 @@ class RunnerService:
             "--mount", f"type=bind,src={self.config.proxy_socket},dst=/run/andrew-egress.sock,rw=true",
             self.config.image,
         ]
+        if self.config.cgroup_parent is not None:
+            # Rootless systemd scopes cannot move a PID out of a system service
+            # into user@.service. Keep every worker inside our delegated subtree.
+            current = Path('/proc/self/cgroup').read_text().strip()
+            if current != '0::'+self.config.cgroup_parent+'/supervisor':
+                raise ValueError('launcher is outside its delegated supervisor cgroup')
+            args.insert(args.index('run'),'--cgroup-manager=cgroupfs')
+            args.insert(args.index('run')+1,'--cgroup-parent='+self.config.cgroup_parent)
+        return args
 
     @staticmethod
     def _validate_request(request):
@@ -194,7 +208,8 @@ def main():
                 if line and not line.startswith("#") and "=" in line:
                     key, value = line.split("=", 1)
                     values[key.strip()] = value.strip()
-        config = WorkerConfig(values["IMAGE"], values["WORKSPACE"], values["PROXY_SOCKET"])
+        config = WorkerConfig(values["IMAGE"], values["WORKSPACE"], values["PROXY_SOCKET"],
+                              cgroup_parent=os.environ.get('ANDREW_CGROUP_PARENT'))
         runner = RunnerService(config)
         runner.recover()
         asyncio.run(serve_systemd_socket(runner))

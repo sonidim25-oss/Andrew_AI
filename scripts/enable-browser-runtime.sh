@@ -132,7 +132,7 @@ install -d -o root -g root -m 0755 /opt/andrew/runtime-services /etc/andrew /etc
 if [ -d /opt/andrew/runtime-services/andrewbot ]; then cp -a /opt/andrew/runtime-services/andrewbot "$BACKUP/service-package"; fi
 install -d -o root -g root -m 0755 /opt/andrew/runtime-services/andrewbot /opt/andrew/runtime-services/checks
 for file in "$PROJECT"/prototype/andrewbot/*.py; do install -o root -g root -m 0644 "$file" /opt/andrew/runtime-services/andrewbot/; done
-for file in verify-runtime.py verify-browser-fixture.py; do install -o root -g root -m 0644 "$PROJECT/scripts/$file" /opt/andrew/runtime-services/checks/; done
+for file in verify-runtime.py verify-browser-fixture.py verify-worker-launch.py; do install -o root -g root -m 0644 "$PROJECT/scripts/$file" /opt/andrew/runtime-services/checks/; done
 IMPORTED_IMAGE=''
 for name in andrew-runtime andrew-browser; do
   task_uid="$(id -u "$name")"

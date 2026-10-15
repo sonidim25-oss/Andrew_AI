@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Targeted Podman startup diagnostics; no credentials loaded or model calls.
+# Targeted Podman metadata and fixed worker launch probes; no credentials or model calls.
 set -Eeuo pipefail
 umask 077
 cd -- /
@@ -41,17 +41,28 @@ for role in runtime browser; do
   options=(--uid="$name" --gid="$name" --property=WorkingDirectory=/opt/andrew/runtime-services
    --setenv="HOME=$task_home" --setenv="XDG_RUNTIME_DIR=/run/user/$task_uid"
    --setenv="DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$task_uid/bus"
-   --property=UMask=0077 --property=RuntimeMaxSec=30)
+   --property=UMask=0077 --property=RuntimeMaxSec=70)
   if [ "$mode" = protected ]; then
    writable="$task_home /sys/fs/cgroup /run/user/$task_uid"
    [ "$role" != runtime ] || writable+=" /srv/andrew/workspace/projects"
    options+=(--property=PrivateTmp=yes --property=ProtectSystem=strict --property=ProtectHome=tmpfs
     --property="BindPaths=/run/user/$task_uid"
     --property=ProtectKernelTunables=yes --property=ProtectKernelModules=yes --property=LockPersonality=yes
-    --property=Delegate=yes --property="ReadWritePaths=$writable"
+    --property=Delegate=yes --property=DelegateSubgroup=supervisor --property="ReadWritePaths=$writable"
     --property=MemoryMax=3G --property=CPUQuota=250% --property=TasksMax=512 --property=LimitNOFILE=2048)
   fi
   systemd-run --wait --pipe --collect --quiet --unit="andrew-startup-diagnostic-$role-$mode" \
     "${options[@]}" /usr/bin/python3 -c "$PROBE" "$mode"
+  if [ "$mode" = protected ]; then
+   printf 'Andrew fixed worker launch: %s / protected\n' "$role"
+   launch_unit="andrew-worker-diagnostic-$role"
+   workspace=/srv/andrew/workspace/projects
+   [ "$role" != browser ] || workspace=/var/lib/andrew/browser/projects
+   systemd-run --wait --pipe --collect --quiet --unit="$launch_unit" "${options[@]}" \
+    --setenv=PYTHONPATH=/opt/andrew/runtime-services \
+    --setenv="ANDREW_CGROUP_PARENT=/system.slice/$launch_unit.service" \
+    --setenv="ANDREW_PROBE_WORKSPACE=$workspace" \
+    /usr/bin/python3 /opt/andrew/runtime-services/checks/verify-worker-launch.py
+  fi
  done
 done

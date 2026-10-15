@@ -10,6 +10,7 @@ Group=andrew-runtime
 WorkingDirectory=/opt/andrew/runtime-services
 Environment=PYTHONPATH=/opt/andrew/runtime-services
 Environment=HOME=/var/lib/andrew/runtime
+Environment=ANDREW_CGROUP_PARENT=/system.slice/%n
 EnvironmentFile=/etc/andrew/runner-environment.conf
 Environment=ANDREW_RUNNER_CONFIG=/etc/andrew/runner.conf
 ExecStart=/usr/bin/python3 -m andrewbot.runner_service
@@ -24,6 +25,7 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 LockPersonality=yes
 Delegate=yes
+DelegateSubgroup=supervisor
 ReadWritePaths=/var/lib/andrew/runtime /srv/andrew/workspace/projects /sys/fs/cgroup
 MemoryMax=3G
 CPUQuota=250%

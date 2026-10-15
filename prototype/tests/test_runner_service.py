@@ -53,6 +53,19 @@ class RunnerServiceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             service.run({"type": "host_shell", "command": "id"})
 
+    def test_service_worker_stays_in_its_delegated_cgroup(self):
+        module=runner_module(self)
+        config=module.WorkerConfig('localhost/a@sha256:'+'b'*64,str(self.workspace),str(self.proxy),
+            cgroup_parent='/system.slice/andrew-runner.service')
+        with patch.object(Path,'read_text',return_value='0::/system.slice/andrew-runner.service/supervisor\n'):
+            args=module.RunnerService(config)._podman_args('worker-test')
+        self.assertIn('--cgroup-manager=cgroupfs',args)
+        self.assertIn('--cgroup-parent=/system.slice/andrew-runner.service',args)
+        for limit in ('--pids-limit=256','--memory=2g','--cpus=2'):
+            self.assertIn(limit,args)
+        with patch.object(Path,'read_text',return_value='0::/system.slice/unrelated.service/supervisor\n'):
+            with self.assertRaises(ValueError): module.RunnerService(config)._podman_args('worker-test')
+
     def test_serialized_frame_limit_includes_json_escaping(self):
         module = runner_module(self)
         with self.assertRaises(ValueError):

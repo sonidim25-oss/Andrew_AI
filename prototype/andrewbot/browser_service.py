@@ -127,7 +127,8 @@ async def serve(process):
 def main():
     try:
         values = dict(line.strip().split('=',1) for line in open('/etc/andrew/runner.conf') if '=' in line and not line.startswith('#'))
-        config = WorkerConfig(values['IMAGE'],'/var/lib/andrew/browser/projects',values['PROXY_SOCKET'])
+        config = WorkerConfig(values['IMAGE'],'/var/lib/andrew/browser/projects',values['PROXY_SOCKET'],
+                              cgroup_parent=os.environ.get('ANDREW_CGROUP_PARENT'))
         RunnerService(config).recover()
         asyncio.run(serve(BrowserProcess(config)))
     except KeyboardInterrupt: return 0

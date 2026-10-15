@@ -18,9 +18,11 @@ The shell used by the coding agent cannot authenticate sudo. The command supplie
 
 The installer verifies the release archive and browser source hashes, checks the content-addressed config ID after OCI import normalization and pins the resulting immutable manifest digest in both dedicated stores, provisions dedicated rootless launchers, installs a 10 GiB ext4 projects filesystem, applies only the `inet andrew_runtime` UID table, and tests through the installed private sockets. It tests direct networking/DNS denial, proxy success and failure, actual 2 GiB OOM kill, 256-task exhaustion, CPU throttling, the full 120-second deadline, real browser operations and controlled signup/login fixtures. It also runs the pinned isolated Letta callback harness without a paid provider.
 
+Before the longer tests, a bounded preflight checks protected runtime-directory access and launches two fixed workers under each service identity. It requires workers to remain beneath the delegated service, retain their exact limits and leave the supervisor's cgroup unchanged. The services use `DelegateSubgroup=supervisor` and an explicit cgroupfs parent to avoid moving workers into a separate user-manager scope. Only each identity's own `/run/user/<UID>` is exposed beneath otherwise hidden home directories.
+
 Only after acceptance does it stop the controller briefly, preserve its IDs/pause/sleep/cycle/spending evidence, install modules, write a root-owned code/image/policy proof, validate startup and enable the advertised tools. Letta and unrelated services are not restarted. Failure restores previous controller files/flags and Andrew firewall rules; dedicated storage and identities remain for retry. Evidence is private under `/var/lib/andrew/runtime-commissioning/`.
 
-Dependencies include Podman, nftables, systemd, ext4 tooling, ACL support, public HTTPS/DNS and the public-IP discovery endpoint. Missing ACL tooling is installed by the root command. Recommission after code, image, unit, policy or host network changes; a stale proof rejects external-runtime startup. The acceptance record is not an ongoing security monitor.
+Dependencies include Podman, nftables, systemd 254 or newer (this server uses 255), ext4 tooling, ACL support, public HTTPS/DNS and the public-IP discovery endpoint. Missing ACL tooling is installed by the root command. Recommission after code, image, unit, policy or host network changes; a stale proof rejects external-runtime startup. The acceptance record is not an ongoing security monitor.
 
 ## Capabilities
 
