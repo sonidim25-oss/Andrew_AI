@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from andrewbot.configuration import load_model_config
+from andrewbot.configuration import MAX_LETTA_OUTPUT_TOKENS, load_model_config
 from andrewbot.controller import Controller
 from andrewbot.store import Store
 
@@ -59,7 +59,7 @@ class ModelConfigurationTests(unittest.TestCase):
                 })
                 controller = Controller(store, object(), 17, model_config=config)
                 estimate = controller._estimate_cost([{"role": "user", "content": "hi"}])
-                self.assertAlmostEqual(estimate, (2 * 2 + 512 * 4) / 1_000_000)
+                self.assertAlmostEqual(estimate, (2 * 2 + MAX_LETTA_OUTPUT_TOKENS * 4) / 1_000_000)
             finally:
                 store.close()
 

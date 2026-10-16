@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import logging
 from .budget import budget_snapshot
-from .configuration import ModelConfig, load_model_config
+from .configuration import MAX_LETTA_OUTPUT_TOKENS, ModelConfig, load_model_config
 from .diary import format_diary_entry, parse_diary_command, validate_diary_content
 from .telegram_menu import BUTTON_COMMANDS, HELP_TEXT
 
@@ -120,26 +120,32 @@ class Controller:
             self.store.add_message(self.owner_id, "user", text, queued=True)
             self.store.add_activity("Message queued while Andrew is sleeping or paused")
             return "I’m asleep or paused. Your message is saved for when I wake."
-        self.store.add_message(self.owner_id, "user", text)
+        message_id = self.store.add_message(self.owner_id, "user", text, queued=True)
         messages = self._bounded_messages([
             {"role": row["role"], "content": row["content"]}
-            for row in self.store.recent_messages(self.owner_id)
-        ])
+            for row in self.store.recent_messages(self.owner_id, limit=11)
+        ] + [{"role": "user", "content": text}])
         max_cost = self._estimate_cost(messages)
         allowed, reason = self.budget_allows(max_cost)
         if not allowed:
             self.store.add_activity(f"Model request blocked by {reason}")
-            return "I’m pausing model requests to stay within the configured budget."
+            return "Your message is queued until the configured budget allows model requests."
+        if not self.store.claim_owner_message(self.owner_id, message_id):
+            return "Your message is saved for delivery."
         try:
             reply, usage = self.model.reply(messages)
         except Exception:
-            self.store.add_activity("Model request failed")
-            return "I couldn’t reach my model just now. Your message is saved; please try again shortly."
+            self.store.hold_uncertain_queued_claim([message_id])
+            self.store.add_activity("Owner message outcome uncertain; held to avoid duplicate delivery")
+            return ("Your message is saved, but its delivery outcome is uncertain. "
+                    "It will not be repeated automatically. Use /replay to retry; "
+                    "any actions already completed could be repeated.")
         month, day = self._periods()
         actual = self._actual_cost(usage)
         if not usage.get("accounted_by_gateway"):
             self.store.record_usage(month, day, max(actual, max_cost if not usage else 0.0),
                                     int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0)))
+        self.store.release_queued(self.owner_id, [message_id])
         self.store.add_message(self.owner_id, "assistant", reply)
         self.store.add_activity("Andrew replied to the owner")
         return reply
@@ -149,7 +155,7 @@ class Controller:
         input_bytes = sum(len(item["content"].encode("utf-8")) for item in messages)
         input_tokens = min(48000, max(1, input_bytes))
         return (input_tokens * self.model_config.input_usd_per_million
-                + 512 * self.model_config.output_usd_per_million) / 1_000_000
+                + MAX_LETTA_OUTPUT_TOKENS * self.model_config.output_usd_per_million) / 1_000_000
 
     @staticmethod
     def _bounded_messages(messages):
@@ -228,7 +234,7 @@ class Controller:
         queued = self.store.claim_queued_messages(self.owner_id)
         if not queued:
             return None
-        message = "Messages received while I was asleep:\n" + "\n".join(row["content"] for row in queued)
+        message = "Saved owner messages:\n" + "\n".join(row["content"] for row in queued)
         bounded = self._bounded_messages([{"role": "user", "content": message}])
         estimate = self._estimate_cost(bounded)
         allowed, reason = self.budget_allows(estimate)

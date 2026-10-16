@@ -2,10 +2,11 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 from andrewbot.controller import Controller
+from andrewbot.configuration import MAX_LETTA_OUTPUT_TOKENS
 from andrewbot.store import Store
 
 
@@ -94,6 +95,69 @@ class ControllerTests(unittest.TestCase):
         })
         self.assertEqual(result, "I remember our conversation.")
         self.assertEqual([row["role"] for row in self.store.recent_messages(123456789)], ["user", "assistant"])
+
+    @staticmethod
+    def owner_message(text):
+        return {"message": {"from": {"id": 123456789},
+                            "chat": {"id": 123456789, "type": "private"}, "text": text}}
+
+    def test_budget_blocked_chat_stays_queued_until_full_output_fits(self):
+        frozen = datetime(2026, 10, 31, 16, 0, tzinfo=timezone.utc)
+        # This balance fits the obsolete 512-token estimate but not the real cap.
+        remaining = (2 * 0.15 + ((512 + MAX_LETTA_OUTPUT_TOKENS) / 2) * 0.47) / 1_000_000
+        with patch("andrewbot.budget.datetime") as clock:
+            clock.now.return_value = frozen
+            self.store.record_usage("2026-10", "2026-10-31", 9 - remaining, 1, 1)
+            reply = self.controller.handle_update(self.owner_message("hi"))
+            self.assertIn("queued", reply)
+            self.assertEqual(self.model.calls, 0)
+            self.assertEqual([row['content'] for row in self.store.queued_messages(123456789)], ['hi'])
+            self.assertIsNone(self.controller.flush_queued())
+            self.assertEqual(self.model.calls, 0)
+            # The next month's budget makes the saved input eligible again.
+            clock.now.return_value = datetime(2026, 11, 1, 16, 0, tzinfo=timezone.utc)
+            self.assertEqual(self.controller.flush_queued(), "I remember our conversation.")
+        self.assertEqual(self.model.calls, 1)
+        self.assertEqual(self.store.pending_message_count(123456789), 0)
+
+    def test_failed_owner_message_requires_explicit_replay_and_survives_restart(self):
+        self.controller.model = Mock()
+        self.controller.model.reply.side_effect = RuntimeError("fixture response lost after action")
+        reply = self.controller.handle_update(self.owner_message("original request"))
+        self.assertIn("/replay", reply)
+        self.assertIn("uncertain", reply)
+        path = self.store.path
+        self.store.close()
+        self.store = Store(path)
+        self.controller.store = self.store
+        self.assertEqual(self.store.uncertain_message_count(123456789), 1)
+        self.assertIsNone(self.controller.flush_queued())
+        self.controller.model.reply.assert_called_once()
+        self.controller.model.reply.side_effect = None
+        self.controller.model.reply.return_value = ("received", {"accounted_by_gateway": True})
+        self.controller.handle_update(self.owner_message("independent follow-up"))
+        submitted = self.controller.model.reply.call_args.args[0]
+        self.assertEqual(submitted, [{"role": "user", "content": "independent follow-up"}])
+        self.assertEqual(self.store.uncertain_message_count(123456789), 1)
+        self.assertIn("Requeued 1", self.controller._command('/replay'))
+        self.assertEqual(self.controller.flush_queued(), "received")
+        self.assertIn("original request", self.controller.model.reply.call_args.args[0][0]['content'])
+        self.assertEqual(self.store.pending_message_count(123456789), 0)
+        self.assertIsNone(self.controller.flush_queued())
+
+    def test_interrupted_direct_message_is_held_on_startup_recovery(self):
+        self.controller.model = Mock()
+        self.controller.model.reply.side_effect = KeyboardInterrupt()
+        with self.assertRaises(KeyboardInterrupt):
+            self.controller.handle_update(self.owner_message("interrupted request"))
+        path = self.store.path
+        self.store.close()
+        self.store = Store(path)
+        self.controller.store = self.store
+        self.assertEqual(self.store.recover_queued_claims(), 1)
+        self.assertEqual(self.store.uncertain_message_count(123456789), 1)
+        self.assertIsNone(self.controller.flush_queued())
+        self.controller.model.reply.assert_called_once()
 
     def test_sleep_queues_owner_message_without_model_call(self):
         self.controller.handle_update({

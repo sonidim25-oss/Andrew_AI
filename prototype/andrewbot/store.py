@@ -205,6 +205,14 @@ class Store:
         return rows
 
     @database_locked
+    def claim_owner_message(self, owner_id, message_id):
+        with self.connection:
+            return self.connection.execute(
+                "UPDATE messages SET queued=2 WHERE id=? AND owner_id=? AND role='user' AND queued=1",
+                (message_id, owner_id),
+            ).rowcount == 1
+
+    @database_locked
     def claim_queued_messages(self, owner_id, max_bytes=40_000):
         with self.connection:
             rows = self.connection.execute(
