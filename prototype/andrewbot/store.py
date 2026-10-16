@@ -2,6 +2,7 @@ import sqlite3
 import threading
 import json
 import uuid
+import hashlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from functools import wraps
@@ -307,6 +308,41 @@ class Store:
             )
 
     @database_locked
+    def start_session_state(self, session_id, started_at, trigger):
+        if self.get_state('paused', '0') == '1' or self.get_state('sleeping', '0') == '1':
+            return False
+        self.transition_state({'active_session_id': session_id, 'active_session_started_at': started_at,
+                               'active_session_status': 'running', 'session_start_requested': ''},
+                              f'Autonomous session started ({trigger})')
+        return True
+
+    @database_locked
+    def transition_owner_control(self, updates, event):
+        revision = int(self.get_state('owner_control_revision', '0')) + 1
+        self.transition_state({**updates, 'owner_control_revision': str(revision)}, event)
+
+    @database_locked
+    def blocked_session_request(self):
+        reason = ('paused' if self.get_state('paused', '0') == '1' else
+                  'sleeping' if self.get_state('sleeping', '0') == '1' else '')
+        if reason:
+            self.set_state('session_start_requested', '')
+        return reason
+
+    @database_locked
+    def clear_session_request(self, trigger, owner_revision):
+        if (self.get_state('session_start_requested', '') == trigger
+                and self.get_state('owner_control_revision', '0') == owner_revision):
+            self.set_state('session_start_requested', '')
+
+    @database_locked
+    def stop_session_state(self, session_id, updates, event):
+        if self.get_state('active_session_id', '') != session_id:
+            return False
+        self.transition_state(updates, event)
+        return True
+
+    @database_locked
     def process_fallback_wake(self, local_day, owner_id):
         """Start one daily session from idle or indefinite sleep; respect timed sleep and pause."""
         with self.connection:
@@ -406,6 +442,27 @@ class Store:
             "SELECT update_id,payload FROM telegram_inbox ORDER BY update_id LIMIT 50"
         ).fetchall()
         return [(row["update_id"], json.loads(row["payload"])) for row in rows]
+
+    @database_locked
+    def pending_owner_controls(self, owner_id, buttons=()):
+        text = "lower(trim(COALESCE(json_extract(payload,'$.message.text'),'')))"
+        clauses, values = [], [owner_id, owner_id]
+        for command in ('/pause', '/wake', '/status', '/budget'):
+            clauses.append(f'({text}=? OR {text} GLOB ?)')
+            values.extend((command, command + '[ @\t\n\r]*'))
+        for button in buttons:
+            clauses.append(f'{text}=?')
+            values.append(button.lower())
+        rows = self.connection.execute(
+            "SELECT update_id,payload FROM telegram_inbox WHERE "
+            "json_extract(payload,'$.message.from.id')=? AND json_extract(payload,'$.message.chat.id')=? "
+            "AND json_extract(payload,'$.message.chat.type')='private' "
+            "AND json_type(payload,'$.message.forward_origin') IS NULL "
+            "AND json_type(payload,'$.message.forward_from') IS NULL "
+            "AND json_type(payload,'$.message.forward_from_chat') IS NULL "
+            "AND json_type(payload,'$.message.forward_sender_name') IS NULL AND (" + ' OR '.join(clauses) + ') '
+            "ORDER BY update_id LIMIT 50", values).fetchall()
+        return [(row['update_id'], json.loads(row['payload'])) for row in rows]
 
     @database_locked
     def complete_update(self, update_id, chat_id=None, reply=None, uncertain=False):
@@ -719,6 +776,68 @@ class Store:
                 (f"Memory record created ({record_id}; type={record_type})", created_at),
             )
         return record_id
+
+    @database_locked
+    def ensure_founding_letter(self, default_content):
+        """Prefer the owner's archived letter; never replace it with a code default."""
+        row = self.connection.execute(
+            "SELECT * FROM memory_records WHERE source='owner' AND record_id LIKE 'owner-letter-%' "
+            "ORDER BY created_at DESC,rowid DESC LIMIT 1"
+        ).fetchone()
+        content = row['content'] if row else default_content
+        if not isinstance(content, str) or not content.strip() or len(content) > 4000:
+            raise ValueError('invalid founding letter')
+        digest = hashlib.sha256(content.encode('utf-8')).hexdigest()
+        record_id = 'owner-letter-' + digest
+        if row and row['record_id'] != record_id:
+            raise ValueError('founding letter archive hash mismatch')
+        with self.connection:
+            if row is None:
+                now = self.now()
+                self.connection.execute(
+                    'INSERT INTO memory_records(record_id,record_type,created_at,content,source) VALUES(?,?,?,?,?)',
+                    (record_id, 'experience', now, content, 'owner'))
+                self.connection.execute(
+                    'INSERT INTO memory_fts(record_id,record_type,created_at,content,source) VALUES(?,?,?,?,?)',
+                    (record_id, 'experience', now, content, 'owner'))
+            for operation in ('UPDATE', 'DELETE'):
+                self.connection.execute(
+                    f'CREATE TRIGGER IF NOT EXISTS protect_owner_letter_{digest}_{operation.lower()} '
+                    f"BEFORE {operation} ON memory_records WHEN OLD.record_id='{record_id}' "
+                    "BEGIN SELECT RAISE(ABORT,'Owner letter is immutable'); END")
+            if self.get_state('founding_letter_record_id', '') != record_id:
+                # Old versions marked agent creation as delivery. That is not a receipt.
+                for key, value in (('founding_letter_delivered', '0'), ('founding_letter_record_id', record_id)):
+                    self.connection.execute('INSERT INTO state(key,value) VALUES(?,?) '
+                                            'ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, value))
+        return {'record_id': record_id, 'content': content, 'digest': digest}
+
+    @database_locked
+    def queue_founding_letter(self, owner_id, letter):
+        marker = 'owner_letter_queued:' + letter['digest']
+        with self.connection:
+            existing = self.connection.execute('SELECT value FROM state WHERE key=?', (marker,)).fetchone()
+            if existing:
+                return int(existing[0])
+            cursor = self.connection.execute(
+                'INSERT INTO messages(owner_id,role,content,created_at,queued) VALUES(?,?,?,?,1)',
+                (owner_id, 'user', letter['content'], self.now()))
+            self.connection.execute('INSERT INTO state(key,value) VALUES(?,?)', (marker, str(cursor.lastrowid)))
+            return cursor.lastrowid
+
+    @database_locked
+    def confirm_founding_letter_delivery(self, letter):
+        with self.connection:
+            if self.get_state('founding_letter_record_id', '') != letter['record_id']:
+                raise ValueError('founding letter changed during delivery')
+            self.connection.execute(
+                "INSERT INTO state(key,value) VALUES('founding_letter_delivered','1') "
+                "ON CONFLICT(key) DO UPDATE SET value='1'")
+            row = self.connection.execute('SELECT value FROM state WHERE key=?',
+                                          ('owner_letter_queued:' + letter['digest'],)).fetchone()
+            if row:
+                self.connection.execute('UPDATE messages SET queued=0 WHERE id=? AND content=? AND queued IN (1,2,3)',
+                                        (int(row[0]), letter['content']))
 
     @database_locked
     def create_personality_revision(self, content, reason, source, event_ids=(), diary_ids=()):

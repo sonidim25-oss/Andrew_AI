@@ -1,11 +1,17 @@
 import tempfile
 import unittest
+import threading
+import queue
+import time
 from pathlib import Path
 from unittest.mock import Mock
 
 from andrewbot.dispatch import ControllerDispatch
 from andrewbot.store import Store
 from andrewbot.telegram import OwnerRateLimit
+from andrewbot.controller import Controller
+from andrewbot.sessions import SessionRunner
+from andrewbot.appserver import LettaTurnCancelled
 
 
 def update(number=1, text='hello'):
@@ -106,6 +112,97 @@ class DispatchTests(unittest.TestCase):
         self.dispatch.step()
         self.assertEqual([call.args[0]['update_id'] for call in self.controller.handle_update.call_args_list], [1, 10])
         self.sessions.tick.assert_called_once()
+
+    def test_persisted_pause_is_found_beyond_the_normal_inbox_page(self):
+        for number in range(1, 101):
+            self.store.enqueue_update(update(number))
+        self.store.enqueue_update(update(101, '/pause'))
+        self.dispatch.process_updates(controls_only=True)
+        self.assertEqual(self.controller.handle_update.call_args.args[0]['update_id'], 101)
+
+    def test_background_control_path_rejects_forwarded_and_nonowner_commands(self):
+        forwarded = update(1, '/pause')
+        forwarded['message']['forward_origin'] = {'type': 'hidden_user'}
+        stranger = update(2, '/pause')
+        stranger['message']['from']['id'] = 99
+        for item in (forwarded, stranger):
+            self.store.enqueue_update(item)
+        self.dispatch.process_updates(controls_only=True)
+        self.controller.handle_update.assert_not_called()
+        self.assertEqual(len(self.store.pending_updates()), 2)
+
+
+class ConcurrentOwnerControlsTests(unittest.TestCase):
+    def run_control(self, controls):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / 'state.sqlite3')
+            entered, cancelled, release, notified = (threading.Event() for _ in range(4))
+            inbox = queue.Queue()
+            replies = []
+            class Telegram:
+                def get_updates(self, **kwargs):
+                    try:
+                        return inbox.get(timeout=0.05)
+                    except queue.Empty:
+                        return []
+                def send_message(self, owner, text):
+                    replies.append(text)
+                    notified.set()
+            class Agent:
+                def autonomous_turn(self, prompt, timeout):
+                    entered.set()
+                    release.wait(3)
+                    if cancelled.is_set():
+                        raise LettaTurnCancelled('Owner control')
+                def cancel_active_turn(self):
+                    cancelled.set()
+                    release.set()
+            agent = Agent()
+            controller = Controller(store, agent, 17, autonomous_enabled=True)
+            runner = SessionRunner(store, controller, agent, enabled=True)
+            store.set_state('session_start_requested', 'owner_wake')
+            dispatch = ControllerDispatch(store, controller, Telegram(), runner, OwnerRateLimit(), 17, True, False)
+            dispatch.start()
+            dispatch._updates_ready.set()
+            worker = threading.Thread(target=dispatch.step)
+            try:
+                worker.start()
+                self.assertTrue(entered.wait(1))
+                inbox.put([update(index + 1, command) for index, command in enumerate(controls)])
+                self.assertTrue(notified.wait(1), 'Owner controls waited for the blocked turn')
+                if '/pause' in controls:
+                    self.assertTrue(cancelled.wait(1))
+                    worker.join(1)
+                    self.assertFalse(worker.is_alive())
+                    expected = 'owner_wake' if controls[-1] == '/wake' else 'paused'
+                    deadline = time.monotonic() + 1
+                    while store.get_state('active_session_status') != expected and time.monotonic() < deadline:
+                        time.sleep(0.005)
+                    self.assertEqual(store.get_state('active_session_status'), expected)
+                    self.assertEqual(store.get_state('paused', '0'), '0' if expected == 'owner_wake' else '1')
+                    if expected == 'owner_wake':
+                        self.assertEqual(store.get_state('session_start_requested'), 'owner_wake')
+                    self.assertEqual(store.connection.execute('SELECT status FROM cycles').fetchone()[0], 'stopped')
+                    self.assertEqual(store.pending_diary_deliveries(), [])
+                else:
+                    self.assertFalse(cancelled.is_set())
+                    self.assertTrue(worker.is_alive())
+                return replies
+            finally:
+                release.set()
+                worker.join(3)
+                dispatch.stop()
+                store.close()
+
+    def test_pause_is_processed_and_turn_cancelled_while_model_is_blocked(self):
+        replies = self.run_control(['/pause'])
+        self.assertTrue(any('Paused' in reply for reply in replies))
+
+    def test_status_remains_available_without_cancelling_active_work(self):
+        self.run_control(['/status'])
+
+    def test_pause_then_wake_preserves_new_wake_request(self):
+        self.run_control(['/pause', '/wake'])
 
 
 class QueueBatchTests(unittest.TestCase):

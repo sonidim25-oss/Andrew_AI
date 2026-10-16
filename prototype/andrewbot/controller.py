@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+import logging
 from .budget import budget_snapshot
 from .configuration import ModelConfig, load_model_config
 from .diary import format_diary_entry, parse_diary_command, validate_diary_content
@@ -378,6 +379,14 @@ class Controller:
             return "Diary entry saved for today. It will be delivered to the owner by Telegram."
         raise ValueError("unsupported controller action")
 
+    def _cancel_active_turn(self):
+        cancel = getattr(self.model, 'cancel_active_turn', None)
+        if callable(cancel):
+            try:
+                cancel()
+            except Exception as error:
+                logging.warning('Active turn cancellation failed (%s)', type(error).__name__)
+
     def _command(self, command, text=""):
         if command in {"/help", "/start", "/menu"}:
             if command in {"/start", "/menu"}:
@@ -486,7 +495,8 @@ class Controller:
             )
             return f"I’m going to sleep and will wake at {target.strftime('%H:%M')} {self.timezone_name}."
         if command == "/wake":
-            self.store.transition_state(
+            self._cancel_active_turn()
+            self.store.transition_owner_control(
                 {"sleeping": "0", "paused": "0", "sleep_until": "",
                  "session_start_requested": "owner_wake" if self.autonomous_enabled else "",
                  "active_session_id": "", "active_session_started_at": "",
@@ -495,10 +505,11 @@ class Controller:
             queued = self.store.pending_message_count(self.owner_id)
             return f"I’m awake. I saved {queued} message(s) while sleeping."
         if command == "/pause":
-            self.store.transition_state(
+            self.store.transition_owner_control(
                 {"paused": "1", "session_start_requested": "", "active_session_id": "",
                  "active_session_started_at": "", "active_session_status": "paused"}, "Owner paused Andrew"
             )
+            self._cancel_active_turn()
             return "Paused. I won’t make model requests until you use /wake."
         if command == "/replay":
             count = self.store.retry_uncertain_messages(self.owner_id)
@@ -526,10 +537,15 @@ class Controller:
                            if latest_diary else "none")
             schedule = "enabled" if self.autonomous_enabled else "disabled"
             fallback = "enabled" if self.fallback_enabled else "disabled"
+            letter_status = ''
+            if self.store.get_state('founding_letter_record_id', ''):
+                receipt = ('receipt verified' if self.store.get_state('founding_letter_delivered', '0') == '1'
+                           else 'delivery pending')
+                letter_status = f' Owner letter: {receipt}.'
             return (f"Andrew is {state}. Session: {session}. Autonomous schedule: {schedule}; fallback: {fallback}. "
                     f"Next self-scheduled wake: {wake_display}. "
                     f"Autonomous cycles today: {cycles}/150. Queued messages: {self.store.pending_message_count(self.owner_id)} "
-                    f"({uncertain} with uncertain prior delivery). Latest diary: {diary_state}.")
+                    f"({uncertain} with uncertain prior delivery). Latest diary: {diary_state}." + letter_status)
         if command == "/budget":
             snapshot = budget_snapshot(
                 self.store,

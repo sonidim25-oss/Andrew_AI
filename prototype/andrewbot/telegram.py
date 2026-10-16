@@ -38,8 +38,8 @@ class TelegramAPI:
     def get_me(self):
         return self.call("getMe", {})
 
-    def get_updates(self, offset=None):
-        payload = {"timeout": 25, "limit": 50, "allowed_updates": ["message"]}
+    def get_updates(self, offset=None, poll_timeout=25):
+        payload = {"timeout": poll_timeout, "limit": 50, "allowed_updates": ["message"]}
         if offset is not None:
             payload["offset"] = offset
         return self.call("getUpdates", payload) or []

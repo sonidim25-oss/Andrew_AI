@@ -150,6 +150,7 @@ def run(validate_only=False):
         gateway_token,
         url=os.environ.get("ANDREW_LETTA_URL", "ws://127.0.0.1:8283/ws"),
         model_config=model_config,
+        owner_id=owner_id,
     )
     tool_runtime = None
     if env_enabled("ANDREW_ISOLATED_RUNTIME_ENABLED", False):
@@ -225,6 +226,7 @@ def run(validate_only=False):
     def stop(_signum, _frame):
         nonlocal stopping
         stopping = True
+        agent.cancel_active_turn()
 
     def deliver_diary_outbox():
         try:
@@ -237,6 +239,7 @@ def run(validate_only=False):
     signal.signal(signal.SIGINT, stop)
     dispatch = ControllerDispatch(store, controller, telegram, sessions, limiter,
                                   owner_id, autonomous_enabled, fallback_enabled, lambda: stopping)
+    dispatch.start()
     logging.info("Andrew Telegram controller started; secrets are loaded from the encrypted vault")
     try:
         while not stopping:
@@ -257,6 +260,7 @@ def run(validate_only=False):
                 logging.warning("Controller iteration failed (%s)", type(error).__name__)
                 time.sleep(5)
     finally:
+        dispatch.stop()
         gateway_thread.close()
         history.close()
         store.close()

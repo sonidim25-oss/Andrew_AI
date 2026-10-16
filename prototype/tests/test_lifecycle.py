@@ -241,6 +241,24 @@ class LifecycleTests(unittest.TestCase):
         self.assertIsNone(self.runner.start("scheduled_wake", self.now))
         self.assertEqual(self.calls, [])
 
+    def test_old_session_stop_cannot_overwrite_a_new_owner_wake(self):
+        self.runner.start('scheduled_wake', self.now)
+        self.controller._command('/pause')
+        self.controller._command('/wake')
+        self.runner.stop('provider_error', rest=True)
+        self.assertEqual(self.store.get_state('active_session_status'), 'owner_wake')
+        self.assertEqual(self.store.get_state('session_start_requested'), 'owner_wake')
+        self.assertEqual(self.store.get_state('sleeping'), '0')
+
+    def test_failed_admission_does_not_discard_a_concurrent_owner_wake(self):
+        self.store.set_state('session_start_requested', 'owner_wake')
+        def deny_start(trigger, current):
+            self.controller._command('/wake')
+            return None
+        with patch.object(self.runner, 'start', side_effect=deny_start):
+            self.assertFalse(self.runner.tick(self.now))
+        self.assertEqual(self.store.get_state('session_start_requested'), 'owner_wake')
+
 
 class LifecyclePolicyTests(unittest.TestCase):
     def policy(self, environment):

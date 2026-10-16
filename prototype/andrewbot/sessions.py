@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from .budget import budget_snapshot
-from .appserver import LettaTurnError
+from .appserver import LettaTurnError, LettaTurnCancelled
 from .diary import incident_summary
 
 
@@ -84,17 +84,11 @@ class SessionRunner:
         if snapshot["remaining_ordinary"] <= 0:
             self.store.add_activity("Autonomous session blocked by budget")
             return None
-        self.active_session_id = uuid.uuid4().hex
+        session_id = uuid.uuid4().hex
+        if not self.store.start_session_state(session_id, now.astimezone(timezone.utc).isoformat(timespec='seconds'), trigger):
+            return None
+        self.active_session_id = session_id
         self.started_at = now
-        self.store.transition_state(
-            {
-                "active_session_id": self.active_session_id,
-                "active_session_started_at": now.astimezone(timezone.utc).isoformat(timespec="seconds"),
-                "active_session_status": "running",
-                "session_start_requested": "",
-            },
-            f"Autonomous session started ({trigger})",
-        )
         return self.active_session_id
 
     def stop(self, reason, rest=False):
@@ -104,7 +98,7 @@ class SessionRunner:
         if rest:
             updates.update({"sleeping": "1", "sleep_until": ""})
         try:
-            self.store.transition_state(updates, f"Autonomous session stopped ({reason})")
+            self.store.stop_session_state(self.active_session_id, updates, f"Autonomous session stopped ({reason})")
         finally:
             # Prevent another provider call in this process even if state storage
             # has failed; startup recovery will reconcile the persisted session.
@@ -121,30 +115,34 @@ class SessionRunner:
             # Owner commands can cancel a session and then clear pause in one poll batch.
             self.active_session_id = ""
             self.started_at = None
-        if self.store.get_state("paused", "0") == "1":
-            self.stop("paused")
-            self.store.set_state("session_start_requested", "")
+        blocked = self.store.blocked_session_request()
+        if blocked:
+            self.stop(blocked)
             return False
-        if self.store.get_state("sleeping", "0") == "1":
-            self.stop("sleeping")
-            self.store.set_state("session_start_requested", "")
+        if (self.store.get_state('founding_letter_record_id', '')
+                and self.store.get_state('founding_letter_delivered', '0') != '1'):
             return False
         if self.active_session_id:
             if current.astimezone(timezone.utc) >= self.started_at.astimezone(timezone.utc) + timedelta(minutes=self.MAX_SESSION_MINUTES):
                 self.stop("time_limit", rest=True)
                 return False
         else:
+            revision = self.store.get_state('owner_control_revision', '0')
             trigger = self.store.get_state("session_start_requested", "")
             if not trigger:
                 return False
             if not self.start(trigger, current):
-                self.store.set_state("session_start_requested", "")
+                self.store.clear_session_request(trigger, revision)
                 return False
         return self.run_cycle(self.active_session_id, current)
 
     def run_cycle(self, session_id, now=None):
         current = datetime.now(timezone.utc) if now is None else now
         if not self.active_session_id or session_id != self.active_session_id:
+            return False
+        if self.store.get_state('active_session_id', '') != session_id:
+            self.active_session_id = ''
+            self.started_at = None
             return False
         if self.store.get_state("sleeping", "0") == "1" or self.store.get_state("paused", "0") == "1":
             self.stop("lifecycle_stop")
@@ -167,9 +165,26 @@ class SessionRunner:
             stage = "agent_turn"
             self.agent.autonomous_turn(self.SESSION_PROMPT + f" Today's diary is {diary_status}.",
                                        timeout=min(120, remaining_seconds))
+            if self.store.get_state('active_session_id', '') != session_id:
+                raise LettaTurnCancelled('Owner changed the active session')
             stage = "finish_cycle"
             self.store.finish_cycle(cycle_id, "complete")
+        except LettaTurnCancelled:
+            if cycle_started:
+                self.store.finish_cycle(cycle_id, 'stopped')
+            # Owner pause/wake already wrote the authoritative state. Do not
+            # replace it with provider_error, sleep, or another session's state.
+            if self.active_session_id == session_id:
+                self.active_session_id = ''
+                self.started_at = None
+            return False
         except Exception as error:
+            if self.store.get_state('active_session_id', '') != session_id:
+                if cycle_started:
+                    self.store.finish_cycle(cycle_id, 'stopped')
+                self.active_session_id = ''
+                self.started_at = None
+                return False
             # Use fixed categories: exception messages can contain credentials,
             # provider payloads, or private conversation content.
             category = "unexpected_error"

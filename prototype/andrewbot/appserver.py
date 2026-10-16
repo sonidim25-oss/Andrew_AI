@@ -6,6 +6,7 @@ import socket
 import struct
 import time
 import uuid
+import threading
 from urllib.parse import urlsplit
 from .configuration import MAX_LETTA_OUTPUT_TOKENS, ModelConfig, load_model_config
 from .gmail_tools import GMAIL_TOOLS, GMAIL_TOOL_NAMES
@@ -38,6 +39,10 @@ class LettaTurnError(RuntimeError):
         message = ("Letta completed the turn without an assistant text response"
                    if self.safe_category == "missing_assistant_text" else "Letta agent turn failed")
         super().__init__(f"{message} ({self.safe_category})")
+
+
+class LettaTurnCancelled(RuntimeError):
+    """An owner control cancelled this turn; it must not become a provider incident."""
 
 
 def _safe_error_category(response):
@@ -89,6 +94,7 @@ class AppServerConnection:
     """Small, dependency-free client for Letta's loopback App Server protocol."""
 
     def __init__(self, url, timeout=15):
+        self._send_lock = threading.RLock()
         parsed = urlsplit(url)
         if parsed.scheme != "ws" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
             raise ValueError("Letta App Server must use a loopback ws:// URL")
@@ -139,7 +145,8 @@ class AppServerConnection:
         else:
             header = bytes((0x81, 0x80 | 127)) + struct.pack("!Q", length)
         masked = bytes(value ^ mask[index % 4] for index, value in enumerate(payload))
-        self.socket.sendall(header + mask + masked)
+        with self._send_lock:
+            self.socket.sendall(header + mask + masked)
 
     def _read_exactly(self, count):
         result = bytearray()
@@ -202,7 +209,8 @@ class AppServerConnection:
     def _send_control(self, opcode, payload=b""):
         mask = os.urandom(4)
         body = bytes(value ^ mask[index % 4] for index, value in enumerate(payload))
-        self.socket.sendall(bytes((0x80 | opcode, 0x80 | len(payload))) + mask + body)
+        with self._send_lock:
+            self.socket.sendall(bytes((0x80 | opcode, 0x80 | len(payload))) + mask + body)
 
     def close(self):
         if getattr(self, "socket", None):
@@ -466,11 +474,16 @@ class LettaAgent:
 
 Удачи, Andrew."""
 
-    def __init__(self, store, gateway_token, url="ws://127.0.0.1:8283/ws", tool_handler=None, model_config=None):
+    def __init__(self, store, gateway_token, url="ws://127.0.0.1:8283/ws", tool_handler=None, model_config=None, owner_id=None):
         self.store = store
         self.gateway_token = gateway_token
         self.url = url
         self.tool_handler = tool_handler
+        self.owner_id = owner_id
+        self._turn_lock = threading.RLock()
+        self._turn_cancel = None
+        self._active_client = None
+        self._active_runtime = None
         if model_config is not None and not isinstance(model_config, ModelConfig):
             raise ValueError("model configuration is invalid")
         self.model_config = model_config or load_model_config({})
@@ -515,10 +528,8 @@ class LettaAgent:
                     "include_base_tools": False,
                     "include_multi_agent_tools": False,
                     "memory_blocks": [],
-                    "initial_message_sequence": [{"role": "user", "content": self.founding_letter}],
                     "tags": ["andrew", "phase1", "controller-managed"],
                 })
-                self.store.set_state("founding_letter_delivered", "1")
                 self._startup_check("Letta model configuration persistence", self.store.set_state, "letta_model_id", self.model_config.model_id)
                 self._startup_check("Letta provider handle persistence", self.store.set_state, "letta_model_handle", self.model_handle)
             elif (self.store.get_state("letta_model_id", "") != self.model_config.model_id
@@ -537,6 +548,10 @@ class LettaAgent:
             runtime = self._startup_check("Letta runtime startup", client.start_runtime, self.agent_id, self.conversation_id or None)
             self.conversation_id = runtime["conversation_id"]
             self._startup_check("Letta conversation ID persistence", self.store.set_state, "letta_conversation_id", self.conversation_id)
+            if self.owner_id is not None:
+                letter = self._startup_check('Founding letter archive', self.store.ensure_founding_letter, self.founding_letter)
+                if not self._startup_check('Founding letter receipt', self._verify_founding_letter, client, letter):
+                    self._startup_check('Founding letter queue', self.store.queue_founding_letter, self.owner_id, letter)
             return runtime
         finally:
             client.close()
@@ -548,25 +563,102 @@ class LettaAgent:
         except Exception as error:
             raise StartupValidationError(check, type(error).__name__, getattr(error, "safe_category", None)) from None
 
+    def _verify_founding_letter(self, client, letter=None):
+        if self.owner_id is None:
+            return False
+        letter = letter or self.store.ensure_founding_letter(self.founding_letter)
+        if self.store.get_state('founding_letter_delivered', '0') == '1':
+            return True
+        query = {'limit': 100, 'order': 'desc'}
+        seen = set()
+        while True:
+            response = client.request({'type': 'conversation_messages_list', 'conversation_id': self.conversation_id,
+                                       'query': query}, 'conversation_messages_list_response')
+            for message in response.get('messages', []):
+                if message.get('message_type') != 'user_message':
+                    continue
+                content = message.get('content')
+                if isinstance(content, list):
+                    content = ''.join(part.get('text', '') for part in content
+                                      if isinstance(part, dict) and part.get('type') == 'text')
+                if isinstance(content, str) and letter['content'] in content:
+                    self.store.confirm_founding_letter_delivery(letter)
+                    return True
+            before = response.get('next_before')
+            if not response.get('has_more') or not before or before in seen:
+                return False
+            seen.add(before)
+            query = {**query, 'before': before}
+
+    def cancel_active_turn(self):
+        with self._turn_lock:
+            if self._turn_cancel is None:
+                return
+            self._turn_cancel.set()
+            client, runtime = self._active_client, self._active_runtime
+            if client is not None:
+                try:
+                    if runtime is not None:
+                        client.connection.send_json({'type': 'abort_message', 'request_id': uuid.uuid4().hex,
+                                                     'runtime': runtime})
+                except OSError:
+                    pass
+                finally:
+                    try:
+                        client.connection.socket.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+
     def reply(self, messages, timeout=120):
         text = next((row["content"] for row in reversed(messages) if row["role"] == "user"), None)
         if not isinstance(text, str) or not text:
             raise ValueError("a user message is required")
-        client = AppServerClient(self.url)
-        client.external_tools_enabled = getattr(self, "external_tools_enabled", False)
+        with self._turn_lock:
+            if self._turn_cancel is not None:
+                raise RuntimeError('A Letta turn is already active')
+            cancelled = threading.Event()
+            self._turn_cancel = cancelled
+        client = None
         try:
+            if self.store.get_state('paused', '0') == '1':
+                raise LettaTurnCancelled('Owner paused this turn')
+            client = AppServerClient(self.url)
+            with self._turn_lock:
+                self._active_client = client
+            client.external_tools_enabled = getattr(self, "external_tools_enabled", False)
+            if cancelled.is_set():
+                raise LettaTurnCancelled('Owner cancelled this turn')
             client.gmail_tools_enabled = gmail_permissions()['enabled']
             if not self.agent_id:
                 self.agent_id = self.store.get_state("letta_agent_id", "")
             if not self.agent_id:
                 raise RuntimeError("Andrew's persistent Letta agent has not been initialized")
             runtime = client.start_runtime(self.agent_id, self.conversation_id or None)
+            with self._turn_lock:
+                self._active_runtime = runtime
+            if cancelled.is_set():
+                self.cancel_active_turn()
+                raise LettaTurnCancelled('Owner cancelled this turn')
             self.conversation_id = runtime["conversation_id"]
             self.store.set_state("letta_conversation_id", self.conversation_id)
-            reply = client.send_user_turn(runtime, text, tool_handler=self.tool_handler, timeout=timeout)
+            def tool_handler(name, arguments):
+                if cancelled.is_set():
+                    raise LettaTurnCancelled('Owner cancelled this turn')
+                return self.tool_handler(name, arguments)
+            reply = client.send_user_turn(runtime, text, tool_handler=tool_handler if self.tool_handler else None, timeout=timeout)
+            if cancelled.is_set():
+                raise LettaTurnCancelled('Owner cancelled this turn')
+            self._verify_founding_letter(client)
             return reply, {"accounted_by_gateway": True}
+        except Exception:
+            if cancelled.is_set():
+                raise LettaTurnCancelled('Owner cancelled this turn') from None
+            raise
         finally:
-            client.close()
+            with self._turn_lock:
+                self._active_client = self._active_runtime = self._turn_cancel = None
+            if client is not None:
+                client.close()
 
     def autonomous_turn(self, prompt, timeout=120):
         if not isinstance(prompt, str) or not prompt:

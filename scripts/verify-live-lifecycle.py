@@ -114,7 +114,7 @@ def run(stage):
                                memory_service=MemoryService(store), model_config=config, **policy.budget_arguments())
         gateway_thread = GatewayThread(make_server(gateway, port=8284))
         gateway_thread.start()
-        agent = LettaAgent(store, token, model_config=config)
+        agent = LettaAgent(store, token, model_config=config, owner_id=int(os.environ['ANDREW_OWNER_ID']))
         agent.initialize()
         controller = Controller(store, agent, int(os.environ["ANDREW_OWNER_ID"]), autonomous_enabled=True,
                                 fallback_enabled=True, memory_service=MemoryService(store),
@@ -154,6 +154,10 @@ def run(stage):
                 " This is the second and last commissioning session. Today's diary is already saved. "
                 "Call wake_at with time=09:00 now, so your next independent session is tomorrow morning in Toronto."
             )
+        if store.get_state('founding_letter_delivered', '0') != '1':
+            controller.flush_queued()
+            require(store.get_state('founding_letter_delivered', '0') == '1',
+                    'Owner founding letter delivery is not yet verified; autonomous commissioning refused')
         for attempt in range(3):
             logging.info("Live lifecycle stage %s: bounded autonomous turn %s/3", stage, attempt + 1)
             require(runner.tick(), "Autonomous cycle failed or was blocked")
