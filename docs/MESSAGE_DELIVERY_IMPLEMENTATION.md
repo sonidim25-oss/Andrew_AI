@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans for inline execution if this plan is approved. Steps use checkbox syntax for tracking.
 
-**Status:** Source implementation reviewed, following the owner’s instruction to continue `plan.md`. Production unchanged.
+**Status:** Installed on production at 23:31:49 UTC on 2026-10-16 after separate owner authorization. Source `6ebf056`, deployment preparation `25b1ffc`.
 
 **Goal:** Deliver local owner-control replies while ordinary Telegram delivery is blocked, without automatic replay of uncertain sends.
 
@@ -140,3 +140,24 @@ Independent review identified the rollback-ordering hazard. A regression asserte
 that disabling precedes each old-module restoration; it failed before the order
 fix and passed afterward. The author verified the corrected branch and full test
 results; the reviewer's session ended before a final follow-up verdict.
+
+
+## Deployment completed
+
+The authorized installer completed at 23:31:49 UTC. Backup, SQLite snapshot,
+acceptance results and `deployment-verification.json` are retained under
+`/var/backups/andrew-incident-r7xl8a4o`. All server acceptance checks passed,
+controller startup succeeded, module hashes match the renewed manifest, the
+runtime proof validates, and the new outbox/progress schema is present.
+Controller, Letta and runner services are active; controller boot startup remains
+enabled because rollback was not needed. Saved Letta output allowance is 6,000.
+
+Read-only exact-row comparisons against the pre-install snapshot confirmed
+unchanged Telegram uncertainty/input records, messages, usage and reservations,
+memory/personality data and references, diary entries, and research records.
+Agent/conversation IDs and lifecycle/error state are unchanged. Four inputs remain
+held; usage remains 80 rows totaling USD 0.111866056. No wake or replay was requested.
+No new live message was sent to exercise priority delivery; that behavior is proved
+by isolated tests, while live checks establish installation and data preservation.
+The earlier source-only limits above were superseded by the separate deployment
+request; later worker/deadline/health/Gmail work remains pending.
