@@ -5,6 +5,7 @@ from .budget import budget_snapshot
 from .configuration import MAX_LETTA_OUTPUT_TOKENS, ModelConfig, load_model_config
 from .diary import format_diary_entry, parse_diary_command, validate_diary_content
 from .telegram_menu import BUTTON_COMMANDS, HELP_TEXT
+from .appserver import LettaTurnError, LettaTurnCancelled
 
 
 class Controller:
@@ -12,7 +13,7 @@ class Controller:
                  monthly_reserve_usd=1.0, daily_target_usd=0.30,
                  timezone_name="America/Toronto", fallback_wake_time="09:00",
                  autonomous_enabled=False, fallback_enabled=False, memory_service=None, model_config=None,
-                 tool_runtime=None, visit_history=None, gmail_tools=None):
+                 tool_runtime=None, visit_history=None, gmail_tools=None, conversation_idle_seconds=300):
         self.store = store
         self.model = model
         self.owner_id = int(owner_id)
@@ -27,6 +28,7 @@ class Controller:
         self.tool_runtime = tool_runtime
         self.visit_history = visit_history
         self.gmail_tools = gmail_tools
+        self.conversation_idle_seconds = max(0, int(conversation_idle_seconds))
         if model_config is not None and not isinstance(model_config, ModelConfig):
             raise ValueError("model configuration is invalid")
         self.model_config = model_config or load_model_config({})
@@ -121,6 +123,8 @@ class Controller:
             self.store.add_activity("Message queued while Andrew is sleeping or paused")
             return "I’m asleep or paused. Your message is saved for when I wake."
         message_id = self.store.add_message(self.owner_id, "user", text, queued=True)
+        owner_revision = self.store.get_state('owner_control_revision', '0')
+        self.note_conversation(owner_revision)
         messages = self._bounded_messages([
             {"role": row["role"], "content": row["content"]}
             for row in self.store.recent_messages(self.owner_id, limit=11)
@@ -134,21 +138,39 @@ class Controller:
             return "Your message is saved for delivery."
         try:
             reply, usage = self.model.reply(messages)
-        except Exception:
+            month, day = self._periods()
+            actual = self._actual_cost(usage)
+            if not usage.get("accounted_by_gateway"):
+                self.store.record_usage(month, day, max(actual, max_cost if not usage else 0.0),
+                                        int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0)))
+            self.store.add_message(self.owner_id, "assistant", reply)
+            self.store.add_activity("Andrew replied to the owner")
+            self.store.release_queued(self.owner_id, [message_id])
+            self.note_conversation(owner_revision, completed=True)
+            return reply
+        except Exception as error:
             self.store.hold_uncertain_queued_claim([message_id])
             self.store.add_activity("Owner message outcome uncertain; held to avoid duplicate delivery")
-            return ("Your message is saved, but its delivery outcome is uncertain. "
-                    "It will not be repeated automatically. Use /replay to retry; "
-                    "any actions already completed could be repeated.")
-        month, day = self._periods()
-        actual = self._actual_cost(usage)
-        if not usage.get("accounted_by_gateway"):
-            self.store.record_usage(month, day, max(actual, max_cost if not usage else 0.0),
-                                    int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0)))
-        self.store.release_queued(self.owner_id, [message_id])
-        self.store.add_message(self.owner_id, "assistant", reply)
-        self.store.add_activity("Andrew replied to the owner")
-        return reply
+            return self.failed_turn(error, owner_revision)
+
+    def note_conversation(self, owner_revision, completed=False, now=None):
+        current = datetime.now(timezone.utc) if now is None else now
+        return self.store.note_conversation(
+            (current + timedelta(seconds=self.conversation_idle_seconds)).isoformat(),
+            self.autonomous_enabled, owner_revision, completed,
+        )
+
+    def failed_turn(self, error, owner_revision):
+        interrupted = ('The turn was interrupted by an owner command. Your message is saved with uncertain '
+                       'delivery and will not be repeated automatically. Use /replay to retry.')
+        if (isinstance(error, LettaTurnCancelled)
+                or self.store.get_state('owner_control_revision', '0') != owner_revision):
+            return interrupted
+        category = (error.safe_category if isinstance(error, LettaTurnError) else
+                    'timeout' if isinstance(error, TimeoutError) else 'turn_failed')
+        if not self.store.record_session_failure(category, self.owner_id, owner_revision=owner_revision, notify=False):
+            return interrupted
+        return self.store.failure_notice(category)
 
     def _estimate_cost(self, messages):
         # Conservative byte-based bound and bounded output keep each request reservable.
@@ -182,6 +204,8 @@ class Controller:
                 + int(usage.get("completion_tokens", 0)) * self.model_config.output_usd_per_million) / 1_000_000
 
     def check_scheduled_wake(self, now=None):
+        if self.store.get_state('autonomy_error', ''):
+            return False
         if self.store.get_state("paused", "0") == "1":
             return False
         if self.store.get_state("sleeping", "0") != "1":
@@ -194,17 +218,7 @@ class Controller:
             current = datetime.now(timezone.utc)
         if current.tzinfo is None:
             raise ValueError("wake comparison time must be timezone-aware")
-        due = datetime.fromisoformat(wake_at)
-        if due.tzinfo is None:
-            raise ValueError("stored wake time must be timezone-aware")
-        if current.astimezone(timezone.utc) < due.astimezone(timezone.utc):
-            return False
-        released = self.store.pending_message_count(self.owner_id)
-        self.store.transition_state(
-            {"sleeping": "0", "sleep_until": "", "session_start_requested": "scheduled_wake"},
-            f"Scheduled wake completed; {released} queued message(s) pending",
-        )
-        return True
+        return self.store.scheduled_wake_state(current, self.owner_id)
 
     def check_fallback_wake(self, now=None):
         if self.store.get_state("paused", "0") == "1":
@@ -229,7 +243,8 @@ class Controller:
         return self.store.process_fallback_wake(local_day, self.owner_id)
 
     def flush_queued(self):
-        if self.store.get_state("sleeping", "0") == "1" or self.store.get_state("paused", "0") == "1":
+        if (self.store.get_state("sleeping", "0") == "1" or self.store.get_state("paused", "0") == "1"
+                or self.store.get_state('autonomy_error', '')):
             return None
         queued = self.store.claim_queued_messages(self.owner_id)
         if not queued:
@@ -242,21 +257,24 @@ class Controller:
             self.store.restore_queued_claim([row["id"] for row in queued])
             self.store.add_activity(f"Queued messages held by {reason} budget gate")
             return None
+        owner_revision = self.store.get_state('owner_control_revision', '0')
+        self.note_conversation(owner_revision)
         try:
             reply, usage = self.model.reply(bounded)
-        except Exception:
+            month, day = self._periods()
+            if not usage.get("accounted_by_gateway"):
+                actual = self._actual_cost(usage)
+                self.store.record_usage(month, day, max(actual, estimate if not usage else 0.0),
+                                        int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0)))
+            self.store.add_message(self.owner_id, "assistant", reply)
+            self.store.add_activity(f"Andrew replayed {len(queued)} queued message(s)")
+            self.store.release_queued(self.owner_id, [row["id"] for row in queued])
+            self.note_conversation(owner_revision, completed=True)
+            return reply
+        except Exception as error:
             self.store.hold_uncertain_queued_claim([row["id"] for row in queued])
             self.store.add_activity("Queued message replay outcome uncertain; messages held to avoid duplicate delivery")
-            return None
-        month, day = self._periods()
-        if not usage.get("accounted_by_gateway"):
-            actual = self._actual_cost(usage)
-            self.store.record_usage(month, day, max(actual, estimate if not usage else 0.0),
-                                    int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0)))
-        self.store.release_queued(self.owner_id, [row["id"] for row in queued])
-        self.store.add_message(self.owner_id, "assistant", reply)
-        self.store.add_activity(f"Andrew replayed {len(queued)} queued message(s)")
-        return reply
+            return self.failed_turn(error, owner_revision)
 
     def execute_tool(self, name, arguments):
         if not isinstance(arguments, dict):
@@ -306,9 +324,10 @@ class Controller:
             if isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= 1440:
                 raise ValueError("sleep duration must be an integer from 1 to 1440 minutes")
             wake_at = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat(timespec="seconds")
-            self.store.transition_state(
+            notice = f"I’m choosing to sleep. I expect to wake at {wake_at} (in {minutes} minutes)."
+            self.store.choose_sleep(
                 {"sleeping": "1", "sleep_until": wake_at, "session_start_requested": ""},
-                "Andrew requested timed sleep",
+                "Andrew requested timed sleep", self.owner_id, notice, datetime.now(timezone.utc),
             )
             return f"Andrew is sleeping and will wake in {minutes} minutes."
         if name == "wake_at":
@@ -324,19 +343,19 @@ class Controller:
                 raise ValueError("wake time or configured timezone is invalid") from None
             local_now = datetime.now(zone)
             target = self._next_local_wake(local_now, hour, minute, zone)
-            self.store.transition_state(
+            notice = f"I’m choosing to sleep. I expect to wake at {target.strftime('%Y-%m-%d %H:%M %Z')}."
+            self.store.choose_sleep(
                 {"sleeping": "1", "sleep_until": target.astimezone(timezone.utc).isoformat(timespec="seconds"),
                  "session_start_requested": ""},
-                "Andrew scheduled a local wake time",
+                "Andrew scheduled a local wake time", self.owner_id, notice, datetime.now(timezone.utc),
             )
             return f"Andrew is sleeping until {target.strftime('%H:%M')} {self.timezone_name}."
         if name == "continue_activity":
+            if self.store.get_state('autonomy_error', ''):
+                raise ValueError('A failed session requires owner recovery before autonomous activity')
             queued = self.store.pending_message_count(self.owner_id)
-            self.store.transition_state(
-                {"sleeping": "0", "sleep_until": "",
-                 "session_start_requested": "agent_continue"}, "Andrew continued activity"
-            )
-            return f"Andrew is awake. {queued} queued message(s) were released."
+            self.store.continue_activity_state()
+            return f"Andrew is awake. {queued} owner message(s) remain saved."
         if name == "check_budget":
             if arguments:
                 raise ValueError("check_budget takes no arguments")
@@ -467,10 +486,12 @@ class Controller:
                 if not 1 <= minutes <= 1440:
                     return "Sleep duration must be between 1 and 1440 minutes."
                 wake_at = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat(timespec="seconds")
-            self.store.transition_state(
-                {"sleeping": "1", "sleep_until": wake_at, "session_start_requested": ""},
+            self.store.transition_owner_control(
+                {"sleeping": "1", "sleep_until": wake_at, "session_start_requested": "", "autonomy_error": "",
+                 "active_session_id": "", "active_session_started_at": "", "active_session_status": "owner_sleep"},
                 "Owner requested sleep",
             )
+            self._cancel_active_turn()
             if wake_at:
                 return f"I’m going to sleep and will wake in {minutes} minutes. I won’t make model requests while asleep."
             if self.fallback_enabled:
@@ -495,20 +516,22 @@ class Controller:
                 return "Use a valid local 24-hour time, such as /wake_at 09:00."
             now_local = datetime.now(zone)
             target = self._next_local_wake(now_local, hour, minute, zone)
-            self.store.transition_state(
+            self.store.transition_owner_control(
                 {"sleeping": "1", "sleep_until": target.astimezone(timezone.utc).isoformat(timespec="seconds"),
-                 "session_start_requested": ""},
+                 "session_start_requested": "", "active_session_id": "", "active_session_started_at": "",
+                 "active_session_status": "owner_sleep", "autonomy_error": ""},
                 "Andrew scheduled a local wake time",
             )
+            self._cancel_active_turn()
             return f"I’m going to sleep and will wake at {target.strftime('%H:%M')} {self.timezone_name}."
         if command == "/wake":
-            self._cancel_active_turn()
             self.store.transition_owner_control(
-                {"sleeping": "0", "paused": "0", "sleep_until": "",
+                {"sleeping": "0", "paused": "0", "sleep_until": "", "autonomy_error": "", "conversation_until": "",
                  "session_start_requested": "owner_wake" if self.autonomous_enabled else "",
                  "active_session_id": "", "active_session_started_at": "",
                  "active_session_status": "owner_wake"}, "Owner woke Andrew"
             )
+            self._cancel_active_turn()
             queued = self.store.pending_message_count(self.owner_id)
             return f"I’m awake. I saved {queued} message(s) while sleeping."
         if command == "/pause":
@@ -523,10 +546,18 @@ class Controller:
             if not count:
                 return "There are no messages held with an uncertain prior delivery."
             self.store.add_activity(f"Owner requested retry of {count} uncertain queued message(s)")
+            self.store.transition_owner_control(
+                {'autonomy_error': '', 'active_session_status': 'owner_replay'},
+                'Owner explicitly authorized uncertain message retry',
+            )
             return (f"Requeued {count} message(s). Their previous delivery may have reached Andrew, "
                     "so a retry could produce a duplicate answer.")
         if command == "/status":
-            state = "sleeping" if self.store.get_state("sleeping", "0") == "1" else "paused" if self.store.get_state("paused", "0") == "1" else "awake"
+            state = ("paused" if self.store.get_state("paused", "0") == "1" else
+                     "sleeping" if self.store.get_state("sleeping", "0") == "1" else
+                     "awake; automatic activity stopped after an error" if self.store.get_state('autonomy_error', '') else
+                     "awake, waiting for your follow-up" if self.store.conversation_waiting(datetime.now(timezone.utc)) else
+                     "awake, working independently" if self.store.get_state('active_session_id', '') else "awake")
             _, day = self._periods()
             cycles = self.store.cycle_count(day)
             wake_at = self.store.get_state("sleep_until", "")
@@ -538,6 +569,8 @@ class Controller:
             else:
                 wake_display = "not set"
             session = self.store.get_state("active_session_status", "idle")
+            if self.store.get_state('autonomy_error', ''):
+                session = 'error (' + self.store.get_state('autonomy_error') + ')'
             uncertain = self.store.uncertain_message_count(self.owner_id)
             latest_diary = self.store.diary_entry()
             diary_state = (f"{latest_diary['local_date']} ({latest_diary['delivery_state']})"

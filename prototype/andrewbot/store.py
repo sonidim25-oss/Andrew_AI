@@ -310,7 +310,7 @@ class Store:
         self.connection.commit()
 
     @database_locked
-    def transition_state(self, updates, event):
+    def transition_state(self, updates, event, chat_id=None, notice=None):
         if not isinstance(updates, dict) or not isinstance(event, str) or not event:
             raise ValueError("state transition requires updates and an event")
         with self.connection:
@@ -322,10 +322,105 @@ class Store:
             self.connection.execute(
                 "INSERT INTO activity(event,created_at) VALUES(?,?)", (event, self.now())
             )
+            if notice and chat_id is not None:
+                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text) VALUES(?,?)", (chat_id, notice))
+
+    @database_locked
+    def conversation_waiting(self, now):
+        until = self.get_state('conversation_until', '')
+        return bool(until and datetime.fromisoformat(until) > now.astimezone(timezone.utc))
+
+    @database_locked
+    def note_conversation(self, until, enabled, owner_revision, completed=False):
+        # A late reply must never undo an owner command issued during the turn.
+        if self.get_state('owner_control_revision', '0') != owner_revision:
+            return False
+        if self.get_state('paused', '0') == '1' or self.get_state('sleeping', '0') == '1':
+            return False
+        updates = {'conversation_until': until}
+        if completed:
+            updates['autonomy_error'] = ''
+            if not self.get_state('active_session_id', ''):
+                updates['active_session_status'] = 'waiting'
+        if enabled and (completed or not self.get_state('autonomy_error', '')):
+            updates['session_start_requested'] = 'conversation_quiet'
+        self.transition_state(updates, 'Owner conversation waiting for a follow-up')
+        return True
+
+    @database_locked
+    def pending_owner_input(self, owner_id):
+        # Search the entire durable inbox, including messages beyond its first page.
+        return self.connection.execute(
+            "SELECT 1 FROM telegram_inbox WHERE json_extract(payload,'$.message.from.id')=? "
+            "AND json_extract(payload,'$.message.chat.id')=? "
+            "AND json_extract(payload,'$.message.chat.type')='private' "
+            "AND json_type(payload,'$.message.text')='text' "
+            "AND trim(json_extract(payload,'$.message.text'))<>'' "
+            "AND json_type(payload,'$.message.forward_origin') IS NULL "
+            "AND json_type(payload,'$.message.forward_from') IS NULL "
+            "AND json_type(payload,'$.message.forward_from_chat') IS NULL "
+            "AND json_type(payload,'$.message.forward_sender_name') IS NULL "
+            "AND update_id NOT IN (SELECT update_id FROM telegram_claims) LIMIT 1",
+            (owner_id, owner_id),
+        ).fetchone() is not None or self.connection.execute(
+            "SELECT 1 FROM messages WHERE owner_id=? AND role='user' AND queued IN (1,2) LIMIT 1",
+            (owner_id,),
+        ).fetchone() is not None
+
+    @database_locked
+    def record_session_failure(self, category, owner_id, owner_revision=None, session_id=None, notify=True):
+        if owner_revision is not None and self.get_state('owner_control_revision', '0') != owner_revision:
+            return False
+        if session_id is not None and self.get_state('active_session_id', '') != session_id:
+            return False
+        self.transition_state(
+            {'active_session_id': '', 'active_session_started_at': '', 'active_session_status': 'error',
+             'autonomy_error': category, 'session_start_requested': ''},
+            f'Session failed (category={category}); automatic model calls stopped',
+            owner_id, self.failure_notice(category) if notify else None,
+        )
+        return True
+
+    @staticmethod
+    def failure_notice(category):
+        return (f'My session failed (error: {category}); your messages are saved. '
+                'I have stopped automatic model calls. Use /wake to resume; uncertain messages '
+                'will stay held unless you explicitly use /replay. Retrying could repeat completed actions.')
+
+    @database_locked
+    def choose_sleep(self, updates, event, owner_id, notice, now):
+        if (self.get_state('paused', '0') == '1' or self.get_state('sleeping', '0') == '1'
+                or self.get_state('autonomy_error', '') or self.conversation_waiting(now)
+                or self.pending_owner_input(owner_id)):
+            raise ValueError('Stay available for owner messages; sleep is unavailable during conversation or an error')
+        self.transition_state(updates, event, owner_id, notice)
+
+    @database_locked
+    def continue_activity_state(self):
+        if (self.get_state('paused', '0') == '1' or self.get_state('sleeping', '0') == '1'
+                or self.get_state('autonomy_error', '')):
+            raise ValueError('Owner controls and failed sessions cannot be overridden by an agent')
+        self.transition_state({'session_start_requested': 'agent_continue'}, 'Andrew continued activity')
+
+    @database_locked
+    def scheduled_wake_state(self, current, owner_id):
+        if (self.get_state('paused', '0') == '1' or self.get_state('autonomy_error', '')
+                or self.get_state('sleeping', '0') != '1' or not self.get_state('sleep_until', '')):
+            return False
+        due = datetime.fromisoformat(self.get_state('sleep_until'))
+        if due.tzinfo is None:
+            raise ValueError('stored wake time must be timezone-aware')
+        if current.astimezone(timezone.utc) < due.astimezone(timezone.utc):
+            return False
+        pending = self.pending_message_count(owner_id)
+        self.transition_state({'sleeping': '0', 'sleep_until': '', 'session_start_requested': 'scheduled_wake'},
+                              f'Scheduled wake completed; {pending} queued message(s) pending')
+        return True
 
     @database_locked
     def start_session_state(self, session_id, started_at, trigger):
-        if self.get_state('paused', '0') == '1' or self.get_state('sleeping', '0') == '1':
+        if (self.get_state('paused', '0') == '1' or self.get_state('sleeping', '0') == '1'
+                or self.get_state('autonomy_error', '')):
             return False
         self.transition_state({'active_session_id': session_id, 'active_session_started_at': started_at,
                                'active_session_status': 'running', 'session_start_requested': ''},
@@ -364,13 +459,13 @@ class Store:
         with self.connection:
             state = dict(self.connection.execute(
                 "SELECT key,value FROM state WHERE key IN ('sleeping','sleep_until','fallback_wake_day',"
-                "'paused','active_session_id','session_start_requested')"
+                "'paused','active_session_id','session_start_requested','autonomy_error')"
             ).fetchall())
             if state.get("paused", "0") == "1":
                 return False
             if state.get("fallback_wake_day", "") >= local_day:
                 return False
-            eligible = (not state.get("active_session_id", "") and not state.get("session_start_requested", "")
+            eligible = (not state.get('autonomy_error', '') and not state.get("active_session_id", "") and not state.get("session_start_requested", "")
                         and not (state.get("sleeping", "0") == "1" and state.get("sleep_until", "")))
             updates = {"fallback_wake_day": local_day}
             if eligible:

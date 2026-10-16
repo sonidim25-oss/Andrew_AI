@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,6 +13,21 @@ class BrowserHistoryTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / "history"
         self.key = b"h" * 32
+
+    def test_history_supports_control_thread_reads_and_deletes_during_recording(self):
+        history = VisitHistory(self.directory, self.key, max_bytes=1_000_000)
+        self.addCleanup(history.close)
+        with ThreadPoolExecutor(max_workers=3) as workers:
+            records = [workers.submit(history.record, f'https://example.com/{index}', f'Visit {index}')
+                       for index in range(12)]
+            reads = [workers.submit(history.search, 'example') for _ in range(4)]
+            ids = [result.result() for result in records]
+            for result in reads:
+                result.result()
+            self.assertEqual(len(history.search('example')), 12)
+            self.assertTrue(workers.submit(history.delete, ids[0]).result())
+            self.assertEqual(workers.submit(history.delete_all).result(), 11)
+        self.assertEqual(history.search(''), [])
 
     def test_encrypted_persistent_sanitized_search_and_delete(self):
         history = VisitHistory(self.directory, self.key, max_bytes=1_000_000)

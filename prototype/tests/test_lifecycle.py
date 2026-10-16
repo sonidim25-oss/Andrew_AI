@@ -142,15 +142,16 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(deliver_pending_diary(Telegram(), self.store, 17), 0)
         self.assertEqual(len(sends), 1)
 
-    def test_restart_interrupts_cycle_preserves_reservation_and_rests(self):
+    def test_restart_interrupts_cycle_preserves_reservation_and_reports_error(self):
         session = self.runner.start("scheduled_wake", self.now)
         self.store.begin_cycle(session, "unfinished", "2026-10-14")
         self.store.reserve_usage("uncertain", "2026-10", "2026-10-14", 0.01)
         self.reopen()
         self.runner.recover()
         self.runner.recover()
-        self.assertEqual(self.store.get_state("active_session_status"), "interrupted")
-        self.assertEqual(self.store.get_state("sleeping"), "1")
+        self.assertEqual(self.store.get_state("active_session_status"), "error")
+        self.assertEqual(self.store.get_state("autonomy_error"), "interrupted")
+        self.assertNotEqual(self.store.get_state("sleeping"), "1")
         self.assertFalse(self.runner.tick(self.now))
         self.assertEqual(self.calls, [])
         row = self.store.connection.execute("SELECT status FROM cycles WHERE cycle_id='unfinished'").fetchone()
@@ -172,7 +173,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(self.store.get_state("active_session_status"), "time_limit")
         self.assertEqual(self.calls, [])
 
-    def test_provider_failure_rests_and_records_incident_without_retry(self):
+    def test_provider_failure_reports_error_and_records_incident_without_retry(self):
         def fail():
             raise RuntimeError("provider unavailable")
         self.action = fail
@@ -180,7 +181,8 @@ class LifecycleTests(unittest.TestCase):
         self.assertFalse(self.runner.tick(self.now))
         self.assertFalse(self.runner.tick(self.now))
         self.assertEqual(len(self.calls), 1)
-        self.assertEqual(self.store.get_state("sleeping"), "1")
+        self.assertNotEqual(self.store.get_state("sleeping"), "1")
+        self.assertEqual(self.store.get_state("active_session_status"), "error")
         self.assertEqual(self.store.pending_diary_deliveries()[0]["record_type"], "incident_summary")
 
     def test_sleep_and_pause_block_gateway_before_provider_and_reservation(self):
@@ -220,7 +222,8 @@ class LifecycleTests(unittest.TestCase):
         self.assertIn("stage=begin_cycle, category=database_error", " ".join(logs.output))
         self.assertNotIn("secret-token", " ".join(logs.output))
         self.assertEqual(self.calls, [])
-        self.assertEqual(self.store.get_state("sleeping"), "1")
+        self.assertNotEqual(self.store.get_state("sleeping"), "1")
+        self.assertEqual(self.store.get_state("active_session_status"), "error")
 
     def test_finish_cycle_failure_is_distinguished_from_agent_failure(self):
         import sqlite3
@@ -234,7 +237,8 @@ class LifecycleTests(unittest.TestCase):
             self.assertFalse(self.runner.tick(self.now))
         self.assertIn("stage=finish_cycle, category=database_error", " ".join(logs.output))
         self.assertEqual(len(self.calls), 1)
-        self.assertEqual(self.store.get_state("sleeping"), "1")
+        self.assertNotEqual(self.store.get_state("sleeping"), "1")
+        self.assertEqual(self.store.get_state("active_session_status"), "error")
 
     def test_budget_exhaustion_blocks_session(self):
         self.store.record_usage("2026-10", "2026-10-14", 9, 1, 1)
@@ -245,7 +249,7 @@ class LifecycleTests(unittest.TestCase):
         self.runner.start('scheduled_wake', self.now)
         self.controller._command('/pause')
         self.controller._command('/wake')
-        self.runner.stop('provider_error', rest=True)
+        self.runner.stop('provider_error')
         self.assertEqual(self.store.get_state('active_session_status'), 'owner_wake')
         self.assertEqual(self.store.get_state('session_start_requested'), 'owner_wake')
         self.assertEqual(self.store.get_state('sleeping'), '0')

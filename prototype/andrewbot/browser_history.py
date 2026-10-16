@@ -2,7 +2,9 @@
 
 import os
 import sqlite3
+import threading
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 from secrets import token_bytes
 from urllib.parse import urlsplit, urlunsplit
@@ -12,6 +14,14 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 class HistoryCapacityError(RuntimeError):
     pass
+
+
+def history_locked(method):
+    @wraps(method)
+    def invoke(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return invoke
 
 
 def sanitize_visit(url, title):
@@ -45,7 +55,8 @@ class VisitHistory:
         self.path = self.directory / "history.sqlite3"
         self.key = key
         self.max_bytes = max_bytes
-        self.db = sqlite3.connect(self.path)
+        self._lock = threading.RLock()
+        self.db = sqlite3.connect(self.path, check_same_thread=False)
         self.db.execute("PRAGMA journal_mode=DELETE")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.execute("PRAGMA secure_delete=ON")
@@ -56,6 +67,7 @@ class VisitHistory:
             self.db.close()
             raise HistoryCapacityError("history capacity reached")
 
+    @history_locked
     def _allocated_bytes(self):
         page_size = self.db.execute("PRAGMA page_size").fetchone()[0]
         page_count = self.db.execute("PRAGMA page_count").fetchone()[0]
@@ -68,6 +80,7 @@ class VisitHistory:
             raise ValueError("visit time must be timezone-aware")
         return value.astimezone(timezone.utc).isoformat(timespec="seconds")
 
+    @history_locked
     def record(self, url, title, visited_at=None):
         clean_url, clean_title = sanitize_visit(url, title)
         stamp = self._timestamp(visited_at)
@@ -88,6 +101,7 @@ class VisitHistory:
             self.db.rollback()
             raise
 
+    @history_locked
     def search(self, query, limit=20):
         if not isinstance(query, str) or len(query) > 256:
             raise ValueError("history query is invalid")
@@ -108,6 +122,7 @@ class VisitHistory:
                     break
         return results
 
+    @history_locked
     def delete(self, visit_id):
         if isinstance(visit_id, bool) or not isinstance(visit_id, int) or visit_id <= 0:
             raise ValueError("visit id is invalid")
@@ -116,6 +131,7 @@ class VisitHistory:
         self.db.execute("VACUUM")
         return cursor.rowcount > 0
 
+    @history_locked
     def delete_all(self):
         count = self.db.execute("SELECT COUNT(*) FROM visits").fetchone()[0]
         self.db.execute("DELETE FROM visits")
@@ -128,5 +144,6 @@ class VisitHistory:
                 pass
         return count
 
+    @history_locked
     def close(self):
         self.db.close()

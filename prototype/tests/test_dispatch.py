@@ -133,6 +133,36 @@ class DispatchTests(unittest.TestCase):
 
 
 class ConcurrentOwnerControlsTests(unittest.TestCase):
+    def test_history_command_uses_real_history_from_the_control_thread(self):
+        from andrewbot.browser_history import VisitHistory
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / 'state.db')
+            history = VisitHistory(Path(directory) / 'history', b'h' * 32)
+            history.record('https://example.com/recorded', 'Recorded visit')
+            inbox, replied = queue.Queue(), threading.Event()
+            replies = []
+            class Telegram:
+                def get_updates(self, **kwargs):
+                    try:
+                        return inbox.get(timeout=0.05)
+                    except queue.Empty:
+                        return []
+                def send_message(self, owner, text):
+                    replies.append(text)
+                    replied.set()
+            controller = Controller(store, Mock(), 17, visit_history=history)
+            dispatch = ControllerDispatch(store, controller, Telegram(), Mock(), OwnerRateLimit(), 17, False, False)
+            dispatch.start()
+            try:
+                inbox.put([update(1, '/history')])
+                self.assertTrue(replied.wait(2))
+                self.assertIn('https://example.com/recorded', replies[0])
+                self.assertEqual(store.connection.execute('SELECT count(*) FROM telegram_uncertain').fetchone()[0], 0)
+            finally:
+                dispatch.stop()
+                history.close()
+                store.close()
+
     def test_lifecycle_batch_and_wake_time_replies_keep_their_order(self):
         cases = [
             (['/sleep', '/wake'], '0', '0'),

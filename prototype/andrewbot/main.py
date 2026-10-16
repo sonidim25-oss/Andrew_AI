@@ -181,6 +181,7 @@ def run(validate_only=False):
     try:
         agent.initialize()
         check = "Telegram bot authentication (getMe)"
+        logging.info('Startup check: %s', check)
         telegram.get_me()
         logging.info("Startup checks passed: Letta agent, model gateway, Telegram authentication, and persistent database")
     except StartupValidationError as error:
@@ -209,7 +210,9 @@ def run(validate_only=False):
     )
     sessions = SessionRunner(store, controller, agent, enabled=autonomous_enabled)
     sessions.recover()
-    store.recover_queued_claims()
+    interrupted_messages = store.recover_queued_claims()
+    if interrupted_messages and not store.get_state('autonomy_error', ''):
+        store.record_session_failure('interrupted', owner_id)
     store.recover_update_claims(owner_id)
     if not autonomous_enabled:
         store.set_state("session_start_requested", "")

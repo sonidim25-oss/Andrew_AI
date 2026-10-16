@@ -17,6 +17,47 @@ from andrewbot.store import Store
 
 
 class AppServerWebSocketTests(unittest.TestCase):
+    def test_active_backend_run_has_a_safe_explicit_category(self):
+        from unittest.mock import Mock
+        client = AppServerClient.__new__(AppServerClient)
+        client.connection = Mock()
+        client.connection.recv_json.side_effect = [
+            {'type': 'stream_delta', 'delta': {'message_type': 'loop_error',
+                                             'message': 'Conversation private-id already has an active run (private-run)'}},
+            {'type': 'turn_finished', 'stop_reason': 'error'},
+        ]
+        with self.assertRaises(LettaTurnError) as caught:
+            client.send_user_turn({'agent_id': 'a', 'conversation_id': 'c'}, 'fixture')
+        self.assertEqual(caught.exception.safe_category, 'active_run_conflict')
+        self.assertNotIn('private', str(caught.exception))
+
+    def test_failed_turn_is_cancelled_before_disconnect_without_masking_timeout(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / 'state.db')
+            self.addCleanup(store.close)
+            for abort_fails in (False, True):
+                with self.subTest(abort_fails=abort_fails):
+                    client = Mock()
+                    runtime = {'agent_id': 'a', 'conversation_id': 'c'}
+                    client.start_runtime.return_value = runtime
+                    original = TimeoutError('fixture deadline')
+                    client.send_user_turn.side_effect = original
+                    if abort_fails:
+                        client.request.side_effect = ConnectionError('fixture cancellation disconnected')
+                    agent = LettaAgent(store, 'fixture-token')
+                    agent.agent_id = 'a'
+                    with patch('andrewbot.appserver.AppServerClient', return_value=client), \
+                         patch('andrewbot.appserver.gmail_permissions', return_value={'enabled': False}):
+                        with self.assertRaises(TimeoutError) as caught:
+                            agent.reply([{'role': 'user', 'content': 'fixture input'}])
+                    self.assertIs(caught.exception, original)
+                    client.request.assert_called_once_with({'type': 'abort_message', 'runtime': runtime},
+                                                           'abort_message_response', timeout=5)
+                    calls = [call[0] for call in client.mock_calls]
+                    self.assertLess(calls.index('request'), calls.index('close'))
+                    self.assertIsNone(agent._turn_cancel)
+
     def test_token_limit_stop_has_explicit_safe_category(self):
         class Connection:
             def __init__(self):

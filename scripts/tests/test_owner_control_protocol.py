@@ -100,7 +100,9 @@ class OwnerControlProtocolTests(unittest.TestCase):
                                 if 'Paused' in text:
                                     notification.set()
                         runner = SessionRunner(store, controller, agent, enabled=True)
-                        store.set_state('session_start_requested', 'owner_wake')
+                        # Explicit owner wake starts a fresh session immediately,
+                        # including after the letter reply's quiet window.
+                        controller._command('/wake')
                         dispatch = ControllerDispatch(store, controller, Telegram(), runner, OwnerRateLimit(), 17, True, False)
                         dispatch.start()
                         dispatch._updates_ready.set()

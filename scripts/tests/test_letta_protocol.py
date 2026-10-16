@@ -100,11 +100,19 @@ class LettaProtocolTests(unittest.TestCase):
                     store.set_state("letta_agent_id", agent_id)
                     controller = Controller(store, agent, 17, autonomous_enabled=True)
                     agent.tool_handler = controller.execute_tool
-                    reply, _ = agent.reply([{"role": "user", "content": "Reply with the fresh protocol greeting."}])
+                    reply = controller.handle_update({'message': {'from': {'id': 17},
+                        'chat': {'id': 17, 'type': 'private'}, 'text': 'Reply with the fresh protocol greeting.'}})
                     self.assertEqual(reply, "A fresh protocol reply.")
                     runner = SessionRunner(store, controller, agent, enabled=True)
-                    store.set_state("session_start_requested", "scheduled_wake")
-                    completed = runner.tick()
+                    self.assertFalse(runner.tick(), 'the conversation must remain available without another model call')
+                    self.assertEqual(len(calls), 1)
+                    clock_now = datetime.fromisoformat(store.get_state('conversation_until'))
+                    class Clock(datetime):
+                        @classmethod
+                        def now(cls, tz=None):
+                            return clock_now.astimezone(tz) if tz else clock_now.replace(tzinfo=None)
+                    with patch('andrewbot.controller.datetime', Clock):
+                        completed = runner.tick(clock_now)
                     self.assertTrue(calls, "the isolated provider must receive the real Letta request")
                     self.assertEqual(store.connection.execute("SELECT count(*) FROM usage").fetchone()[0], len(calls),
                                      "the deterministic provider must settle before checking callback behavior")
@@ -113,6 +121,7 @@ class LettaProtocolTests(unittest.TestCase):
                     self.assertEqual(store.get_state("sleeping"), "1")
                     self.assertTrue(store.get_state("sleep_until"), "the sleep callback must save a deadline")
                     self.assertEqual(store.get_state("active_session_status"), "agent_sleep")
+                    self.assertIn('expect to wake', store.next_reply()['text'])
                     self.assertEqual(len(calls), 3)
                     self.assertTrue(all(call['max_tokens'] == MAX_LETTA_OUTPUT_TOKENS for call in calls))
                     self.assertEqual(store.connection.execute("SELECT count(*) FROM budget_reservations").fetchone()[0], 0)
@@ -145,7 +154,9 @@ class LettaProtocolTests(unittest.TestCase):
                     self.assertEqual(len(calls), 3, "restart must not replay a model request")
                     self.assertTrue(controller.check_scheduled_wake(datetime.fromisoformat(due)))
                     self.assertFalse(controller.check_scheduled_wake(datetime.fromisoformat(due)))
-                    self.assertTrue(runner.tick(datetime.fromisoformat(due)))
+                    clock_now = datetime.fromisoformat(due)
+                    with patch('andrewbot.controller.datetime', Clock):
+                        self.assertTrue(runner.tick(clock_now))
                     self.assertEqual(len(calls), 4)
                     self.assertEqual(store.get_state("active_session_status"), "agent_sleep")
                     self.assertTrue(store.get_state("sleep_until"))

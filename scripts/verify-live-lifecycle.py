@@ -118,7 +118,8 @@ def run(stage):
         agent.initialize()
         controller = Controller(store, agent, int(os.environ["ANDREW_OWNER_ID"]), autonomous_enabled=True,
                                 fallback_enabled=True, memory_service=MemoryService(store),
-                                model_config=config, **policy.budget_arguments())
+                                # Commissioning explicitly requests immediate lifecycle checks.
+                                conversation_idle_seconds=0, model_config=config, **policy.budget_arguments())
         agent.tool_handler = controller.execute_tool
         runner = SessionRunner(store, controller, agent, enabled=True)
         runner.recover()

@@ -22,6 +22,9 @@ class SessionRunner:
         "chat transcripts, credentials, or claims unsupported by your experience. Stay within controller limits. "
         "Use check_budget to inspect current spending and remaining allowance; this local read needs no approval. "
         "Treat old diary claims about missing tools or approval errors as historical; use current advertised capabilities."
+        " The owner conversation has become quiet. Resume your own interests or projects; sending a reply does not "
+        "require sleep. Owner messages take priority at the next safe stopping point. Sleep is an explicit choice "
+        "using sleep or wake_at, which tells the owner when you expect to return. A failure is an error, not sleep."
     )
 
     def __init__(self, store, controller, agent, enabled=False):
@@ -37,12 +40,22 @@ class SessionRunner:
         previous = self.store.get_state("active_session_id", "")
         if previous:
             started = self.store.get_state("active_session_started_at", "")
-            rest = {} if self.store.get_state("sleeping", "0") == "1" else {"sleeping": "1", "sleep_until": ""}
-            self.store.transition_state(
-                {"active_session_id": "", "active_session_started_at": "", "active_session_status": "interrupted",
-                 "session_start_requested": "", **rest},
-                "Autonomous session interrupted by controller restart",
-            )
+            if (not interrupted and self.enabled and not self.store.get_state('autonomy_error', '')
+                    and self.store.get_state('paused', '0') != '1'
+                    and self.store.get_state('sleeping', '0') != '1'):
+                # An idle conversation/session has no in-flight actions to recover.
+                # Keep its deadline rather than reporting an ordinary restart as failure.
+                try:
+                    started_at = datetime.fromisoformat(started)
+                    if started_at.tzinfo is None:
+                        raise ValueError('session start requires a timezone')
+                except (TypeError, ValueError):
+                    pass
+                else:
+                    self.active_session_id = previous
+                    self.started_at = started_at
+                    return
+            self.store.record_session_failure('interrupted', self.controller.owner_id, session_id=previous)
             self._record_incident(previous, "restart", started)
         elif interrupted:
             self.store.set_state("session_start_requested", "")
@@ -65,7 +78,7 @@ class SessionRunner:
 
     def start(self, trigger, now):
         if not self.enabled or trigger not in {
-            "fallback_wake", "scheduled_wake", "agent_continue", "owner_wake",
+            "fallback_wake", "scheduled_wake", "agent_continue", "owner_wake", "conversation_quiet",
         }:
             return None
         if self.store.get_state("sleeping", "0") == "1" or self.store.get_state("paused", "0") == "1":
@@ -91,18 +104,24 @@ class SessionRunner:
         self.started_at = now
         return self.active_session_id
 
-    def stop(self, reason, rest=False):
+    def stop(self, reason):
         if not self.active_session_id:
             return
         updates = {"active_session_id": "", "active_session_started_at": "", "active_session_status": reason}
-        if rest:
-            updates.update({"sleeping": "1", "sleep_until": ""})
+        updates['session_start_requested'] = ''
         try:
             self.store.stop_session_state(self.active_session_id, updates, f"Autonomous session stopped ({reason})")
         finally:
             # Prevent another provider call in this process even if state storage
             # has failed; startup recovery will reconcile the persisted session.
             self.active_session_id = ""
+            self.started_at = None
+
+    def fail(self, category):
+        try:
+            self.store.record_session_failure(category, self.controller.owner_id, session_id=self.active_session_id)
+        finally:
+            self.active_session_id = ''
             self.started_at = None
 
     def tick(self, now=None):
@@ -119,12 +138,15 @@ class SessionRunner:
         if blocked:
             self.stop(blocked)
             return False
+        if (self.store.get_state('autonomy_error', '') or self.store.conversation_waiting(current)
+                or self.store.pending_owner_input(self.controller.owner_id)):
+            return False
         if (self.store.get_state('founding_letter_record_id', '')
                 and self.store.get_state('founding_letter_delivered', '0') != '1'):
             return False
         if self.active_session_id:
             if current.astimezone(timezone.utc) >= self.started_at.astimezone(timezone.utc) + timedelta(minutes=self.MAX_SESSION_MINUTES):
-                self.stop("time_limit", rest=True)
+                self.stop("time_limit")
                 return False
         else:
             revision = self.store.get_state('owner_control_revision', '0')
@@ -138,6 +160,9 @@ class SessionRunner:
 
     def run_cycle(self, session_id, now=None):
         current = datetime.now(timezone.utc) if now is None else now
+        if (self.store.get_state('autonomy_error', '') or self.store.conversation_waiting(current)
+                or self.store.pending_owner_input(self.controller.owner_id)):
+            return False
         if not self.active_session_id or session_id != self.active_session_id:
             return False
         if self.store.get_state('active_session_id', '') != session_id:
@@ -149,7 +174,7 @@ class SessionRunner:
             return False
         _, day = self.controller._periods(current)
         if self.store.cycle_count(day) >= self.MAX_CYCLES_PER_DAY:
-            self.stop("cycle_limit", rest=True)
+            self.stop("cycle_limit")
             return False
         deadline = self.started_at.astimezone(timezone.utc) + timedelta(minutes=self.MAX_SESSION_MINUTES)
         remaining_seconds = max(1, int((deadline - current.astimezone(timezone.utc)).total_seconds()))
@@ -211,16 +236,16 @@ class SessionRunner:
                 self._record_incident(session_id, "provider_error", self.started_at.isoformat())
             except Exception:
                 pass
-            self.stop("provider_error", rest=True)
+            self.fail(category)
             return False
         try:
             cycles_today = self.store.cycle_count(day)
             self.store.add_activity(f"Autonomous cycle completed ({cycles_today}/150 today)")
         except Exception:
-            self.stop("ledger_error", rest=True)
+            self.fail('ledger_error')
             return False
         if cycles_today >= self.MAX_CYCLES_PER_DAY:
-            self.stop("cycle_limit", rest=True)
+            self.stop("cycle_limit")
         elif self.store.get_state("sleeping", "0") == "1":
             self.stop("agent_sleep")
         elif self.store.get_state("paused", "0") == "1":

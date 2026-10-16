@@ -1,0 +1,18 @@
+{
+  "appserver.py": {
+    "original": "e2ea2d4e50395a7d88036956c93e8c06640abf195fc8a92be65063c3b6a9949f",
+    "tested": "afbf8ab950d77291f5566c481bb04b915c0dfb47ec56bb427406d004e31f5b5a"
+  },
+  "configuration.py": {
+    "original": "d7531f8a83ae78b2e130fa9c86b2c0195df4248faec9ee629bb9a98631ca6096",
+    "tested": "c0265f879f8b7ff662b40eb2f0405fa80080b8f7a6c7581c716173e290f072b7"
+  },
+  "gateway.py": {
+    "original": "d21342fcc34c651d6bccb29f47bdbd99450c0c4e640ce88a0f8d55f7b6195a54",
+    "tested": "8b702d58d2359b963b42bc548d1549789996aeb8535d13fb3ffdcb6666200047"
+  },
+  "sessions.py": {
+    "original": "8bd13dfabdbb1da67b066845dacc7a286581f62482cb07932e985381c269366f",
+    "tested": "e9801014987431ec9149c38019cab0499f93ec8b377ab79a639cfd805ca819dc"
+  }
+}
