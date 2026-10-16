@@ -88,6 +88,26 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.controller._command("/history", "/history confirm DELETE ALL HISTORY"), "Deleted 3 browser history visit(s).")
         self.assertEqual(history.deleted, 1)
 
+    def test_history_query_excludes_the_full_command_token(self):
+        history = Mock()
+        history.search.return_value = []
+        self.controller.visit_history = history
+        cases = [
+            ('/history', ''),
+            ('/history example.com', 'example.com'),
+            ('/history@AndrewBot', ''),
+            ('/history@AndrewBot example.com', 'example.com'),
+            ('/HISTORY@AndrewBot two search terms', 'two search terms'),
+            ('/history@AndrewBot\t  example.com', 'example.com'),
+            ('🌐 Browsing history', ''),
+        ]
+        for command, query in cases:
+            with self.subTest(command=command):
+                history.reset_mock()
+                self.controller.handle_update(self.owner_message(command))
+                history.search.assert_called_once_with(query, limit=20)
+        self.assertEqual(self.model.calls, 0)
+
     def test_owner_chat_uses_model_and_persists_both_messages(self):
         result = self.controller.handle_update({
             "update_id": 2,

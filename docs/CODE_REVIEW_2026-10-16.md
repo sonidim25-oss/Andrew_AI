@@ -137,3 +137,14 @@ acknowledgement but before final diary confirmation. Full verification:
 218 core tests run, 216 passed, 2 skipped; 38 script tests passed with the pinned
 isolated Letta fixture enabled. R4 remains open. These fixes have not been
 installed in the live service.
+
+## R4 follow-up — source correction, 2026-10-16
+
+History search now takes its query after the complete first command token,
+including any bot suffix, instead of removing a fixed number of characters.
+The regression failed before the fix and covers ordinary and bot-suffixed
+commands, uppercase commands, whitespace, multiword queries, no query, and the
+history button. History commands make no model calls. Full core verification:
+219 tests run, 217 passed, 2 skipped. This correction is not installed in the
+live service. All four review findings now have source corrections recorded
+here; live installation and observation remain separate work.

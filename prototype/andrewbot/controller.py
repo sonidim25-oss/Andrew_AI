@@ -445,7 +445,8 @@ class Controller:
                 self.store.set_state("history_delete_confirmation", "")
                 self.store.add_activity("Owner deleted all browser history")
                 return f"Deleted {count} browser history visit(s)."
-            query = text[len("/history"):].strip()
+            command_and_query = text.split(maxsplit=1)
+            query = command_and_query[1] if len(command_and_query) == 2 else ""
             try:
                 rows = self.visit_history.search(query, limit=20)
             except (ValueError, OSError):
