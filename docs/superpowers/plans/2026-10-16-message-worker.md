@@ -1,6 +1,6 @@
 # Message worker, interactive timeouts and health implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Preserve the previously chosen inline execution method.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking. Preserve the previously chosen inline execution method.
 
 **Goal:** Keep the scheduler responsive during model and diary network work and expose local queue and worker health.
 
@@ -43,52 +43,77 @@
 
 **Interfaces:** `ModelWorker(action, should_stop)` in `workers.py` provides `start()`, `wake()`, `stop(timeout=2) -> bool`, and `snapshot() -> dict`. The action is one bounded scheduling pass, not one unbounded drain. Snapshot has fixed state (`idle`, `running`, `stopping`, `stopped`), monotonic active age and last completion time; no exception text or payloads.
 
-- [ ] Write blocked-fixture tests: repeated wake calls during one action do not overlap actions; notifications coalesce; an exception is recorded and does not silently kill the thread; stop prevents another action.
-- [ ] Run `PYTHONPATH=prototype python3 -m unittest discover -s prototype/tests -p test_model_worker.py -v`; observe expected missing-worker failures.
-- [ ] Implement worker lifecycle using a single event, one thread and a snapshot lock; no volatile job queue.
-- [ ] Add integration tests: blocked `handle_update()` leaves `dispatch.step()` and schedule checks responsive; `/status` still completes through the system lane; normal, queued and autonomous fake model calls have maximum concurrency one.
-- [ ] Move `process_updates()`, `flush_queued()` and `sessions.tick()` from `step()` into one worker pass in that order. Keep controls on the poll thread. Check stop between stages. Recheck durable pending owner input before autonomy using the existing session admission checks. Preserve rate limiting and stage metrics. Do not claim an inbox row when merely notifying the worker.
-- [ ] Add deterministic tests for pending owner input before autonomy, sleep/pause cancellation and authoritative owner revision, queued input surviving restart, and claimed interrupted input remaining held. `/replay` remains explicit local requeue authorization; do not invoke it in tests against production.
-- [ ] Run the worker and existing dispatch/session tests, then the full core suite. Commit only the worker increment after green results.
+- [x] Write blocked-fixture tests: repeated wake calls during one action do not overlap actions; notifications coalesce; an exception is recorded and does not silently kill the thread; stop prevents another action.
+- [x] Run `PYTHONPATH=prototype python3 -m unittest discover -s prototype/tests -p test_model_worker.py -v`; observe expected missing-worker failures.
+- [x] Implement worker lifecycle using a single event, one thread and a snapshot lock; no volatile job queue.
+- [x] Add integration tests: blocked `handle_update()` leaves `dispatch.step()` and schedule checks responsive; `/status` still completes through the system lane; normal, queued and autonomous fake model calls have maximum concurrency one.
+- [x] Move `process_updates()`, `flush_queued()` and `sessions.tick()` from `step()` into one worker pass in that order. Keep controls on the poll thread. Check stop between stages. Recheck durable pending owner input before autonomy using the existing session admission checks. Preserve rate limiting and stage metrics. Do not claim an inbox row when merely notifying the worker.
+- [x] Add deterministic tests for pending owner input before autonomy, sleep/pause cancellation and authoritative owner revision, queued input surviving restart, and claimed interrupted input remaining held. `/replay` remains explicit local requeue authorization; do not invoke it in tests against production.
+- [x] Run the worker and existing dispatch/session tests, then the full core suite. Commit only the worker increment after green results.
 
 ### Task 2: Move diary delivery off the scheduler and close safely
 
-**Interfaces:** Reuse Task 1 worker lifecycle for a dedicated diary action; dispatch owns or explicitly receives both worker lifecycles. `ControllerDispatch.stop(timeout=2) -> bool` reports all poll, reply, model and diary threads stopped, with a shared monotonic shutdown deadline. `close_controller_resources()` consumes that result before closing shared storage.
+**Interfaces:** Reuse Task 1 worker lifecycle for a dedicated diary action; dispatch owns both worker lifecycles. Its optional `diary_action(should_stop)` receives the dispatch-owned stop predicate and forwards it through diary entry and chunk admission. `ControllerDispatch.stop(timeout=2) -> bool` reports all poll, reply, model and diary threads stopped, with a shared monotonic shutdown deadline. `close_controller_resources()` consumes that result before closing shared storage.
 
-- [ ] Add tests proving blocked diary delivery does not block `step()` or system replies, concurrent explicit retry cannot overlap an active diary send, acknowledged parts stay acknowledged, and unacknowledged parts remain held after restart.
-- [ ] Observe RED with the current synchronous main-loop diary calls.
-- [ ] Replace synchronous diary delivery calls in `main.py` with wake notifications. Keep one diary sender; preserve existing explicit owner retry semantics and atomic chunk authorization. If retry can reset authorization during an active send, add transactional diary claim ownership checked by both retry and sender, and recover interrupted ownership conservatively at startup.
-- [ ] Extend shutdown tests to block model and diary actions independently, verify stop forbids new admissions, and verify history/database remain open on incomplete shutdown. Retain existing cancellation request on SIGTERM.
-- [ ] Run diary, shutdown, delivery and full core suites; commit after green results.
+- [x] Add tests proving blocked diary delivery does not block `step()` or system replies, concurrent explicit retry cannot overlap an active diary send, acknowledged parts stay acknowledged, and unacknowledged parts remain held after restart.
+- [x] Observe RED with the current synchronous main-loop diary calls.
+- [x] Replace synchronous diary delivery calls in `main.py` with wake notifications. Keep one diary sender; preserve existing explicit owner retry semantics and atomic chunk authorization. If retry can reset authorization during an active send, add transactional diary claim ownership checked by both retry and sender, and recover interrupted ownership conservatively at startup.
+- [x] Extend shutdown tests to block model and diary actions independently, verify stop forbids new admissions, and verify history/database remain open on incomplete shutdown. Retain existing cancellation request on SIGTERM.
+- [x] Run diary, shutdown, delivery and full core suites; commit after green results.
 
 ### Task 3: Bound interactive Telegram socket waits
 
 **Interfaces:** Preserve `TelegramAPI(..., timeout=...)` as an explicit compatibility override. With no override, interactive methods use 5 seconds; `getUpdates` uses requested poll duration plus 5 seconds (default 25 -> 30, background 1 -> 6). Reject invalid poll durations before opening a socket.
 
-- [ ] Add fake-opener tests asserting exact timeouts for sendMessage/getMe, 25-second and 1-second polls, and explicit timeout overrides. Observe RED on current shared 35-second default.
-- [ ] Implement method-specific timeout selection in `_call()` without automatic retries. Preserve token-redacted errors and timing metrics.
-- [ ] Test timeout after persisted send attempt: no second send occurs and the delivery becomes held. Test HTTP 429 does not cause immediate repeated send attempts.
-- [ ] Run Telegram and delivery suites plus full core suite; commit after green results.
+- [x] Add fake-opener tests asserting exact timeouts for sendMessage/getMe, 25-second and 1-second polls, and explicit timeout overrides. Observe RED on current shared 35-second default.
+- [x] Implement method-specific timeout selection in `_call()` without automatic retries. Preserve token-redacted errors and timing metrics.
+- [x] Test timeout after persisted send attempt: no second send occurs and the delivery becomes held. Test HTTP 429 does not cause immediate repeated send attempts.
+- [x] Run Telegram and delivery suites plus full core suite; commit after green results.
 
 ### Task 4: Add owner-only local health diagnostics
 
 **Interfaces:** Inject a `health_snapshot()` callable into Controller (optional for existing constructors). Dispatch supplies worker snapshots plus metrics; Store supplies read-only queue aggregates. `/health` renders bounded plain text with queued/held inputs, pending/held replies per lane, oldest pending age, model/diary state and active age, stage durations and most recent successful completion. Empty data is reported as unavailable rather than a fabricated zero-age success.
 
-- [ ] Add tests for unauthorized requests, paused/error state, empty queues, legacy persisted timestamps and a blocked model/sender. Assert no model or network call, no message text, credentials or raw exception text, and system-lane response delivery.
-- [ ] Observe RED because `/health` is not implemented.
-- [ ] Add read-only aggregate Store queries, assemble snapshots without holding database locks across network/model work, and render `/health` inside the existing authenticated command route. Avoid exposing claim tokens or identifiers unnecessary for diagnosis.
-- [ ] Run health, controls, latency and full core suites; commit after green results.
+- [x] Add tests for unauthorized requests, paused/error state, empty queues, legacy persisted timestamps and a blocked model/sender. Assert no model or network call, no message text, credentials or raw exception text, and system-lane response delivery.
+- [x] Observe RED because `/health` is not implemented.
+- [x] Add read-only aggregate Store queries, assemble snapshots without holding database locks across network/model work, and render `/health` inside the existing authenticated command route. Avoid exposing claim tokens or identifiers unnecessary for diagnosis.
+- [x] Run health, controls, latency and full core suites; commit after green results.
 
 ### Task 5: Review and installation preparation boundary
 
-- [ ] Run `PYTHONPATH=prototype python3 -m unittest discover -s prototype/tests -q`; all mandatory tests must pass, optional skips documented.
-- [ ] Run script tests with the existing Letta test binary. New/changed source hashes may require separate reviewed deployment-manifest preparation; record expected manifest mismatches precisely, never describe that suite as passing if it fails.
-- [ ] Obtain one fresh-context whole-change review under executing-plans; fix important findings with reproducing tests, rerun affected and full core suites.
-- [ ] Update `plan.md` and the design status with source-only completion and actual test results. Record remaining production preparation, including manifest coverage for `workers.py`, restored-file behavior and fail-closed rollback after attempted startup.
+- [x] Run `PYTHONPATH=prototype python3 -m unittest discover -s prototype/tests -q`; all mandatory tests must pass, optional skips documented.
+- [x] Run script tests with the existing Letta test binary. New/changed source hashes may require separate reviewed deployment-manifest preparation; record expected manifest mismatches precisely, never describe that suite as passing if it fails.
+- [x] Obtain one fresh-context whole-change review under executing-plans; fix important findings with reproducing tests, rerun affected and full core suites.
+- [x] Update `plan.md` and the design status with source-only completion and actual test results. Record remaining production preparation, including manifest coverage for `workers.py`, restored-file behavior and fail-closed rollback after attempted startup.
 - [ ] Commit/push/deploy only under the applicable existing user authorization; do not resume Andrew or replay held messages as part of verification.
 
 ## Self-review
 
 The worker, timeout and health tasks cover every requirement of the approved third increment. Diary concurrency and shutdown are explicit work rather than incidental cleanup. Existing Store and session admission/revision checks remain authoritative; tests must pin their behavior before moving execution threads. Production diagnostics remain read-only, and the source plan introduces no new paid requests or replay authority.
 
-Status: prepared for owner review; implementation has not started.
+Status: owner approved; Tasks 1–4 implemented in `18c05f7`, independently reviewed, and both shutdown findings fixed in the subsequent commit. Source work complete; deployment preparation remains outstanding.
+
+Verification: 305 core tests, 303 passed and 2 optional skipped. The 59-method
+script suite has seven source-hash subtest failures in
+`test_checked_in_deployment_manifest_matches_prepared_sources` (controller,
+diary, dispatch, main, store, telegram, telegram_menu); the other 58 methods pass.
+The installed P0 manifest is unchanged and does not yet admit `workers.py`.
+Production installation preparation is outstanding; no deployment was attempted.
+
+Execution decisions: worked on feature branch `fix/message-worker-p1` in the
+existing checkout to preserve user-visible paths and uncommitted plan documents;
+this provides less filesystem isolation than a separate worktree. Tasks 1 and 2
+share worker shutdown and their tests, so they were committed together with the
+other source tasks after the full suite passed; this makes the revert unit larger.
+
+Final independent review found two shutdown defects: normal input could be admitted
+after an interrupted inbox read, and diary delivery could admit a second entry
+after dispatch stop. Both were treated as important because stopping must prevent
+new actions. Reproducing tests
+`test_stop_during_inbox_read_does_not_claim_or_handle_input` and
+`test_dispatch_stop_is_passed_into_diary_entry_admission` failed first, then passed
+with shared stop predicates checked at admission boundaries. All 305 core tests
+were rerun after fixes (303 passed, 2 optional skipped); the script suite still has
+only the seven documented manifest mismatches. No other review findings or deferred
+minors. An additional integration test verifies chat, queued work and autonomy all
+use one worker thread with maximum model concurrency one.

@@ -30,7 +30,9 @@ class ControllerDispatch:
         self._reply_ready = threading.Event()
         self._system_reply_ready = threading.Event()
         self._input_lock = threading.RLock()
-        self._diary_worker = ModelWorker(diary_action, lambda: self._poll_stop.is_set() or self.should_stop()) if diary_action is not None else None
+        self._diary_worker = ModelWorker(
+            lambda: diary_action(should_stop=lambda: self._poll_stop.is_set() or self.should_stop()),
+            lambda: self._poll_stop.is_set() or self.should_stop()) if diary_action is not None else None
         self._model_worker = ModelWorker(self._model_pass, lambda: self._poll_stop.is_set() or self.should_stop())
         self.controller.health_snapshot = self.health_snapshot
 
@@ -141,9 +143,11 @@ class ControllerDispatch:
         if updates is None:
             updates = self.store.pending_updates()
         for update_id, update in updates:
-            if self.should_stop():
+            if self._poll_stop.is_set() or self.should_stop():
                 return
             with self._input_lock:
+                if self._poll_stop.is_set() or self.should_stop():
+                    return
                 message = update.get('message') or {}
                 owner = ((message.get('from') or {}).get('id') == self.owner_id
                          and (message.get('chat') or {}).get('id') == self.owner_id
@@ -166,6 +170,8 @@ class ControllerDispatch:
             self._handle_claimed_update(update_id, update, owner, control=False)
 
     def _handle_claimed_update(self, update_id, update, owner, control):
+        if self._poll_stop.is_set() or self.should_stop():
+            return
         uncertain = False
         try:
             age = wall_age_seconds(self.store.inbox_received_at(update_id), self.utc_now())
@@ -245,11 +251,11 @@ class ControllerDispatch:
             self._updates_ready.wait(1)
             self._updates_ready.clear()
             polled = True
-        if self.should_stop():
+        if self._poll_stop.is_set() or self.should_stop():
             return polled
         if self._poll_thread is None:
             self.guarded('Owner request processing', self.process_updates)
-        if self.should_stop():
+        if self._poll_stop.is_set() or self.should_stop():
             return polled
         if self.autonomous_enabled:
             self.guarded('Scheduled wake', lambda: self._run_stage('schedule', self.controller.check_scheduled_wake))
@@ -259,7 +265,7 @@ class ControllerDispatch:
             self.guarded('Telegram reply delivery', self.deliver_reply)
         else:
             self._reply_ready.set()
-        if self.should_stop():
+        if self._poll_stop.is_set() or self.should_stop():
             return polled
         if self._poll_thread is not None:
             self._model_worker.wake()

@@ -102,6 +102,58 @@ class DispatchWorkerTests(unittest.TestCase):
                 self.assertTrue(dispatch.stop())
                 store.close()
 
+    def test_chat_queued_and_autonomy_share_one_model_worker(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import Mock
+        from andrewbot.dispatch import ControllerDispatch
+        from andrewbot.store import Store
+        from andrewbot.telegram import OwnerRateLimit
+        entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+        lock = threading.Lock()
+        calls, threads, active = [], [], [0, 0]
+        def model_operation(kind):
+            with lock:
+                active[0] += 1
+                active[1] = max(active)
+                calls.append(kind)
+                threads.append(threading.get_ident())
+            if kind == 'chat':
+                entered.set()
+                release.wait(3)
+            with lock:
+                active[0] -= 1
+            if kind == 'autonomy':
+                finished.set()
+            return None
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / 'state.db')
+            controller, telegram, sessions = Mock(), Mock(), Mock()
+            controller.handle_update.side_effect = lambda *args, **kwargs: model_operation('chat')
+            controller.flush_queued.side_effect = lambda: model_operation('queued')
+            sessions.tick.side_effect = lambda: model_operation('autonomy')
+            telegram.get_updates.return_value = []
+            store.enqueue_update({'update_id': 1, 'message': {'text': 'chat', 'from': {'id': 17},
+                'chat': {'id': 17, 'type': 'private'}}})
+            dispatch = ControllerDispatch(store, controller, telegram, sessions, OwnerRateLimit(), 17, True, True)
+            dispatch.start()
+            try:
+                dispatch._updates_ready.set()
+                dispatch.step()
+                self.assertTrue(entered.wait(1))
+                for _ in range(10):
+                    dispatch._model_worker.wake()
+                self.assertEqual(calls, ['chat'])
+                release.set()
+                self.assertTrue(finished.wait(1))
+            finally:
+                release.set()
+                self.assertTrue(dispatch.stop())
+                store.close()
+            self.assertEqual(calls[:3], ['chat', 'queued', 'autonomy'])
+            self.assertEqual(active[1], 1)
+            self.assertEqual(len(set(threads)), 1)
+
 class AdmissionTests(unittest.TestCase):
     def test_shutdown_during_flush_does_not_start_autonomy(self):
         from unittest.mock import Mock
@@ -165,7 +217,7 @@ class DiaryWorkerTests(unittest.TestCase):
             controller, telegram, sessions = Mock(), Mock(), Mock()
             telegram.get_updates.return_value = []
             controller.flush_queued.return_value = None
-            def diary():
+            def diary(should_stop):
                 entered.set()
                 release.wait(4)
             dispatch = ControllerDispatch(store, controller, telegram, sessions, OwnerRateLimit(),
@@ -237,3 +289,75 @@ class DiaryWorkerTests(unittest.TestCase):
                 self.assertFalse(recovered.finish_diary_sender(entry, token, delivered=True))
             finally:
                 recovered.close()
+
+class StopAdmissionRegressionTests(unittest.TestCase):
+    def test_stop_during_inbox_read_does_not_claim_or_handle_input(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import Mock, patch
+        from andrewbot.dispatch import ControllerDispatch
+        from andrewbot.store import Store
+        from andrewbot.telegram import OwnerRateLimit
+        entered, release = threading.Event(), threading.Event()
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / 'state.db')
+            store.enqueue_update({'update_id': 1, 'message': {'text': 'saved', 'from': {'id': 17},
+                'chat': {'id': 17, 'type': 'private'}}})
+            controller = Mock()
+            dispatch = ControllerDispatch(store, controller, Mock(), Mock(), OwnerRateLimit(), 17, True, True)
+            original = store.pending_updates
+            def pending():
+                entered.set()
+                release.wait(3)
+                return original()
+            try:
+                with patch.object(store, 'pending_updates', side_effect=pending):
+                    dispatch._model_worker.start()
+                    dispatch._model_worker.wake()
+                    self.assertTrue(entered.wait(1))
+                    self.assertFalse(dispatch.stop(timeout=0))
+                    release.set()
+                    self.assertTrue(dispatch.stop())
+                controller.handle_update.assert_not_called()
+                self.assertEqual(len(store.pending_updates()), 1)
+                self.assertEqual(store.connection.execute('SELECT count(*) FROM telegram_claims').fetchone()[0], 0)
+            finally:
+                release.set()
+                dispatch.stop()
+                store.close()
+
+    def test_dispatch_stop_is_passed_into_diary_entry_admission(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import Mock
+        from andrewbot.diary import deliver_pending_diary
+        from andrewbot.dispatch import ControllerDispatch
+        from andrewbot.store import Store
+        from andrewbot.telegram import OwnerRateLimit
+        entered, release = threading.Event(), threading.Event()
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / 'state.db')
+            first = store.create_diary_entry('2026-10-15', 'First day.')
+            second = store.create_diary_entry('2026-10-16', 'Second day.')
+            with store.connection:
+                store.connection.execute('UPDATE diary_entries SET created_at=? WHERE entry_id=?',
+                                         ('2026-10-15T00:00:00+00:00', first))
+            telegram = Mock()
+            telegram.send_message.side_effect = lambda *args: (entered.set(), release.wait(3))
+            def diary(should_stop=lambda: False):
+                return deliver_pending_diary(telegram, store, 17, should_stop=should_stop)
+            dispatch = ControllerDispatch(store, Mock(), telegram, Mock(), OwnerRateLimit(), 17, False, False,
+                                          diary_action=diary)
+            try:
+                dispatch._diary_worker.start()
+                dispatch._diary_worker.wake()
+                self.assertTrue(entered.wait(1))
+                self.assertFalse(dispatch.stop(timeout=0))
+                release.set()
+                self.assertTrue(dispatch.stop())
+                self.assertEqual(telegram.send_message.call_count, 1)
+                self.assertEqual(store.diary_delivery_state(second), 'pending')
+            finally:
+                release.set()
+                dispatch.stop()
+                store.close()

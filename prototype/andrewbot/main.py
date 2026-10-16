@@ -248,10 +248,10 @@ def run(validate_only=False):
         stopping = True
         agent.cancel_active_turn()
 
-    def deliver_diary_outbox():
+    def deliver_diary_outbox(should_stop):
         try:
             with metrics.measure('diary'):
-                return deliver_pending_diary(telegram, store, owner_id, should_stop=lambda: stopping)
+                return deliver_pending_diary(telegram, store, owner_id, should_stop=should_stop)
         except Exception as error:
             logging.warning("Diary delivery processing stopped (%s)", type(error).__name__)
             return 0
