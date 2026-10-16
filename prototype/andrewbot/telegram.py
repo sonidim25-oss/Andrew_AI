@@ -6,6 +6,37 @@ from urllib.request import Request, urlopen
 from .telegram_menu import command_keyboard
 
 
+def split_message(text, limit=3800):
+    """Split without losing Unicode characters; leave room for a retry notice."""
+    chunks, current, used = [], [], 0
+    for character in text:
+        units = 2 if ord(character) > 0xffff else 1
+        if used + units > limit:
+            chunks.append(''.join(current))
+            current, used = [], 0
+        current.append(character)
+        used += units
+    if current or not chunks:
+        chunks.append(''.join(current))
+    return chunks
+
+
+def deliver_saved_message(telegram, store, kind, record_id, chat_id, text,
+                          previously_attempted=False, should_stop=lambda: False):
+    progress = store.prepare_telegram_delivery(kind, record_id, text, previously_attempted)
+    chunks = split_message(progress['content'])
+    for index in range(progress['next_chunk'], len(chunks)):
+        if should_stop():
+            return False
+        attempts = store.attempt_telegram_chunk(kind, record_id, index)
+        prefix = 'Delivery retry; you may have already received this part.\n\n' if attempts else ''
+        telegram.send_message(chat_id, prefix + chunks[index])
+        # Save each acknowledgement before sending another part. A lost
+        # acknowledgement can duplicate only the uncertain part on retry.
+        store.acknowledge_telegram_chunk(kind, record_id, index)
+    return True
+
+
 class TelegramAPI:
     def __init__(self, token, opener=None, timeout=35):
         self.token = token
@@ -30,10 +61,11 @@ class TelegramAPI:
         return data.get("result")
 
     def send_message(self, chat_id, text):
-        # Telegram counts UTF-16 units; astral emoji use two, unlike len(str).
-        text = text.encode('utf-16-le')[:8000].decode('utf-16-le', errors='ignore')
-        return self.call("sendMessage", {"chat_id": chat_id, "text": text,
-                                         "reply_markup": command_keyboard()})
+        result = None
+        for chunk in split_message(text, limit=4000):
+            result = self.call("sendMessage", {"chat_id": chat_id, "text": chunk,
+                                              "reply_markup": command_keyboard()})
+        return result
 
     def get_me(self):
         return self.call("getMe", {})

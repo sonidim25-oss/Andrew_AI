@@ -3,6 +3,7 @@ import logging
 import threading
 
 from .telegram_menu import BUTTON_COMMANDS
+from .telegram import deliver_saved_message
 
 
 class ControllerDispatch:
@@ -19,6 +20,7 @@ class ControllerDispatch:
         self._updates_ready = threading.Event()
         self._reply_ready = threading.Event()
         self._delivery_lock = threading.Lock()
+        self._input_lock = threading.RLock()
 
     def start(self):
         """Poll and execute only local owner controls while model work is blocked."""
@@ -46,8 +48,8 @@ class ControllerDispatch:
                 return
             self.guarded('Telegram reply delivery', self.deliver_reply)
 
-    @staticmethod
-    def _owner_control(update, owner_id):
+    def _owner_control(self, update, owner_id):
+        """Route local commands and time-entry replies without starting model work."""
         message = update.get('message') or {}
         text = message.get('text') or ''
         if not isinstance(text, str):
@@ -57,7 +59,9 @@ class ControllerDispatch:
                     and (message.get('chat') or {}).get('id') == owner_id
                     and (message.get('chat') or {}).get('type') == 'private'
                     and not any(key in message for key in ('forward_origin', 'forward_from', 'forward_from_chat', 'forward_sender_name'))
-                    and command and command[0].split('@', 1)[0].lower() in {'/pause', '/wake', '/status', '/budget'})
+                    and ((command and command[0].startswith('/')) or (
+                        self.store.get_state('telegram_wake_prompt_until', '')
+                        and update.get('update_id', -1) > int(self.store.get_state('telegram_wake_prompt_after_update_id', '-1')))))
 
     def _poll_loop(self):
         while not self._poll_stop.is_set() and not self.should_stop():
@@ -71,10 +75,10 @@ class ControllerDispatch:
                 updates = self.telegram.get_updates(offset=None if offset is None else offset + 1, poll_timeout=1)
                 if self._poll_stop.is_set() or self.should_stop():
                     return
-                received = [update for update in updates if self.store.enqueue_update(update)]
-                # Handle new controls directly even if normal chat has filled
-                # the durable inbox's first page. Claims prevent duplicate work.
-                self.process_updates(controls_only=True, updates=[(u['update_id'], u) for u in received])
+                for update in updates:
+                    self.store.enqueue_update(update)
+                # One ordered durable queue covers new and previously saved
+                # commands, including sleep and wake-time entry.
                 self.process_updates(controls_only=True)
                 if updates:
                     self._updates_ready.set()
@@ -84,42 +88,60 @@ class ControllerDispatch:
 
     def process_updates(self, controls_only=False, updates=None):
         handled_chat = False
+        if controls_only and updates is None:
+            # Re-query after each command: /wake_at can make the next plain
+            # message a local time response before a later /wake executes.
+            for _ in range(50):
+                with self._input_lock:
+                    pending = self.store.pending_owner_controls(self.owner_id, BUTTON_COMMANDS)
+                    if not pending or self._poll_stop.is_set() or self.should_stop():
+                        return
+                    self.process_updates(controls_only=True, updates=pending[:1])
+            return
         if updates is None:
-            buttons = [text for text, command in BUTTON_COMMANDS.items() if command in {'/pause', '/wake', '/status', '/budget'}]
-            updates = self.store.pending_owner_controls(self.owner_id, buttons) if controls_only else self.store.pending_updates()
+            updates = self.store.pending_updates()
         for update_id, update in updates:
             if self.should_stop():
                 return
-            message = update.get('message') or {}
-            owner = ((message.get('from') or {}).get('id') == self.owner_id
-                     and (message.get('chat') or {}).get('id') == self.owner_id
-                     and (message.get('chat') or {}).get('type') == 'private')
-            control = self._owner_control(update, self.owner_id)
-            if controls_only and not control:
-                continue
-            if not controls_only and self._poll_thread is not None and control:
-                continue
-            if owner and not control and (handled_chat or not self.limiter.allow()):
-                # Defer instead of discarding saved owner messages. Pause and
-                # status remain available even when the chat is busy.
-                continue
-            if not self.store.claim_update(update_id):
-                continue
-            if owner and not control:
-                handled_chat = True
-            uncertain = False
-            try:
+            with self._input_lock:
+                message = update.get('message') or {}
+                owner = ((message.get('from') or {}).get('id') == self.owner_id
+                         and (message.get('chat') or {}).get('id') == self.owner_id
+                         and (message.get('chat') or {}).get('type') == 'private')
+                control = self._owner_control(update, self.owner_id)
+                if controls_only and not control:
+                    continue
+                if not controls_only and self._poll_thread is not None and control:
+                    continue
+                if owner and not control and (handled_chat or not self.limiter.allow()):
+                    continue
+                if not self.store.claim_update(update_id):
+                    continue
+                if control:
+                    self._handle_claimed_update(update_id, update, owner, control=True)
+                    continue
+                if owner:
+                    handled_chat = True
+            # Release the routing lock before any model or external tool work.
+            self._handle_claimed_update(update_id, update, owner, control=False)
+
+    def _handle_claimed_update(self, update_id, update, owner, control):
+        uncertain = False
+        try:
+            if self._poll_thread is not None and not control:
+                reply = self.controller.handle_update(update, allow_time_entry=False)
+            else:
                 reply = self.controller.handle_update(update)
-            except Exception as error:
-                uncertain = True
-                logging.warning('Owner request outcome uncertain (%s)', type(error).__name__)
-                reply = 'The request outcome is uncertain. It was not automatically repeated; please check the result before asking again.'
-            if self._poll_stop.is_set():
-                return
-            # Commit the response and completion together before attempting
-            # delivery. A Telegram failure must not repeat model/tool actions.
-            self.store.complete_update(update_id, self.owner_id if owner else None, reply, uncertain)
-            self._reply_ready.set()
+            if control and self.store.get_state('telegram_wake_prompt_until', ''):
+                self.store.set_state('telegram_wake_prompt_after_update_id', str(update_id))
+        except Exception as error:
+            uncertain = True
+            logging.warning('Owner request outcome uncertain (%s)', type(error).__name__)
+            reply = 'The request outcome is uncertain. It was not automatically repeated; please check the result before asking again.'
+        if self._poll_stop.is_set():
+            return
+        self.store.complete_update(update_id, self.owner_id if owner else None, reply, uncertain)
+        self._reply_ready.set()
 
     def deliver_reply(self):
         with self._delivery_lock:
@@ -130,11 +152,10 @@ class ControllerDispatch:
         if row is None:
             return
         self.store.attempt_reply(row['id'])
-        text = row['text']
-        if row['attempts']:
-            text = 'Delivery retry; you may have already received this reply.\n\n' + text
-        self.telegram.send_message(row['chat_id'], text)
-        if not self._poll_stop.is_set():
+        complete = deliver_saved_message(self.telegram, self.store, 'reply', row['id'], row['chat_id'],
+                                         row['text'], row['attempts'] > 0,
+                                         should_stop=lambda: self._poll_stop.is_set() or self.should_stop())
+        if complete and not self._poll_stop.is_set():
             self.store.delivered_reply(row['id'])
 
     @staticmethod

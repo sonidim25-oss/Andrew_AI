@@ -133,6 +133,73 @@ class DispatchTests(unittest.TestCase):
 
 
 class ConcurrentOwnerControlsTests(unittest.TestCase):
+    def test_lifecycle_batch_and_wake_time_replies_keep_their_order(self):
+        cases = [
+            (['/sleep', '/wake'], '0', '0'),
+            (['/wake', '/sleep 30'], '1', '0'),
+            (['/pause', '/sleep', '/wake'], '0', '0'),
+            (['/wake_at 09:00', '/wake'], '0', '0'),
+            (['/wake_at', '09:00', '/wake'], '0', '0'),
+            (['⏰ Set wake time', 'invalid time', '09:00', '☀️ Wake up'], '0', '0'),
+            (['/wake_at', '/cancel', '/pause'], '0', '1'),
+            (['/sleep@AndrewBot 30', '/wake@AndrewBot'], '0', '0'),
+        ]
+        for commands, sleeping, paused in cases:
+            with self.subTest(commands=commands), tempfile.TemporaryDirectory() as directory:
+                store = Store(Path(directory) / 'state.db')
+                try:
+                    model = Mock()
+                    controller = Controller(store, model, 17, autonomous_enabled=True)
+                    dispatch = ControllerDispatch(store, controller, Mock(), Mock(), OwnerRateLimit(), 17, True, False)
+                    # Exercise the split background/main routing without a
+                    # network poll introducing nondeterministic timing.
+                    dispatch._poll_thread = object()
+                    for index, command in enumerate(commands):
+                        store.enqueue_update(update(index + 1, command))
+                    saved_main_snapshot = store.pending_updates()
+                    dispatch.process_updates(controls_only=True)
+                    dispatch.process_updates(updates=saved_main_snapshot)
+                    self.assertEqual(store.get_state('sleeping', '0'), sleeping)
+                    self.assertEqual(store.get_state('paused', '0'), paused)
+                    self.assertEqual(store.pending_updates(), [])
+                    model.reply.assert_not_called()
+                finally:
+                    store.close()
+
+    def test_new_wake_cannot_overtake_a_pause_saved_during_polling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / 'state.db')
+            ready = threading.Event()
+            requests = 0
+            class Telegram:
+                def get_updates(self, **kwargs):
+                    nonlocal requests
+                    requests += 1
+                    if requests == 1:
+                        # The older input becomes durable after the poller's
+                        # pre-poll drain but before it receives the new batch.
+                        store.enqueue_update(update(1, '/pause'))
+                        return [update(2, '/wake')]
+                    ready.wait(0.05)
+                    return []
+                def send_message(self, owner, text):
+                    if 'awake' in text:
+                        ready.set()
+            model = Mock()
+            controller = Controller(store, model, 17, autonomous_enabled=True)
+            dispatch = ControllerDispatch(store, controller, Telegram(), Mock(), OwnerRateLimit(), 17, True, False)
+            dispatch.start()
+            try:
+                self.assertTrue(ready.wait(2))
+                self.assertEqual(store.get_state('paused'), '0')
+                self.assertEqual(store.get_state('session_start_requested'), 'owner_wake')
+                events = [row['event'] for row in reversed(store.recent_activity())]
+                self.assertEqual(events, ['Owner paused Andrew', 'Owner woke Andrew'])
+                model.reply.assert_not_called()
+            finally:
+                dispatch.stop()
+                store.close()
+
     def test_saved_pause_cancels_blocked_turn_despite_failed_telegram_polls(self):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / 'state.sqlite3')
@@ -230,7 +297,7 @@ class ConcurrentOwnerControlsTests(unittest.TestCase):
                 self.assertTrue(entered.wait(1))
                 inbox.put([update(index + 1, command) for index, command in enumerate(controls)])
                 self.assertTrue(notified.wait(1), 'Owner controls waited for the blocked turn')
-                if '/pause' in controls:
+                if '/pause' in controls or '/wake' in controls:
                     self.assertTrue(cancelled.wait(1))
                     worker.join(1)
                     self.assertFalse(worker.is_alive())
@@ -263,6 +330,10 @@ class ConcurrentOwnerControlsTests(unittest.TestCase):
 
     def test_pause_then_wake_preserves_new_wake_request(self):
         self.run_control(['/pause', '/wake'])
+
+    def test_sleep_then_wake_remains_ordered_while_model_is_blocked(self):
+        replies = self.run_control(['/sleep', '/wake'])
+        self.assertTrue(any('awake' in reply for reply in replies))
 
 
 class QueueBatchTests(unittest.TestCase):

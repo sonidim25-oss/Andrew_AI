@@ -10,9 +10,11 @@ class TelegramAPITests(unittest.TestCase):
         api = TelegramAPI('fixture-token')
         api.call = Mock()
         api.send_message(17, '🙂' * 3000)
-        text = api.call.call_args.args[1]['text']
-        self.assertEqual(len(text.encode('utf-16-le')), 8000)
-        self.assertNotIn('\ufffd', text)
+        chunks = [call.args[1]['text'] for call in api.call.call_args_list]
+        self.assertEqual(''.join(chunks), '🙂' * 3000)
+        for text in chunks:
+            self.assertLessEqual(len(text.encode('utf-16-le')), 8000)
+            self.assertNotIn('\ufffd', text)
 
     def test_request_errors_do_not_expose_bot_token(self):
         token = "123456789:synthetic-secret-token"

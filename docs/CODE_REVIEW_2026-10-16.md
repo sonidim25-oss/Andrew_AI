@@ -110,3 +110,30 @@ being available; applying the saved pause does not.
 Full verification: 211 core tests run, 209 passed, 2 skipped; 38 script tests
 passed with the pinned isolated Letta fixture enabled. The other findings remain
 open. This source correction has not been installed in the live service.
+
+## R2 and R3 follow-up — source corrections, 2026-10-16
+
+R2: all authenticated local owner commands now use the same control worker and
+durable input order. Newly received commands no longer bypass older saved ones.
+Wake-time prompts are re-evaluated after each input so a plain time response is
+processed before a later wake command. Routing and input claims share a short
+lock, released before model work. A main-thread inbox snapshot cannot reclaim
+an input already completed by the control worker. Ordinary chat claimed before
+a new time prompt cannot later become an out-of-order scheduling response.
+
+R3: outgoing text is split by UTF-16 length without dropping characters. A new
+additive SQLite table keeps the original rendered message, the next part to
+send, and the current part's attempt count. Acknowledgements are persisted
+between parts, so restart/retry skips confirmed parts and labels an uncertain
+part when repeating it. A partial diary retains its uncertain state and still
+requires the owner's existing explicit retry command. Only complete delivery
+clears the durable progress and confirms the parent outbox/diary record.
+
+Regressions cover both ordering reproductions, typed and button commands,
+interactive/invalid wake-time responses, stale main-thread inbox snapshots,
+sleep/wake during blocked model work, a complete emoji-heavy diary, partial
+diary and reply failure across database reopen, and restart after the last
+acknowledgement but before final diary confirmation. Full verification:
+218 core tests run, 216 passed, 2 skipped; 38 script tests passed with the pinned
+isolated Letta fixture enabled. R4 remains open. These fixes have not been
+installed in the live service.

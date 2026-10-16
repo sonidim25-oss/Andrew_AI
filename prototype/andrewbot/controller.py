@@ -80,7 +80,7 @@ class Controller:
             return False, "monthly_reserve"
         return True, "ok"
 
-    def handle_update(self, update):
+    def handle_update(self, update, allow_time_entry=True):
         message = update.get("message") or {}
         sender = message.get("from") or {}
         chat = message.get("chat") or {}
@@ -98,7 +98,7 @@ class Controller:
             self.store.set_state("telegram_wake_prompt_until", "")
             return self._command(command, text)
         prompt_until = self.store.get_state("telegram_wake_prompt_until", "")
-        if prompt_until:
+        if prompt_until and allow_time_entry:
             try:
                 pending = datetime.now(timezone.utc) < datetime.fromisoformat(prompt_until)
             except (ValueError, TypeError):

@@ -59,6 +59,14 @@ class Store:
                 text TEXT NOT NULL,
                 attempts INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS telegram_delivery_progress (
+                kind TEXT NOT NULL,
+                record_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                next_chunk INTEGER NOT NULL DEFAULT 0,
+                chunk_attempts INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(kind,record_id)
+            );
             CREATE TABLE IF NOT EXISTS usage (
                 id INTEGER PRIMARY KEY,
                 month TEXT NOT NULL,
@@ -454,13 +462,13 @@ class Store:
     @database_locked
     def pending_owner_controls(self, owner_id, buttons=()):
         text = "lower(trim(COALESCE(json_extract(payload,'$.message.text'),'')))"
-        clauses, values = [], [owner_id, owner_id]
-        for command in ('/pause', '/wake', '/status', '/budget'):
-            clauses.append(f'({text}=? OR {text} GLOB ?)')
-            values.extend((command, command + '[ @\t\n\r]*'))
+        clauses, values = [f"{text} GLOB '/*'"], [owner_id, owner_id]
         for button in buttons:
             clauses.append(f'{text}=?')
             values.append(button.lower())
+        if self.get_state('telegram_wake_prompt_until', ''):
+            clauses.append('update_id>?')
+            values.append(int(self.get_state('telegram_wake_prompt_after_update_id', '-1')))
         rows = self.connection.execute(
             "SELECT update_id,payload FROM telegram_inbox WHERE "
             "json_extract(payload,'$.message.from.id')=? AND json_extract(payload,'$.message.chat.id')=? "
@@ -468,7 +476,9 @@ class Store:
             "AND json_type(payload,'$.message.forward_origin') IS NULL "
             "AND json_type(payload,'$.message.forward_from') IS NULL "
             "AND json_type(payload,'$.message.forward_from_chat') IS NULL "
-            "AND json_type(payload,'$.message.forward_sender_name') IS NULL AND (" + ' OR '.join(clauses) + ') '
+            "AND json_type(payload,'$.message.forward_sender_name') IS NULL "
+            "AND json_type(payload,'$.message.text')='text' "
+            "AND update_id NOT IN (SELECT update_id FROM telegram_claims) AND (" + ' OR '.join(clauses) + ') '
             "ORDER BY update_id LIMIT 50", values).fetchall()
         return [(row['update_id'], json.loads(row['payload'])) for row in rows]
 
@@ -487,7 +497,8 @@ class Store:
     def claim_update(self, update_id):
         with self.connection:
             return self.connection.execute(
-                "INSERT OR IGNORE INTO telegram_claims(update_id) VALUES(?)", (update_id,)
+                "INSERT OR IGNORE INTO telegram_claims(update_id) "
+                "SELECT update_id FROM telegram_inbox WHERE update_id=?", (update_id,)
             ).rowcount == 1
 
     @database_locked
@@ -525,6 +536,40 @@ class Store:
     def delivered_reply(self, reply_id):
         with self.connection:
             self.connection.execute("DELETE FROM telegram_outbox WHERE id=?", (reply_id,))
+            self.connection.execute("DELETE FROM telegram_delivery_progress WHERE kind='reply' AND record_id=?", (str(reply_id),))
+
+    @database_locked
+    def prepare_telegram_delivery(self, kind, record_id, content, previously_attempted=False):
+        with self.connection:
+            self.connection.execute(
+                "INSERT OR IGNORE INTO telegram_delivery_progress(kind,record_id,content,chunk_attempts) VALUES(?,?,?,?)",
+                (kind, str(record_id), content, int(previously_attempted)))
+            return dict(self.connection.execute(
+                "SELECT * FROM telegram_delivery_progress WHERE kind=? AND record_id=?",
+                (kind, str(record_id))).fetchone())
+
+    @database_locked
+    def attempt_telegram_chunk(self, kind, record_id, chunk):
+        with self.connection:
+            row = self.connection.execute(
+                "SELECT chunk_attempts FROM telegram_delivery_progress WHERE kind=? AND record_id=? AND next_chunk=?",
+                (kind, str(record_id), chunk)).fetchone()
+            if row is None:
+                raise ValueError('Telegram delivery progress changed')
+            self.connection.execute(
+                "UPDATE telegram_delivery_progress SET chunk_attempts=chunk_attempts+1 WHERE kind=? AND record_id=?",
+                (kind, str(record_id)))
+            return row[0]
+
+    @database_locked
+    def acknowledge_telegram_chunk(self, kind, record_id, chunk):
+        with self.connection:
+            cursor = self.connection.execute(
+                "UPDATE telegram_delivery_progress SET next_chunk=next_chunk+1,chunk_attempts=0 "
+                "WHERE kind=? AND record_id=? AND next_chunk=?",
+                (kind, str(record_id), chunk))
+            if cursor.rowcount != 1:
+                raise ValueError('Telegram delivery progress changed')
 
     @database_locked
     def last_update_id(self):
@@ -732,12 +777,14 @@ class Store:
 
     @database_locked
     def mark_diary_delivered(self, entry_id):
-        cursor = self.connection.execute(
-            "UPDATE diary_entries SET delivery_state='delivered' WHERE entry_id=? AND delivery_state='uncertain'",
-            (entry_id,),
-        )
-        self.connection.commit()
-        return cursor.rowcount == 1
+        with self.connection:
+            cursor = self.connection.execute(
+                "UPDATE diary_entries SET delivery_state='delivered' WHERE entry_id=? AND delivery_state='uncertain'",
+                (entry_id,),
+            )
+            if cursor.rowcount == 1:
+                self.connection.execute("DELETE FROM telegram_delivery_progress WHERE kind='diary' AND record_id=?", (entry_id,))
+            return cursor.rowcount == 1
 
     @database_locked
     def retry_uncertain_diary_delivery(self, entry_id):
