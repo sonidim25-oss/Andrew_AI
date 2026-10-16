@@ -128,7 +128,7 @@ class DispatchTests(unittest.TestCase):
         self.store = Store(self.path)
         self.dispatch.store = self.store
 
-    def test_delivery_failure_and_restart_do_not_repeat_actions(self):
+    def test_delivery_failure_and_restart_do_not_repeat_actions_or_uncertain_sends(self):
         self.store.enqueue_update(update())
         self.telegram.send_message.side_effect = RuntimeError('offline')
         self.dispatch.step()
@@ -139,8 +139,8 @@ class DispatchTests(unittest.TestCase):
         self.telegram.send_message.side_effect = None
         self.dispatch.step()
         self.assertEqual(self.controller.handle_update.call_count, 1)
-        self.assertIsNone(self.store.next_reply())
-        self.assertIn('Delivery retry', self.telegram.send_message.call_args.args[1])
+        self.assertEqual(self.store.next_reply()['delivery_state'], 'held')
+        self.assertEqual(self.telegram.send_message.call_count, 1)
 
     def test_poll_failure_does_not_stall_saved_updates_wakes_or_session(self):
         self.store.enqueue_update(update())

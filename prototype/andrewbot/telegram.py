@@ -30,10 +30,12 @@ def deliver_saved_message(telegram, store, kind, record_id, chat_id, text,
         if should_stop():
             return False
         attempts = store.attempt_telegram_chunk(kind, record_id, index)
+        if attempts is None:
+            return False
         prefix = 'Delivery retry; you may have already received this part.\n\n' if attempts else ''
         telegram.send_message(chat_id, prefix + chunks[index])
-        # Save each acknowledgement before sending another part. A lost
-        # acknowledgement can duplicate only the uncertain part on retry.
+        # Persist each acknowledgement. An unacknowledged attempt is held;
+        # only an explicit owner diary retry can authorize another attempt.
         store.acknowledge_telegram_chunk(kind, record_id, index)
     return True
 

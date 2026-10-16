@@ -201,6 +201,14 @@ class Store:
         columns = {row['name'] for row in self.connection.execute('PRAGMA table_info(telegram_outbox)')}
         if 'created_at' not in columns:
             self.connection.execute('ALTER TABLE telegram_outbox ADD COLUMN created_at TEXT')
+        for name, declaration in {'lane': "TEXT NOT NULL DEFAULT 'normal'",
+                                  'delivery_state': "TEXT NOT NULL DEFAULT 'pending'",
+                                  'claim_token': 'TEXT'}.items():
+            if name not in columns:
+                self.connection.execute('ALTER TABLE telegram_outbox ADD COLUMN ' + name + ' ' + declaration)
+        progress_columns = {row['name'] for row in self.connection.execute('PRAGMA table_info(telegram_delivery_progress)')}
+        if 'retry_notice' not in progress_columns:
+            self.connection.execute('ALTER TABLE telegram_delivery_progress ADD COLUMN retry_notice INTEGER NOT NULL DEFAULT 0')
         self.connection.commit()
         try:
             self.path.chmod(0o600)
@@ -800,12 +808,13 @@ class Store:
         return [(row['update_id'], json.loads(row['payload'])) for row in rows]
 
     @database_locked
-    def complete_update(self, update_id, chat_id=None, reply=None, uncertain=False):
+    def complete_update(self, update_id, chat_id=None, reply=None, uncertain=False, lane='normal'):
+        self._validate_lane(lane)
         with self.connection:
             if uncertain:
                 self.connection.execute('INSERT OR IGNORE INTO telegram_uncertain SELECT * FROM telegram_inbox WHERE update_id=?', (update_id,))
             if reply and chat_id is not None:
-                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text,created_at) VALUES(?,?,?)", (chat_id, reply, self.now()))
+                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text,created_at,lane) VALUES(?,?,?,?)", (chat_id, reply, self.now(), lane))
             self.connection.execute("INSERT OR IGNORE INTO updates(update_id) VALUES(?)", (update_id,))
             self.connection.execute("DELETE FROM telegram_inbox WHERE update_id=?", (update_id,))
             self.connection.execute("DELETE FROM telegram_claims WHERE update_id=?", (update_id,))
@@ -835,10 +844,11 @@ class Store:
             return len(rows)
 
     @database_locked
-    def queue_reply(self, chat_id, text):
+    def queue_reply(self, chat_id, text, lane='normal'):
+        self._validate_lane(lane)
         if text:
             with self.connection:
-                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text,created_at) VALUES(?,?,?)", (chat_id, text, self.now()))
+                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text,created_at,lane) VALUES(?,?,?,?)", (chat_id, text, self.now(), lane))
 
     @database_locked
     def inbox_received_at(self, update_id):
@@ -855,6 +865,106 @@ class Store:
     @database_locked
     def next_reply(self):
         return self.connection.execute("SELECT * FROM telegram_outbox ORDER BY id LIMIT 1").fetchone()
+
+    @staticmethod
+    def _validate_lane(lane):
+        if lane not in ('normal', 'system'):
+            raise ValueError('Unknown reply lane')
+
+    def _reply_status(self, row):
+        # Caller holds the Store lock. Per-part acknowledgements override the
+        # legacy attempt count; no progress after an attempt is uncertain.
+        from .telegram import split_message
+        progress = self.connection.execute(
+            "SELECT * FROM telegram_delivery_progress WHERE kind='reply' AND record_id=?",
+            (str(row['id']),)).fetchone()
+        if progress is None:
+            return 'held' if row['attempts'] else 'pending'
+        if progress['chunk_attempts']:
+            return 'held'
+        if progress['next_chunk'] >= len(split_message(progress['content'])):
+            return 'complete'
+        return 'pending'
+
+    def _delete_reply_progress(self, reply_id):
+        self.connection.execute("DELETE FROM telegram_delivery_progress WHERE kind='reply' AND record_id=?", (str(reply_id),))
+
+    @database_locked
+    def claim_reply(self, lane):
+        self._validate_lane(lane)
+        # A single write statement arbitrates across independent connections.
+        with self.connection:
+            while True:
+                token = uuid.uuid4().hex
+                rows = self.connection.execute(
+                    "UPDATE telegram_outbox SET delivery_state='sending',claim_token=? "
+                    "WHERE id=(SELECT id FROM telegram_outbox WHERE lane=? AND delivery_state='pending' ORDER BY id LIMIT 1) "
+                    "AND delivery_state='pending' AND NOT EXISTS "
+                    "(SELECT 1 FROM telegram_outbox WHERE lane=? AND delivery_state='sending') RETURNING *",
+                    (token, lane, lane)).fetchall()
+                if not rows:
+                    return None
+                row = rows[0]
+                status = self._reply_status(row)
+                if status == 'complete':
+                    self.connection.execute('DELETE FROM telegram_outbox WHERE id=?', (row['id'],))
+                    self._delete_reply_progress(row['id'])
+                elif status == 'held':
+                    self.connection.execute("UPDATE telegram_outbox SET delivery_state='held',claim_token=NULL WHERE id=?", (row['id'],))
+                else:
+                    return dict(row)
+
+    @database_locked
+    def hold_reply(self, reply_id, token):
+        with self.connection:
+            return self.connection.execute(
+                "UPDATE telegram_outbox SET delivery_state='held',claim_token=NULL "
+                "WHERE id=? AND claim_token=? AND delivery_state='sending'", (reply_id, token)).rowcount == 1
+
+    @database_locked
+    def finish_reply(self, reply_id, token):
+        with self.connection:
+            row = self.connection.execute("SELECT * FROM telegram_outbox WHERE id=? AND claim_token=? AND delivery_state='sending'",
+                                          (reply_id, token)).fetchone()
+            if row is None or self._reply_status(row) != 'complete':
+                return False
+            removed = self.connection.execute("DELETE FROM telegram_outbox WHERE id=? AND claim_token=? AND delivery_state='sending'",
+                                              (reply_id, token)).rowcount == 1
+            if removed:
+                self._delete_reply_progress(reply_id)
+            return removed
+
+    @database_locked
+    def release_reply(self, reply_id, token):
+        # Used on shutdown before the next part, never to permit an uncertain retry.
+        with self.connection:
+            row = self.connection.execute("SELECT * FROM telegram_outbox WHERE id=? AND claim_token=? AND delivery_state='sending'",
+                                          (reply_id, token)).fetchone()
+            if row is None:
+                return False
+            status = self._reply_status(row)
+            if status == 'complete':
+                return self.finish_reply(reply_id, token)
+            return self.connection.execute('UPDATE telegram_outbox SET delivery_state=?,claim_token=NULL WHERE id=? AND claim_token=?',
+                                           (status, reply_id, token)).rowcount == 1
+
+    @database_locked
+    def recover_reply_claims(self):
+        """Startup only, before any senders: retain uncertainty, release unsent work."""
+        recovered = 0
+        with self.connection:
+            for row in self.connection.execute("SELECT * FROM telegram_outbox").fetchall():
+                status = self._reply_status(row)
+                if status == 'complete':
+                    self.connection.execute('DELETE FROM telegram_outbox WHERE id=?', (row['id'],))
+                    self._delete_reply_progress(row['id'])
+                    recovered += 1
+                elif row['delivery_state'] == 'held':
+                    continue
+                elif row['delivery_state'] != status or row['claim_token'] is not None:
+                    self.connection.execute('UPDATE telegram_outbox SET delivery_state=?,claim_token=NULL WHERE id=?', (status, row['id']))
+                    recovered += 1
+        return recovered
 
     @database_locked
     def attempt_reply(self, reply_id):
@@ -880,21 +990,21 @@ class Store:
     @database_locked
     def attempt_telegram_chunk(self, kind, record_id, chunk):
         with self.connection:
-            row = self.connection.execute(
-                "SELECT chunk_attempts FROM telegram_delivery_progress WHERE kind=? AND record_id=? AND next_chunk=?",
-                (kind, str(record_id), chunk)).fetchone()
-            if row is None:
-                raise ValueError('Telegram delivery progress changed')
-            self.connection.execute(
-                "UPDATE telegram_delivery_progress SET chunk_attempts=chunk_attempts+1 WHERE kind=? AND record_id=?",
-                (kind, str(record_id)))
-            return row[0]
+            rows = self.connection.execute(
+                "UPDATE telegram_delivery_progress SET chunk_attempts=1 "
+                "WHERE kind=? AND record_id=? AND next_chunk=? AND chunk_attempts=0 RETURNING retry_notice",
+                (kind, str(record_id), chunk)).fetchall()
+            if not rows:
+                return None
+            if kind == 'reply':
+                self.connection.execute('UPDATE telegram_outbox SET attempts=attempts+1 WHERE id=?', (record_id,))
+            return rows[0]['retry_notice']
 
     @database_locked
     def acknowledge_telegram_chunk(self, kind, record_id, chunk):
         with self.connection:
             cursor = self.connection.execute(
-                "UPDATE telegram_delivery_progress SET next_chunk=next_chunk+1,chunk_attempts=0 "
+                "UPDATE telegram_delivery_progress SET next_chunk=next_chunk+1,chunk_attempts=0,retry_notice=0 "
                 "WHERE kind=? AND record_id=? AND next_chunk=?",
                 (kind, str(record_id), chunk))
             if cursor.rowcount != 1:
@@ -1117,12 +1227,19 @@ class Store:
 
     @database_locked
     def retry_uncertain_diary_delivery(self, entry_id):
-        cursor = self.connection.execute(
-            "UPDATE diary_entries SET delivery_state='pending' WHERE entry_id=? AND delivery_state='uncertain'",
-            (entry_id,),
-        )
-        self.connection.commit()
-        return cursor.rowcount == 1
+        # This method is invoked only by the explicit owner retry command.
+        from .diary import format_diary_entry
+        with self.connection:
+            row = self.connection.execute("SELECT * FROM diary_entries WHERE entry_id=? AND delivery_state='uncertain'", (entry_id,)).fetchone()
+            if row is None:
+                return False
+            content = format_diary_entry(self._diary_row(row))
+            self.connection.execute(
+                "INSERT OR IGNORE INTO telegram_delivery_progress(kind,record_id,content) VALUES('diary',?,?)",
+                (entry_id, content))
+            self.connection.execute("UPDATE telegram_delivery_progress SET chunk_attempts=0,retry_notice=1 WHERE kind='diary' AND record_id=?", (entry_id,))
+            self.connection.execute("UPDATE diary_entries SET delivery_state='pending' WHERE entry_id=?", (entry_id,))
+            return True
 
     @database_locked
     def recent_activity(self, limit=10):

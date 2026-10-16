@@ -77,7 +77,7 @@ class MultipartDeliveryTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.store.diary_delivery_state(entry_id), 'delivered')
 
-    def test_long_reply_resumes_without_repeating_acknowledged_parts_or_model_work(self):
+    def test_long_reply_holds_uncertain_part_without_repeating_model_or_send(self):
         text = ('A complete reply. 🙂\n' * 600) + 'The ending is preserved.'
         self.store.queue_reply(17, text)
         self.fail_at = 2
@@ -90,15 +90,35 @@ class MultipartDeliveryTests(unittest.TestCase):
         self.reopen()
         dispatch.store = self.store
         dispatch.deliver_reply()
-        self.assertIsNone(self.store.next_reply())
+        self.assertEqual(self.store.next_reply()['delivery_state'], 'held')
+        self.assertEqual(len(self.calls), 2)
         self.assertEqual(self.calls.count(first), 1)
-        self.assertTrue(self.calls[2].startswith(RETRY_NOTICE))
-        self.assertFalse(self.calls[-1].startswith(RETRY_NOTICE))
-        self.assertEqual(''.join(part.removeprefix(RETRY_NOTICE) for part in self.acknowledged), text)
-        for part in self.calls:
-            self.assertLessEqual(len(part.encode('utf-16-le')), 8000)
+        self.assertEqual(self.store.next_reply()['text'], text)
         controller.handle_update.assert_not_called()
-        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM telegram_delivery_progress').fetchone()[0], 0)
+        progress = self.store.connection.execute('SELECT * FROM telegram_delivery_progress').fetchone()
+        self.assertEqual((progress['next_chunk'], progress['chunk_attempts']), (1, 1))
+
+    def test_final_reply_ack_is_not_repeated_after_finish_failure(self):
+        self.store.queue_reply(17, 'Fixture reply.')
+        dispatch = ControllerDispatch(self.store, Mock(), self.api, Mock(), OwnerRateLimit(), 17, False, False)
+        with patch.object(self.store, 'finish_reply', side_effect=RuntimeError('fixture crash')):
+            with self.assertRaises(RuntimeError):
+                dispatch.deliver_reply()
+        self.assertEqual(len(self.calls), 1)
+        self.reopen()
+        self.store.recover_reply_claims()
+        dispatch.store = self.store
+        dispatch.deliver_reply()
+        self.assertEqual(len(self.calls), 1)
+        self.assertIsNone(self.store.next_reply())
+
+    def test_generic_sender_refuses_a_previously_attempted_unacknowledged_part(self):
+        from andrewbot.telegram import deliver_saved_message
+        self.fail_at = 1
+        with self.assertRaises(TimeoutError):
+            deliver_saved_message(self.api, self.store, 'reply', 7, 17, 'Fixture reply.')
+        self.assertFalse(deliver_saved_message(self.api, self.store, 'reply', 7, 17, 'Fixture reply.'))
+        self.assertEqual(len(self.calls), 1)
 
 
 if __name__ == '__main__':

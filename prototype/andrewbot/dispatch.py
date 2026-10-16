@@ -22,10 +22,11 @@ class ControllerDispatch:
         self.should_stop = should_stop
         self._poll_thread = None
         self._reply_thread = None
+        self._system_reply_thread = None
         self._poll_stop = threading.Event()
         self._updates_ready = threading.Event()
         self._reply_ready = threading.Event()
-        self._delivery_lock = threading.Lock()
+        self._system_reply_ready = threading.Event()
         self._input_lock = threading.RLock()
 
     def start(self):
@@ -33,26 +34,37 @@ class ControllerDispatch:
         if self._poll_thread is not None:
             raise RuntimeError('Telegram poller is already started')
         self._poll_thread = threading.Thread(target=self._poll_loop, name='andrew-owner-controls', daemon=True)
-        self._reply_thread = threading.Thread(target=self._reply_loop, name='andrew-replies', daemon=True)
+        self._reply_thread = threading.Thread(target=self._reply_loop, args=('normal',), name='andrew-replies', daemon=True)
+        self._system_reply_thread = threading.Thread(target=self._reply_loop, args=('system',), name='andrew-system-replies', daemon=True)
         self._poll_thread.start()
         self._reply_thread.start()
+        self._system_reply_thread.start()
 
-    def stop(self):
+    def stop(self, timeout=2):
         self._poll_stop.set()
         self._updates_ready.set()
         self._reply_ready.set()
-        if self._poll_thread is not None:
-            self._poll_thread.join(timeout=2)
-        if self._reply_thread is not None:
-            self._reply_thread.join(timeout=2)
+        self._system_reply_ready.set()
+        workers = (self._poll_thread, self._reply_thread, self._system_reply_thread)
+        for worker in workers:
+            if worker is not None:
+                worker.join(timeout=timeout)
+        return all(worker is None or not worker.is_alive() for worker in workers)
 
-    def _reply_loop(self):
+    def _reply_loop(self, lane):
+        ready = self._system_reply_ready if lane == 'system' else self._reply_ready
         while not self._poll_stop.is_set() and not self.should_stop():
-            self._reply_ready.wait(1)
-            self._reply_ready.clear()
-            if self._poll_stop.is_set() or self.should_stop():
-                return
-            self.guarded('Telegram reply delivery', self.deliver_reply)
+            ready.wait(1)
+            ready.clear()
+            # Drain the lane, so coalesced notifications do not add one second
+            # per reply. Claims and part attempts remain durable between calls.
+            while not self._poll_stop.is_set() and not self.should_stop():
+                try:
+                    if not self._deliver_reply(lane):
+                        break
+                except Exception as error:
+                    logging.warning('Telegram reply delivery failed (%s)', type(error).__name__)
+                    break
 
     def _owner_control(self, update, owner_id):
         """Route local commands and time-entry replies without starting model work."""
@@ -151,26 +163,38 @@ class ControllerDispatch:
             reply = 'The request outcome is uncertain. It was not automatically repeated; please check the result before asking again.'
         if self._poll_stop.is_set():
             return
-        self.store.complete_update(update_id, self.owner_id if owner else None, reply, uncertain)
-        self._reply_ready.set()
+        self.store.complete_update(update_id, self.owner_id if owner else None, reply, uncertain,
+                                   lane='system' if control else 'normal')
+        (self._system_reply_ready if control else self._reply_ready).set()
 
-    def deliver_reply(self):
-        with self._delivery_lock:
-            self._deliver_reply()
+    def deliver_reply(self, lane=None):
+        if lane is not None:
+            return self._deliver_reply(lane)
+        system = self._deliver_reply('system')
+        normal = self._deliver_reply('normal')
+        return system or normal
 
-    def _deliver_reply(self):
-        row = self.store.next_reply()
+    def _deliver_reply(self, lane='normal'):
+        if self._poll_stop.is_set() or self.should_stop():
+            return False
+        row = self.store.claim_reply(lane)
         if row is None:
-            return
-        age = self.store.reply_age_seconds(row['id'], self.utc_now())
-        if age is not None:
-            self.metrics.observe('outbox_wait', age)
-        self.store.attempt_reply(row['id'])
-        complete = deliver_saved_message(self.telegram, self.store, 'reply', row['id'], row['chat_id'],
-                                         row['text'], row['attempts'] > 0,
-                                         should_stop=lambda: self._poll_stop.is_set() or self.should_stop())
-        if complete and not self._poll_stop.is_set():
-            self.store.delivered_reply(row['id'])
+            return False
+        try:
+            age = self.store.reply_age_seconds(row['id'], self.utc_now())
+            if age is not None:
+                self.metrics.observe('outbox_wait', age)
+            complete = deliver_saved_message(self.telegram, self.store, 'reply', row['id'], row['chat_id'],
+                                             row['text'], row['attempts'] > 0,
+                                             should_stop=lambda: self._poll_stop.is_set() or self.should_stop())
+            if complete:
+                self.store.finish_reply(row['id'], row['claim_token'])
+            else:
+                self.store.release_reply(row['id'], row['claim_token'])
+        except Exception:
+            self.store.hold_reply(row['id'], row['claim_token'])
+            raise
+        return True
 
     def _run_stage(self, stage, action):
         with self.metrics.measure(stage):

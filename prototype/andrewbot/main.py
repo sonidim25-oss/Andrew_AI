@@ -29,6 +29,19 @@ from .dispatch import ControllerDispatch
 from .latency import LatencyMetrics
 
 
+def close_controller_resources(dispatch, gateway_thread, history, store):
+    workers_stopped = dispatch.stop()
+    gateway_thread.close()
+    if not workers_stopped:
+        # A timed-out sender/poller may still need these objects. Process exit
+        # releases them; closing them here would race its acknowledgement.
+        logging.error('Controller workers did not stop; shared storage kept open until process exit')
+        return False
+    history.close()
+    store.close()
+    return True
+
+
 def data_directory():
     return Path(os.environ.get("ANDREW_DATA_DIR", Path.home() / ".local/state/andrew"))
 
@@ -216,6 +229,7 @@ def run(validate_only=False):
     if interrupted_messages and not store.get_state('autonomy_error', ''):
         store.record_session_failure('interrupted', owner_id)
     store.recover_update_claims(owner_id)
+    store.recover_reply_claims()
     if not autonomous_enabled:
         store.set_state("session_start_requested", "")
     logging.info(
@@ -268,12 +282,9 @@ def run(validate_only=False):
                 logging.warning("Controller iteration failed (%s)", type(error).__name__)
                 time.sleep(5)
     finally:
-        dispatch.stop()
-        gateway_thread.close()
-        history.close()
-        store.close()
+        shutdown_complete = close_controller_resources(dispatch, gateway_thread, history, store)
     logging.info("Andrew Telegram controller stopped")
-    return 0
+    return 0 if shutdown_complete else 2
 
 
 if __name__ == "__main__":

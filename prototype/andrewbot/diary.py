@@ -124,8 +124,11 @@ def deliver_pending_diary(telegram, store, owner_id):
         if not store.claim_pending_diary_delivery(entry_id):
             continue
         try:
-            deliver_saved_message(telegram, store, 'diary', entry_id, owner_id,
-                                  format_diary_entry(entry), entry['delivery_attempts'] > 0)
+            complete = deliver_saved_message(telegram, store, 'diary', entry_id, owner_id,
+                                             format_diary_entry(entry), entry['delivery_attempts'] > 0)
+            if not complete:
+                record_failure(RuntimeError('Diary delivery remains held'))
+                continue
         except Exception as error:
             record_failure(error)
             store.add_activity(f"Diary Telegram delivery outcome uncertain ({entry_id})")
