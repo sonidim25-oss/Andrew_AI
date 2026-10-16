@@ -53,7 +53,12 @@ class RunnerService:
     def _podman_args(self, container_name):
         args = [
             self.config.podman_binary, "--runtime=/usr/bin/crun", "run", "--rm", "--name", container_name, "-i",
-            "--timeout=120", "--log-driver=none", "--pull=never", "--label=org.andrew.runtime=managed",
+            # The outer watchdog owns the 120-second request deadline. Podman
+            # starts its timer independently and can otherwise exit 255 just
+            # before that watchdog, hiding the timeout as worker_unavailable.
+            # Keep a later container fallback for a failed launcher; the hard
+            # run_bounded deadline and forced cleanup remain at 120 seconds.
+            "--timeout=125", "--log-driver=none", "--pull=never", "--label=org.andrew.runtime=managed",
             "--group-add=keep-groups", "--network=none", "--userns=keep-id:uid=1000,gid=1000", "--read-only", "--user=1000:1000", "--cap-drop=ALL",
             "--security-opt=no-new-privileges", "--pids-limit=256", "--memory=2g", "--cpus=2",
             "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=256m",

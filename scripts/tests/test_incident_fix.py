@@ -39,7 +39,7 @@ class IncidentFixTests(unittest.TestCase):
         self.assertNotIn('private text', json.dumps(result))
 
     def exercise_installer(self, fail_start=False, changed_source=False, fail_acceptance=False, fail_proof=False,
-                           p1=False, intermediate=False, unknown_installed=False):
+                           p1=False, intermediate=False, unknown_installed=False, runtime_patch=False):
         installer = load('install-p1-fixes' if p1 else 'install-incident-fix')
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -55,10 +55,17 @@ class IncidentFixTests(unittest.TestCase):
             readiness = Mock(PROOF=proof_path)
             readiness.protected_read.return_value = b'{}'
             readiness.bindings.return_value = {'code': 'old', 'policy': 'same'}
+            runtime_path = root / 'runtime-runner.py'
+            runtime_path.write_bytes(b'# runtime original\n')
+            runtime = {'path': runtime_path, 'original': runtime_path.read_bytes(),
+                       'tested': b'# runtime tested\n', 'expected_service_code': 'expected-service'} if runtime_patch else None
+            if runtime_patch:
+                readiness.bindings.side_effect = lambda: {'code': 'old', 'policy': 'same', 'service_code':
+                    'expected-service' if runtime_path.read_bytes() == b'# runtime tested\n' else 'original-service'}
             manifest = {}
             installed_data = (b'# unreviewed change\n' if unknown_installed else
                               b'# reviewed intermediate\n' if intermediate else b'# original\n')
-            names = (['appserver.py', 'browser_history.py', 'controller.py', 'diary.py', 'dispatch.py', 'main.py', 'memory.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py']
+            names = (['appserver.py', 'browser_history.py', 'controller.py', 'diary.py', 'dispatch.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py']
                      if p1 else ['appserver.py', 'configuration.py', 'gateway.py', 'sessions.py'])
             for name in names:
                 (source / name).write_bytes(b'# tested\n')
@@ -72,18 +79,26 @@ class IncidentFixTests(unittest.TestCase):
                 (source / names[0]).write_bytes(b'# untested change\n')
             starts = []
             def command(*args):
-                if args[:2] == ('systemctl', 'start'):
+                if args[:3] == ('systemctl', 'start', installer.SERVICE):
                     starts.append(args)
                     if fail_start and len(starts) == 1:
                         raise RuntimeError('startup failed')
                 return 'Andrew Telegram controller started' if args[0] == 'journalctl' else 'active'
+            def accept(*args):
+                if runtime_patch:
+                    self.assertEqual(runtime_path.read_bytes(), b'# runtime tested\n')
+                    self.assertTrue(any(call.args[:3] == ('systemctl', 'stop', installer.SERVICE)
+                                        for call in commands.call_args_list))
+                if fail_acceptance:
+                    raise RuntimeError('failed acceptance')
             with patch.object(installer, 'ROOT', root), patch.object(installer, 'TARGET', target), \
                  patch.object(installer.os, 'geteuid', return_value=0), \
                  patch.object(installer.grp, 'getgrnam', return_value=types.SimpleNamespace(gr_gid=1000)), \
                  patch.object(installer, 'check_idle'), patch.object(installer, 'command', side_effect=command) as commands, \
+                 patch.object(installer, 'runtime_patch', return_value=runtime, create=True), \
                  patch.object(installer, 'wait_for_letta', create=True), \
                  patch.object(installer, 'load_readiness', return_value=readiness), \
-                 patch.object(installer, 'acceptance', side_effect=RuntimeError('failed acceptance') if fail_acceptance else None) as acceptance, \
+                 patch.object(installer, 'acceptance', side_effect=accept) as acceptance, \
                  patch.object(installer, 'renew_proof', side_effect=RuntimeError('failed proof') if fail_proof else None) as renewal, \
                  patch.object(installer.tempfile, 'mkdtemp', return_value=str(backup)), \
                  patch.object(installer, 'replace', side_effect=lambda path, data, gid, **kwargs: path.write_bytes(data)), \
@@ -96,7 +111,8 @@ class IncidentFixTests(unittest.TestCase):
                 if changed_source or unknown_installed:
                     commands.assert_not_called()
                 elif fail_acceptance:
-                    self.assertFalse(any(call.args[:2] == ('systemctl', 'stop') for call in commands.call_args_list))
+                    if not runtime_patch:
+                        self.assertFalse(any(call.args[:2] == ('systemctl', 'stop') for call in commands.call_args_list))
                     renewal.assert_not_called()
                 else:
                     acceptance.assert_called_once()
@@ -113,6 +129,57 @@ class IncidentFixTests(unittest.TestCase):
             if fail_start:
                 self.assertEqual(len(starts), 2)
             self.assertEqual(proof_path.read_bytes(), b'{}')
+            self.assertEqual(runtime_path.read_bytes(), b'# runtime original\n' if fail_start or fail_acceptance or fail_proof else
+                             b'# runtime tested\n' if runtime_patch else b'# runtime original\n')
+
+    def test_runtime_deadline_patch_is_installed_before_acceptance(self):
+        self.exercise_installer(p1=True, runtime_patch=True)
+
+    def test_runtime_patch_rolls_back_on_acceptance_failure(self):
+        self.exercise_installer(p1=True, runtime_patch=True, fail_acceptance=True)
+
+    def test_runtime_patch_rolls_back_on_controller_startup_failure(self):
+        self.exercise_installer(p1=True, runtime_patch=True, fail_start=True)
+
+    def test_runtime_patch_rolls_back_on_proof_failure(self):
+        self.exercise_installer(p1=True, runtime_patch=True, fail_proof=True)
+
+    def test_runtime_patch_only_accepts_reviewed_code_and_predicts_exact_package_digest(self):
+        installer = load('install-p1-fixes')
+        from andrewbot.runtime_readiness import code_digest
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / 'runtime'
+            package.mkdir()
+            (root / 'prototype/andrewbot').mkdir(parents=True)
+            path = package / 'runner_service.py'
+            path.write_bytes(b'# original\n')
+            (package / 'unrelated.py').write_bytes(b'# unrelated\n')
+            (root / 'prototype/andrewbot/runner_service.py').write_bytes(b'# tested\n')
+            hashes = {key: hashlib.sha256(data).hexdigest() for key, data in
+                      [('original', b'# original\n'), ('tested', b'# tested\n')]}
+            with patch.object(installer, 'ROOT', root), patch.object(installer, 'RUNTIME_PACKAGE', package):
+                plan = installer.runtime_patch({'runner_service.py': hashes})
+                self.assertEqual(path.read_bytes(), b'# original\n')
+                path.write_bytes(plan['tested'])
+                self.assertEqual(plan['expected_service_code'], code_digest(package))
+                self.assertIsNone(installer.runtime_patch({'runner_service.py': hashes}))
+                path.write_bytes(b'# unknown\n')
+                with self.assertRaises(RuntimeError):
+                    installer.runtime_patch({'runner_service.py': hashes})
+
+    def test_runtime_proof_allows_only_predicted_service_digest(self):
+        installer = load('install-p1-fixes')
+        readiness = Mock(PROOF=Path('/unused/proof.json'))
+        before = {'code': 'old', 'service_code': 'old-runtime', 'policy': 'same', 'image': 'same'}
+        readiness.bindings.return_value = {**before, 'code': 'new', 'service_code': 'expected-runtime'}
+        with patch.object(installer, 'replace') as replace:
+            installer.renew_proof(readiness, {}, before, Path('/evidence'), expected_service_code='expected-runtime')
+            self.assertEqual(json.loads(replace.call_args.args[1])['service_code'], 'expected-runtime')
+        readiness.bindings.return_value['service_code'] = 'unexpected-runtime'
+        with patch.object(installer, 'replace') as replace, self.assertRaises(RuntimeError):
+            installer.renew_proof(readiness, {}, before, Path('/evidence'), expected_service_code='expected-runtime')
+        replace.assert_not_called()
 
     def test_installer_verifies_startup(self):
         self.exercise_installer()

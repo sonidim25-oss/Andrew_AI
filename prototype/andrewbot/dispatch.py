@@ -1,6 +1,9 @@
 """Durable Telegram dispatch, independent of the autonomous scheduler."""
 import logging
 import threading
+from datetime import datetime, timezone
+
+from .latency import LatencyMetrics, wall_age_seconds
 
 from .telegram_menu import BUTTON_COMMANDS
 from .telegram import deliver_saved_message
@@ -8,11 +11,14 @@ from .telegram import deliver_saved_message
 
 class ControllerDispatch:
     def __init__(self, store, controller, telegram, sessions, limiter,
-                 owner_id, autonomous_enabled, fallback_enabled, should_stop=lambda: False):
+                 owner_id, autonomous_enabled, fallback_enabled, should_stop=lambda: False,
+                 metrics=None, utc_now=None):
         self.store, self.controller, self.telegram = store, controller, telegram
         self.sessions, self.limiter = sessions, limiter
         self.owner_id = owner_id
         self.autonomous_enabled, self.fallback_enabled = autonomous_enabled, fallback_enabled
+        self.metrics = metrics if metrics is not None else LatencyMetrics()
+        self.utc_now = utc_now if utc_now is not None else lambda: datetime.now(timezone.utc)
         self.should_stop = should_stop
         self._poll_thread = None
         self._reply_thread = None
@@ -72,7 +78,8 @@ class ControllerDispatch:
                 return
             try:
                 offset = self.store.last_update_id()
-                updates = self.telegram.get_updates(offset=None if offset is None else offset + 1, poll_timeout=1)
+                updates = self._run_stage('poll', lambda: self.telegram.get_updates(
+                    offset=None if offset is None else offset + 1, poll_timeout=1))
                 if self._poll_stop.is_set() or self.should_stop():
                     return
                 for update in updates:
@@ -128,10 +135,14 @@ class ControllerDispatch:
     def _handle_claimed_update(self, update_id, update, owner, control):
         uncertain = False
         try:
-            if self._poll_thread is not None and not control:
-                reply = self.controller.handle_update(update, allow_time_entry=False)
-            else:
-                reply = self.controller.handle_update(update)
+            age = wall_age_seconds(self.store.inbox_received_at(update_id), self.utc_now())
+            if age is not None:
+                self.metrics.observe('inbox_wait', age)
+            with self.metrics.measure('control' if control else 'chat'):
+                if self._poll_thread is not None and not control:
+                    reply = self.controller.handle_update(update, allow_time_entry=False)
+                else:
+                    reply = self.controller.handle_update(update)
             if control and self.store.get_state('telegram_wake_prompt_until', ''):
                 self.store.set_state('telegram_wake_prompt_after_update_id', str(update_id))
         except Exception as error:
@@ -151,12 +162,19 @@ class ControllerDispatch:
         row = self.store.next_reply()
         if row is None:
             return
+        age = self.store.reply_age_seconds(row['id'], self.utc_now())
+        if age is not None:
+            self.metrics.observe('outbox_wait', age)
         self.store.attempt_reply(row['id'])
         complete = deliver_saved_message(self.telegram, self.store, 'reply', row['id'], row['chat_id'],
                                          row['text'], row['attempts'] > 0,
                                          should_stop=lambda: self._poll_stop.is_set() or self.should_stop())
         if complete and not self._poll_stop.is_set():
             self.store.delivered_reply(row['id'])
+
+    def _run_stage(self, stage, action):
+        with self.metrics.measure(stage):
+            return action()
 
     @staticmethod
     def guarded(name, action):
@@ -171,7 +189,9 @@ class ControllerDispatch:
     def step(self):
         def poll():
             offset = self.store.last_update_id()
-            for update in self.telegram.get_updates(offset=None if offset is None else offset + 1):
+            updates = self._run_stage('poll', lambda: self.telegram.get_updates(
+                offset=None if offset is None else offset + 1))
+            for update in updates:
                 self.store.enqueue_update(update)
 
         if self._poll_thread is None:
@@ -186,19 +206,19 @@ class ControllerDispatch:
         if self.should_stop():
             return polled
         if self.autonomous_enabled:
-            self.guarded('Scheduled wake', self.controller.check_scheduled_wake)
+            self.guarded('Scheduled wake', lambda: self._run_stage('schedule', self.controller.check_scheduled_wake))
         if self.fallback_enabled:
-            self.guarded('Fallback wake', self.controller.check_fallback_wake)
+            self.guarded('Fallback wake', lambda: self._run_stage('schedule', self.controller.check_fallback_wake))
         if self._poll_thread is None:
             self.guarded('Telegram reply delivery', self.deliver_reply)
         else:
             self._reply_ready.set()
         if self.should_stop():
             return polled
-        self.guarded('Queued messages', lambda: self.store.queue_reply(
-            self.owner_id, self.controller.flush_queued()))
+        self.guarded('Queued messages', lambda: self._run_stage('queued', lambda: self.store.queue_reply(
+            self.owner_id, self.controller.flush_queued())))
         self._reply_ready.set()
         if self.should_stop():
             return polled
-        self.guarded('Autonomous session', self.sessions.tick)
+        self.guarded('Autonomous session', lambda: self._run_stage('autonomous', self.sessions.tick))
         return polled

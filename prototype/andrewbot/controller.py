@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import logging
+from .latency import record_failure
 from .budget import budget_snapshot
 from .configuration import MAX_LETTA_OUTPUT_TOKENS, ModelConfig, load_model_config
 from .diary import format_diary_entry, parse_diary_command, validate_diary_content
@@ -156,6 +157,7 @@ class Controller:
             self.note_conversation(owner_revision, completed=True)
             return reply
         except Exception as error:
+            record_failure(error, 'cancelled' if isinstance(error, LettaTurnCancelled) else None)
             self.store.hold_uncertain_queued_claim([message_id])
             self.store.add_activity("Owner message outcome uncertain; held to avoid duplicate delivery")
             return self.failed_turn(error, owner_revision)
@@ -279,6 +281,7 @@ class Controller:
             self.note_conversation(owner_revision, completed=True)
             return reply
         except Exception as error:
+            record_failure(error, 'cancelled' if isinstance(error, LettaTurnCancelled) else None)
             self.store.hold_uncertain_queued_claim([row["id"] for row in queued])
             self.store.add_activity("Queued message replay outcome uncertain; messages held to avoid duplicate delivery")
             return self.failed_turn(error, owner_revision)

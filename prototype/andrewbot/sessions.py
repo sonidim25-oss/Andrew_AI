@@ -1,3 +1,4 @@
+from .latency import record_failure
 import logging
 import sqlite3
 import uuid
@@ -199,7 +200,8 @@ class SessionRunner:
                 raise LettaTurnCancelled('Owner changed the active session')
             stage = "finish_cycle"
             self.store.finish_cycle(cycle_id, "complete")
-        except LettaTurnCancelled:
+        except LettaTurnCancelled as error:
+            record_failure(error, 'cancelled')
             if cycle_started:
                 self.store.finish_cycle(cycle_id, 'stopped')
             # Owner pause/wake already wrote the authoritative state. Do not
@@ -209,6 +211,7 @@ class SessionRunner:
                 self.started_at = None
             return False
         except Exception as error:
+            record_failure(error)
             if self.store.get_state('active_session_id', '') != session_id:
                 if cycle_started:
                     self.store.finish_cycle(cycle_id, 'stopped')
@@ -246,7 +249,8 @@ class SessionRunner:
         try:
             cycles_today = self.store.cycle_count(day)
             self.store.add_activity(f"Autonomous cycle completed ({cycles_today}/150 today)")
-        except Exception:
+        except Exception as error:
+            record_failure(error)
             self.fail('ledger_error')
             return False
         if cycles_today >= self.MAX_CYCLES_PER_DAY:

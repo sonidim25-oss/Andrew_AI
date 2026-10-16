@@ -4,6 +4,7 @@ from collections import deque
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from .telegram_menu import command_keyboard
+from .latency import LatencyMetrics
 
 
 def split_message(text, limit=3800):
@@ -38,12 +39,19 @@ def deliver_saved_message(telegram, store, kind, record_id, chat_id, text,
 
 
 class TelegramAPI:
-    def __init__(self, token, opener=None, timeout=35):
+    def __init__(self, token, opener=None, timeout=35, metrics=None):
         self.token = token
         self.opener = opener or urlopen
         self.timeout = timeout
+        self.metrics = metrics if metrics is not None else LatencyMetrics()
 
     def call(self, method, payload):
+        if method == 'sendMessage':
+            with self.metrics.measure('send'):
+                return self._call(method, payload)
+        return self._call(method, payload)
+
+    def _call(self, method, payload):
         url = f"https://api.telegram.org/bot{self.token}/{method}"
         request = Request(url, data=json.dumps(payload).encode("utf-8"),
                           headers={"Content-Type": "application/json"}, method="POST")

@@ -281,8 +281,11 @@ class LifecyclePolicyTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.policy({"ANDREW_AUTONOMOUS_ENABLED": "1"})
 
-    def test_external_runtime_is_rejected_for_this_autonomous_release(self):
-        with self.assertRaises(ValueError):
+    def test_external_runtime_without_acceptance_proof_is_rejected(self):
+        # The host may have a valid production proof. Exercise the missing-proof
+        # branch explicitly rather than depending on the machine running tests.
+        with patch('andrewbot.lifecycle_policy.validate_runtime_proof',
+                   side_effect=ValueError('missing acceptance proof')), self.assertRaises(ValueError):
             self.policy({"ANDREW_AUTONOMOUS_ENABLED": "1", "ANDREW_ISOLATED_RUNTIME_ENABLED": "1"})
 
     def test_budget_values_cannot_weaken_release_limits(self):

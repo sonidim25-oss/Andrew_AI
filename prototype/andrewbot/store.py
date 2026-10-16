@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from functools import wraps
 from zoneinfo import ZoneInfo
+from .latency import wall_age_seconds
 
 
 def database_locked(method):
@@ -57,7 +58,8 @@ class Store:
                 id INTEGER PRIMARY KEY,
                 chat_id INTEGER NOT NULL,
                 text TEXT NOT NULL,
-                attempts INTEGER NOT NULL DEFAULT 0
+                attempts INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT
             );
             CREATE TABLE IF NOT EXISTS telegram_delivery_progress (
                 kind TEXT NOT NULL,
@@ -195,6 +197,10 @@ class Store:
                 created_at TEXT NOT NULL
             );
         """)
+        # Additive migration: historical enqueue times are unknown, not "now".
+        columns = {row['name'] for row in self.connection.execute('PRAGMA table_info(telegram_outbox)')}
+        if 'created_at' not in columns:
+            self.connection.execute('ALTER TABLE telegram_outbox ADD COLUMN created_at TEXT')
         self.connection.commit()
         try:
             self.path.chmod(0o600)
@@ -527,7 +533,7 @@ class Store:
                 "INSERT INTO activity(event,created_at) VALUES(?,?)", (event, self.now())
             )
             if notice and chat_id is not None:
-                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text) VALUES(?,?)", (chat_id, notice))
+                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text,created_at) VALUES(?,?,?)", (chat_id, notice, self.now()))
             if updates.get('active_session_id'):
                 self._research_event('session_started')
             if updates.get('active_session_id') == '':
@@ -799,7 +805,7 @@ class Store:
             if uncertain:
                 self.connection.execute('INSERT OR IGNORE INTO telegram_uncertain SELECT * FROM telegram_inbox WHERE update_id=?', (update_id,))
             if reply and chat_id is not None:
-                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text) VALUES(?,?)", (chat_id, reply))
+                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text,created_at) VALUES(?,?,?)", (chat_id, reply, self.now()))
             self.connection.execute("INSERT OR IGNORE INTO updates(update_id) VALUES(?)", (update_id,))
             self.connection.execute("DELETE FROM telegram_inbox WHERE update_id=?", (update_id,))
             self.connection.execute("DELETE FROM telegram_claims WHERE update_id=?", (update_id,))
@@ -824,15 +830,27 @@ class Store:
                 self.connection.execute("DELETE FROM telegram_inbox WHERE update_id=?", (row[0],))
             self.connection.execute("DELETE FROM telegram_claims")
             if rows:
-                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text) VALUES(?,?)", (
-                    owner_id, "Andrew restarted during an owner request. Its outcome is uncertain; it was not automatically repeated. Please check the result before asking again."))
+                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text,created_at) VALUES(?,?,?)", (
+                    owner_id, "Andrew restarted during an owner request. Its outcome is uncertain; it was not automatically repeated. Please check the result before asking again.", self.now()))
             return len(rows)
 
     @database_locked
     def queue_reply(self, chat_id, text):
         if text:
             with self.connection:
-                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text) VALUES(?,?)", (chat_id, text))
+                self.connection.execute("INSERT INTO telegram_outbox(chat_id,text,created_at) VALUES(?,?,?)", (chat_id, text, self.now()))
+
+    @database_locked
+    def inbox_received_at(self, update_id):
+        row = self.connection.execute('SELECT received_at FROM telegram_inbox WHERE update_id=?',
+                                      (update_id,)).fetchone()
+        return row['received_at'] if row else None
+
+    @database_locked
+    def reply_age_seconds(self, reply_id, now):
+        row = self.connection.execute('SELECT created_at FROM telegram_outbox WHERE id=?',
+                                      (reply_id,)).fetchone()
+        return wall_age_seconds(row['created_at'], now) if row else None
 
     @database_locked
     def next_reply(self):

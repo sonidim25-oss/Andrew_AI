@@ -26,6 +26,7 @@ from .browser_tools import BrowserTools
 from .account_broker import StoredAccountBroker
 from .gmail_tools import GmailTools
 from .dispatch import ControllerDispatch
+from .latency import LatencyMetrics
 
 
 def data_directory():
@@ -123,7 +124,8 @@ def run(validate_only=False):
         logging.error("Startup validation failed: browser history storage (%s)", type(error).__name__)
         store.close()
         return 2
-    telegram = TelegramAPI(telegram_token)
+    metrics = LatencyMetrics()
+    telegram = TelegramAPI(telegram_token, metrics=metrics)
     try:
         gateway_token = systemd_credential("andrew-gateway-token")
     except Exception as error:
@@ -233,7 +235,8 @@ def run(validate_only=False):
 
     def deliver_diary_outbox():
         try:
-            return deliver_pending_diary(telegram, store, owner_id)
+            with metrics.measure('diary'):
+                return deliver_pending_diary(telegram, store, owner_id)
         except Exception as error:
             logging.warning("Diary delivery processing stopped (%s)", type(error).__name__)
             return 0
@@ -241,14 +244,16 @@ def run(validate_only=False):
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     dispatch = ControllerDispatch(store, controller, telegram, sessions, limiter,
-                                  owner_id, autonomous_enabled, fallback_enabled, lambda: stopping)
+                                  owner_id, autonomous_enabled, fallback_enabled, lambda: stopping, metrics=metrics)
     dispatch.start()
     logging.info("Andrew Telegram controller started; secrets are loaded from the encrypted vault")
     try:
         while not stopping:
             try:
                 try:
-                    if backup_scheduler.maybe_snapshot():
+                    with metrics.measure('backup'):
+                        snapshot_created = backup_scheduler.maybe_snapshot()
+                    if snapshot_created:
                         logging.info("Encrypted memory backup snapshot created")
                 except Exception as error:
                     logging.warning("Encrypted memory backup failed (%s)", type(error).__name__)

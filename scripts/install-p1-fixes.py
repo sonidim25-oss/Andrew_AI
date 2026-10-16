@@ -20,6 +20,25 @@ from datetime import datetime, timezone
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = Path('/opt/andrew/prototype/andrewbot')
 SERVICE = 'andrew-control.service'
+RUNTIME_PACKAGE = Path('/opt/andrew/runtime-services/andrewbot')
+
+
+def runtime_patch(manifest):
+    """Review the one runtime-service replacement before stopping any service."""
+    path = RUNTIME_PACKAGE / 'runner_service.py'
+    original = path.read_bytes()
+    hashes = manifest['runner_service.py']
+    if hashlib.sha256(original).hexdigest() not in {hashes['original'], hashes['tested'], *hashes.get('reviewed', {})}:
+        raise RuntimeError('Installed runtime runner differs from reviewed versions; installation refused')
+    tested = (ROOT / 'prototype/andrewbot/runner_service.py').read_bytes()
+    if original == tested:
+        return None
+    digest = hashlib.sha256()
+    for module in sorted(RUNTIME_PACKAGE.glob('*.py')):
+        if module.is_symlink():
+            raise RuntimeError('Symlink in runtime service package; installation refused')
+        digest.update(module.name.encode() + b'\0' + (tested if module == path else module.read_bytes()) + b'\0')
+    return {'path': path, 'original': original, 'tested': tested, 'expected_service_code': digest.hexdigest()}
 
 
 def command(*args):
@@ -71,9 +90,12 @@ def acceptance(backup, readiness):
           '-p', 'test_*protocol.py', '-q')
 
 
-def renew_proof(readiness, original, before, backup):
+def renew_proof(readiness, original, before, backup, expected_service_code=None):
     after = readiness.bindings()
-    if any(after.get(key) != value for key, value in before.items() if key != 'code'):
+    expected = {**before}
+    if expected_service_code is not None:
+        expected['service_code'] = expected_service_code
+    if any(after.get(key) != value for key, value in expected.items() if key != 'code'):
         raise RuntimeError('Runtime service code, image, or policy changed during installation')
     proof = {**original, **after, 'verified_at': datetime.now(timezone.utc).isoformat(), 'evidence': str(backup)}
     readiness.check_proof(proof, after)
@@ -137,7 +159,7 @@ def main():
     if os.geteuid() != 0:
         raise SystemExit('Run this installer with sudo in your server terminal.')
     manifest = json.loads((ROOT / 'scripts/p1-fix-manifest.json').read_text())
-    if set(manifest) != {'appserver.py', 'browser_history.py', 'controller.py', 'diary.py', 'dispatch.py', 'main.py', 'memory.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py'}:
+    if set(manifest) != {'appserver.py', 'browser_history.py', 'controller.py', 'diary.py', 'dispatch.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py'}:
         raise SystemExit('Unexpected module manifest; installation refused.')
     replacements = {}
     for name, hashes in manifest.items():
@@ -158,6 +180,7 @@ def main():
     original_proof = json.loads(original_proof_bytes)
     before = readiness.bindings()
     readiness.check_proof(original_proof, before)
+    runtime = runtime_patch(manifest)
     # Protocol checks use the checkout; require it to match every unchanged installed module.
     for path in TARGET.glob('*.py'):
         if path.name not in replacements and path.read_bytes() != (ROOT / 'prototype/andrewbot' / path.name).read_bytes():
@@ -167,16 +190,34 @@ def main():
     for name in replacements:
         shutil.copy2(TARGET / name, backup / name)
     (backup / 'runtime-proof.json').write_bytes(original_proof_bytes)
+    if runtime:
+        (backup / 'runtime-runner_service.py').write_bytes(runtime['original'])
     print('Original modules backed up in ' + str(backup), flush=True)
+    controller_stopped = False
+    runtime_changed = False
+    stage = 'acceptance'
     try:
+        if runtime:
+            # No autonomous work may run against an unaccepted service binding.
+            command('systemctl', 'stop', SERVICE)
+            controller_stopped = True
+            check_idle()
+            stage = 'runtime_deadline_patch'
+            command('systemctl', 'stop', 'andrew-runner.service')
+            runtime_changed = True
+            replace(runtime['path'], runtime['tested'], 0, mode=0o644)
+            command('systemctl', 'start', 'andrew-runner.service')
+            command('systemctl', 'is-active', 'andrew-runner.service')
+        stage = 'acceptance'
         acceptance(backup, readiness)
-        readiness.check_proof(original_proof, readiness.bindings())
+        expected_before = {**before, **({'service_code': runtime['expected_service_code']} if runtime else {})}
+        if readiness.bindings() != expected_before:
+            raise RuntimeError('Runtime bindings changed unexpectedly during acceptance')
         check_idle()
-    except Exception:
-        raise SystemExit('Acceptance failed before installation; controller left running unchanged. Evidence: ' + str(backup))
-    command('systemctl', 'stop', SERVICE)
-    stage = 'idle_recheck'
-    try:
+        if not controller_stopped:
+            command('systemctl', 'stop', SERVICE)
+            controller_stopped = True
+        stage = 'idle_recheck'
         check_idle()
         # The local backend keeps active-run bookkeeping in memory. A controller
         # restart alone cannot clear an orphaned run left by an old transport.
@@ -189,7 +230,10 @@ def main():
         for name, data in replacements.items():
             replace(TARGET / name, data, gid)
         stage = 'proof_renewal'
-        renew_proof(readiness, original_proof, before, backup)
+        if runtime:
+            renew_proof(readiness, original_proof, before, backup, expected_service_code=runtime['expected_service_code'])
+        else:
+            renew_proof(readiness, original_proof, before, backup)
         stage = 'controller_start'
         command('systemctl', 'start', SERVICE)
         stage = 'controller_startup_verification'
@@ -197,9 +241,15 @@ def main():
         print('Reviewed fixes installed; Letta backend restarted and controller startup verified. Stored messages were preserved; no wake or replay was requested.')
     except Exception as error:
         (backup / 'installation-failure.json').write_text(json.dumps({'stage': stage, 'error_type': type(error).__name__}) + '\n')
+        if not controller_stopped:
+            raise SystemExit('Acceptance failed before installation; controller left running unchanged. Evidence: ' + str(backup))
         command('systemctl', 'stop', SERVICE)
         for name in replacements:
             replace(TARGET / name, (backup / name).read_bytes(), gid)
+        if runtime_changed:
+            command('systemctl', 'stop', 'andrew-runner.service')
+            replace(runtime['path'], runtime['original'], 0, mode=0o644)
+            command('systemctl', 'start', 'andrew-runner.service')
         replace(readiness.PROOF, original_proof_bytes, 0, mode=0o644)
         command('systemctl', 'start', SERVICE)
         raise SystemExit('Installation failed at ' + stage + ' (' + type(error).__name__ + '); '

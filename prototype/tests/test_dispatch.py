@@ -35,6 +35,94 @@ class DispatchTests(unittest.TestCase):
         self.dispatch = ControllerDispatch(self.store, self.controller, self.telegram,
             self.sessions, OwnerRateLimit(), 17, True, True)
 
+    def test_latency_snapshot_during_blocked_chat_and_local_control(self):
+        from andrewbot.latency import LatencyMetrics
+        metrics = LatencyMetrics()
+        self.dispatch = ControllerDispatch(self.store, self.controller, self.telegram,
+            self.sessions, OwnerRateLimit(), 17, True, True, metrics=metrics)
+        entered, release = threading.Event(), threading.Event()
+        errors = []
+        def handle(value):
+            if value['update_id'] == 1:
+                entered.set()
+                if not release.wait(3):
+                    raise AssertionError('chat fixture was not released')
+            return 'local reply' if value['update_id'] == 2 else 'model reply'
+        self.controller.handle_update.side_effect = handle
+        first, second = update(1), update(2, '/status')
+        self.store.enqueue_update(first)
+        self.store.enqueue_update(second)
+        def run_chat():
+            try:
+                self.dispatch.process_updates(updates=[(1, first)])
+            except BaseException as error:
+                errors.append(error)
+        worker = threading.Thread(target=run_chat)
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(1))
+            self.assertEqual(metrics.snapshot()['chat']['active_count'], 1)
+            self.dispatch.process_updates(controls_only=True, updates=[(2, second)])
+            snapshot = metrics.snapshot()
+            self.assertEqual(snapshot['control']['count'], 1)
+            self.assertEqual(snapshot['chat']['count'], 0)
+            self.assertEqual(snapshot['inbox_wait']['count'], 2)
+            self.assertEqual(self.store.next_reply()['text'], 'local reply')
+            self.assertEqual(self.controller.handle_update.call_count, 2)
+        finally:
+            release.set()
+            worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(metrics.snapshot()['chat']['count'], 1)
+
+    def test_persisted_queue_age_survives_restart_without_inventing_legacy_age(self):
+        from datetime import datetime, timedelta, timezone
+        self.store.enqueue_update(update(1))
+        received = self.store.inbox_received_at(1)
+        self.assertIsNotNone(received)
+        self.assertIsNone(self.store.inbox_received_at(99))
+        # Simulate the exact previous schema while retaining an attempted reply.
+        with self.store.connection:
+            self.store.connection.execute('DROP TABLE telegram_outbox')
+            self.store.connection.execute('CREATE TABLE telegram_outbox '
+                '(id INTEGER PRIMARY KEY, chat_id INTEGER NOT NULL, text TEXT NOT NULL, '
+                'attempts INTEGER NOT NULL DEFAULT 0)')
+            self.store.connection.execute("INSERT INTO telegram_outbox VALUES(7,17,'saved',2)")
+        self.store.prepare_telegram_delivery('reply', 7, 'saved', True)
+        self.reopen()
+        legacy = self.store.next_reply()
+        self.assertEqual((legacy['id'], legacy['text'], legacy['attempts']), (7, 'saved', 2))
+        self.assertIsNone(legacy['created_at'])
+        self.assertEqual(self.store.inbox_received_at(1), received)
+        self.assertEqual(self.store.connection.execute(
+            'SELECT chunk_attempts FROM telegram_delivery_progress').fetchone()[0], 1)
+        now = datetime.now(timezone.utc)
+        self.assertIsNone(self.store.reply_age_seconds(7, now))
+        self.assertIsNone(self.store.reply_age_seconds(999, now))
+        self.store.queue_reply(17, 'new')
+        row = self.store.connection.execute('SELECT * FROM telegram_outbox WHERE id>7').fetchone()
+        created = datetime.fromisoformat(row['created_at'])
+        self.reopen()
+        self.assertEqual(self.store.reply_age_seconds(row['id'], created + timedelta(seconds=20)), 20)
+        self.assertEqual(self.store.reply_age_seconds(row['id'], created - timedelta(seconds=20)), 0)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 0)
+
+    def test_dispatch_records_distinct_stages_and_failed_handling(self):
+        from andrewbot.latency import LatencyMetrics
+        metrics = LatencyMetrics()
+        self.dispatch = ControllerDispatch(self.store, self.controller, self.telegram,
+            self.sessions, OwnerRateLimit(), 17, True, True, metrics=metrics)
+        self.controller.handle_update.side_effect = RuntimeError('private content')
+        self.store.enqueue_update(update())
+        self.dispatch.step()
+        snapshot = metrics.snapshot()
+        for stage in ('poll', 'chat', 'inbox_wait', 'outbox_wait', 'queued', 'autonomous'):
+            self.assertEqual(snapshot[stage]['count'], 1, stage)
+        self.assertEqual(snapshot['schedule']['count'], 2)
+        self.assertEqual(snapshot['chat']['failures'], 1)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM telegram_uncertain').fetchone()[0], 1)
+
     def reopen(self):
         self.store.close()
         self.store = Store(self.path)

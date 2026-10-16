@@ -1,6 +1,7 @@
 import re
 from datetime import datetime
 from .telegram import deliver_saved_message
+from .latency import record_failure
 
 
 MAX_DIARY_CHARACTERS = 3000
@@ -123,7 +124,8 @@ def deliver_pending_diary(telegram, store, owner_id):
         try:
             deliver_saved_message(telegram, store, 'diary', entry_id, owner_id,
                                   format_diary_entry(entry), entry['delivery_attempts'] > 0)
-        except Exception:
+        except Exception as error:
+            record_failure(error)
             store.add_activity(f"Diary Telegram delivery outcome uncertain ({entry_id})")
             continue
         if store.mark_diary_delivered(entry_id):

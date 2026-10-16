@@ -193,5 +193,14 @@
         "c6c09cb0e383c48908ee082ddd42a5514be78f19"
       ]
     }
+  },
+  "runner_service.py": {
+    "original": "9570ad4dd2ce5617d13055076508af66dd3f88df00bf61bbf8f515eebccaee2f",
+    "tested": "db4c4ed2e3c5647278a514a7942b921a33b2083b4e7e80cc971cbd2a486b72fb",
+    "reviewed": {
+      "9570ad4dd2ce5617d13055076508af66dd3f88df00bf61bbf8f515eebccaee2f": [
+        "55026819e5eaa11876694dd2e0253a3b10b50a13"
+      ]
+    }
   }
 }
