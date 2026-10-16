@@ -230,6 +230,7 @@ def run(validate_only=False):
         store.record_session_failure('interrupted', owner_id)
     store.recover_update_claims(owner_id)
     store.recover_reply_claims()
+    store.recover_diary_claims()
     if not autonomous_enabled:
         store.set_state("session_start_requested", "")
     logging.info(
@@ -250,7 +251,7 @@ def run(validate_only=False):
     def deliver_diary_outbox():
         try:
             with metrics.measure('diary'):
-                return deliver_pending_diary(telegram, store, owner_id)
+                return deliver_pending_diary(telegram, store, owner_id, should_stop=lambda: stopping)
         except Exception as error:
             logging.warning("Diary delivery processing stopped (%s)", type(error).__name__)
             return 0
@@ -258,7 +259,8 @@ def run(validate_only=False):
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     dispatch = ControllerDispatch(store, controller, telegram, sessions, limiter,
-                                  owner_id, autonomous_enabled, fallback_enabled, lambda: stopping, metrics=metrics)
+                                  owner_id, autonomous_enabled, fallback_enabled, lambda: stopping, metrics=metrics,
+                                  diary_action=deliver_diary_outbox)
     dispatch.start()
     logging.info("Andrew Telegram controller started; secrets are loaded from the encrypted vault")
     try:
@@ -271,10 +273,8 @@ def run(validate_only=False):
                         logging.info("Encrypted memory backup snapshot created")
                 except Exception as error:
                     logging.warning("Encrypted memory backup failed (%s)", type(error).__name__)
-                deliver_diary_outbox()
                 if not dispatch.step():
                     time.sleep(5)
-                deliver_diary_outbox()
             except RuntimeError as error:
                 logging.warning("A remote request failed (%s)", type(error).__name__)
                 time.sleep(5)

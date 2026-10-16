@@ -1,9 +1,11 @@
 """Durable Telegram dispatch, independent of the autonomous scheduler."""
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 
 from .latency import LatencyMetrics, wall_age_seconds
+from .workers import ModelWorker
 
 from .telegram_menu import BUTTON_COMMANDS
 from .telegram import deliver_saved_message
@@ -12,7 +14,7 @@ from .telegram import deliver_saved_message
 class ControllerDispatch:
     def __init__(self, store, controller, telegram, sessions, limiter,
                  owner_id, autonomous_enabled, fallback_enabled, should_stop=lambda: False,
-                 metrics=None, utc_now=None):
+                 metrics=None, utc_now=None, diary_action=None):
         self.store, self.controller, self.telegram = store, controller, telegram
         self.sessions, self.limiter = sessions, limiter
         self.owner_id = owner_id
@@ -28,6 +30,19 @@ class ControllerDispatch:
         self._reply_ready = threading.Event()
         self._system_reply_ready = threading.Event()
         self._input_lock = threading.RLock()
+        self._diary_worker = ModelWorker(diary_action, lambda: self._poll_stop.is_set() or self.should_stop()) if diary_action is not None else None
+        self._model_worker = ModelWorker(self._model_pass, lambda: self._poll_stop.is_set() or self.should_stop())
+        self.controller.health_snapshot = self.health_snapshot
+
+    def health_snapshot(self):
+        now = time.monotonic()
+        metrics = self.metrics.snapshot()
+        for row in metrics.values():
+            last = row.pop('last_success_monotonic')
+            row['last_success_age_seconds'] = None if last is None else max(0, now - last)
+        return {'model': self._model_worker.snapshot(),
+                'diary': None if self._diary_worker is None else self._diary_worker.snapshot(),
+                'metrics': metrics}
 
     def start(self):
         """Poll and execute only local owner controls while model work is blocked."""
@@ -39,17 +54,23 @@ class ControllerDispatch:
         self._poll_thread.start()
         self._reply_thread.start()
         self._system_reply_thread.start()
+        self._model_worker.start()
+        if self._diary_worker is not None:
+            self._diary_worker.start()
 
     def stop(self, timeout=2):
         self._poll_stop.set()
         self._updates_ready.set()
         self._reply_ready.set()
         self._system_reply_ready.set()
+        deadline = time.monotonic() + max(0, timeout)
+        model_stopped = self._model_worker.stop(timeout=max(0, deadline - time.monotonic()))
+        diary_stopped = self._diary_worker is None or self._diary_worker.stop(timeout=max(0, deadline - time.monotonic()))
         workers = (self._poll_thread, self._reply_thread, self._system_reply_thread)
         for worker in workers:
             if worker is not None:
-                worker.join(timeout=timeout)
-        return all(worker is None or not worker.is_alive() for worker in workers)
+                worker.join(timeout=max(0, deadline - time.monotonic()))
+        return model_stopped and diary_stopped and all(worker is None or not worker.is_alive() for worker in workers)
 
     def _reply_loop(self, lane):
         ready = self._system_reply_ready if lane == 'system' else self._reply_ready
@@ -226,7 +247,8 @@ class ControllerDispatch:
             polled = True
         if self.should_stop():
             return polled
-        self.guarded('Owner request processing', self.process_updates)
+        if self._poll_thread is None:
+            self.guarded('Owner request processing', self.process_updates)
         if self.should_stop():
             return polled
         if self.autonomous_enabled:
@@ -239,10 +261,25 @@ class ControllerDispatch:
             self._reply_ready.set()
         if self.should_stop():
             return polled
+        if self._poll_thread is not None:
+            self._model_worker.wake()
+            if self._diary_worker is not None:
+                self._diary_worker.wake()
+            return polled
+        self._finish_model_pass()
+        return polled
+
+    def _model_pass(self):
+        self.guarded('Owner request processing', self.process_updates)
+        if not self._poll_stop.is_set() and not self.should_stop():
+            self._finish_model_pass()
+
+    def _finish_model_pass(self):
+        if self._poll_stop.is_set() or self.should_stop():
+            return
         self.guarded('Queued messages', lambda: self._run_stage('queued', lambda: self.store.queue_reply(
             self.owner_id, self.controller.flush_queued())))
         self._reply_ready.set()
-        if self.should_stop():
-            return polled
+        if self._poll_stop.is_set() or self.should_stop():
+            return
         self.guarded('Autonomous session', lambda: self._run_stage('autonomous', self.sessions.tick))
-        return polled

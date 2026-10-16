@@ -80,6 +80,21 @@ class PriorityDeliveryTests(unittest.TestCase):
             self.release.set()
             self.dispatch.stop()
 
+    def test_health_reports_blocked_sender_without_waiting_for_it(self):
+        try:
+            self.start_blocked_send()
+            self.inbox.put([control(text='/health')])
+            self.assertTrue(self.system_sent.wait(1))
+            self.assertFalse(self.release.is_set())
+            reply = self.sent[0]
+            self.assertIn('Health (local snapshots)', reply)
+            self.assertIn('normal: pending=0, sending=1, held=0', reply)
+            self.assertNotIn('ordinary fixture', reply)
+            self.assertEqual(self.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 0)
+        finally:
+            self.release.set()
+            self.dispatch.stop()
+
     def test_only_authenticated_local_controls_use_system_lane(self):
         values = [control(1), control(2, owner=99), control(3)]
         values[-1]['message']['forward_origin'] = {'type': 'user'}

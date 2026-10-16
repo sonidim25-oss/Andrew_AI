@@ -117,23 +117,27 @@ def parse_diary_command(text):
     raise ValueError("use /diary, /diary YYYY-MM-DD, or /diary retry YYYY-MM-DD")
 
 
-def deliver_pending_diary(telegram, store, owner_id):
+def deliver_pending_diary(telegram, store, owner_id, should_stop=lambda: False):
     delivered = 0
     for entry in store.pending_diary_deliveries():
+        if should_stop():
+            break
         entry_id = entry["entry_id"]
-        if not store.claim_pending_diary_delivery(entry_id):
+        token = store.claim_diary_sender(entry_id)
+        if token is None:
             continue
+        complete = False
         try:
             complete = deliver_saved_message(telegram, store, 'diary', entry_id, owner_id,
-                                             format_diary_entry(entry), entry['delivery_attempts'] > 0)
+                                             format_diary_entry(entry), entry['delivery_attempts'] > 0,
+                                             should_stop=should_stop)
             if not complete:
                 record_failure(RuntimeError('Diary delivery remains held'))
-                continue
         except Exception as error:
             record_failure(error)
             store.add_activity(f"Diary Telegram delivery outcome uncertain ({entry_id})")
-            continue
-        if store.mark_diary_delivered(entry_id):
-            delivered += 1
-            store.add_activity(f"Diary Telegram delivery confirmed ({entry_id})")
+        finally:
+            if store.finish_diary_sender(entry_id, token, delivered=complete):
+                delivered += 1
+                store.add_activity(f"Diary Telegram delivery confirmed ({entry_id})")
     return delivered

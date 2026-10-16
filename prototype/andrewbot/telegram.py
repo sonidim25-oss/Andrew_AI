@@ -41,7 +41,7 @@ def deliver_saved_message(telegram, store, kind, record_id, chat_id, text,
 
 
 class TelegramAPI:
-    def __init__(self, token, opener=None, timeout=35, metrics=None):
+    def __init__(self, token, opener=None, timeout=None, metrics=None):
         self.token = token
         self.opener = opener or urlopen
         self.timeout = timeout
@@ -58,7 +58,8 @@ class TelegramAPI:
         request = Request(url, data=json.dumps(payload).encode("utf-8"),
                           headers={"Content-Type": "application/json"}, method="POST")
         try:
-            with self.opener(request, timeout=self.timeout) as response:
+            timeout = self.timeout if self.timeout is not None else (payload['timeout'] + 5 if method == 'getUpdates' else 5)
+            with self.opener(request, timeout=timeout) as response:
                 data = json.loads(response.read())
         except HTTPError as error:
             # HTTPError URLs contain the bot token, so expose only the status.
@@ -81,6 +82,8 @@ class TelegramAPI:
         return self.call("getMe", {})
 
     def get_updates(self, offset=None, poll_timeout=25):
+        if type(poll_timeout) is not int or not 0 <= poll_timeout <= 50:
+            raise ValueError("Poll duration must be an integer from 0 to 50 seconds")
         payload = {"timeout": poll_timeout, "limit": 50, "allowed_updates": ["message"]}
         if offset is not None:
             payload["offset"] = offset

@@ -93,6 +93,10 @@ class Store:
                 delivery_state TEXT NOT NULL DEFAULT 'pending' CHECK(delivery_state IN ('pending','delivered','uncertain')),
                 delivery_attempts INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS diary_delivery_claims (
+                entry_id TEXT PRIMARY KEY REFERENCES diary_entries(entry_id),
+                token TEXT NOT NULL
+            );
             CREATE UNIQUE INDEX IF NOT EXISTS diary_one_per_day
                 ON diary_entries(local_date) WHERE record_type='diary';
             CREATE UNIQUE INDEX IF NOT EXISTS diary_one_incident_per_session
@@ -1215,6 +1219,37 @@ class Store:
         return cursor.rowcount == 1
 
     @database_locked
+    def claim_diary_sender(self, entry_id):
+        token = uuid.uuid4().hex
+        with self.connection:
+            cursor = self.connection.execute(
+                "UPDATE diary_entries SET delivery_state='uncertain',delivery_attempts=delivery_attempts+1 "
+                "WHERE entry_id=? AND delivery_state='pending' "
+                "AND NOT EXISTS(SELECT 1 FROM diary_delivery_claims WHERE entry_id=?)",
+                (entry_id, entry_id))
+            if cursor.rowcount != 1:
+                return None
+            self.connection.execute('INSERT INTO diary_delivery_claims VALUES(?,?)', (entry_id, token))
+        return token
+
+    @database_locked
+    def finish_diary_sender(self, entry_id, token, delivered=False):
+        with self.connection:
+            cursor = self.connection.execute('DELETE FROM diary_delivery_claims WHERE entry_id=? AND token=?',
+                                             (entry_id, token))
+            if cursor.rowcount != 1:
+                return False
+            if delivered:
+                return self.mark_diary_delivered(entry_id)
+        return False
+
+    @database_locked
+    def recover_diary_claims(self):
+        # Startup only: interrupted sends remain uncertain; no retry authorization.
+        with self.connection:
+            self.connection.execute('DELETE FROM diary_delivery_claims')
+
+    @database_locked
     def mark_diary_delivered(self, entry_id):
         with self.connection:
             cursor = self.connection.execute(
@@ -1231,7 +1266,8 @@ class Store:
         from .diary import format_diary_entry
         with self.connection:
             row = self.connection.execute("SELECT * FROM diary_entries WHERE entry_id=? AND delivery_state='uncertain'", (entry_id,)).fetchone()
-            if row is None:
+            if row is None or self.connection.execute(
+                    'SELECT 1 FROM diary_delivery_claims WHERE entry_id=?', (entry_id,)).fetchone():
                 return False
             content = format_diary_entry(self._diary_row(row))
             self.connection.execute(
@@ -1240,6 +1276,40 @@ class Store:
             self.connection.execute("UPDATE telegram_delivery_progress SET chunk_attempts=0,retry_notice=1 WHERE kind='diary' AND record_id=?", (entry_id,))
             self.connection.execute("UPDATE diary_entries SET delivery_state='pending' WHERE entry_id=?", (entry_id,))
             return True
+
+    @database_locked
+    def health_snapshot(self, owner_id, now=None):
+        current = datetime.now(timezone.utc) if now is None else now
+        messages = {row['queued']: row['n'] for row in self.connection.execute(
+            "SELECT queued,count(*) AS n FROM messages WHERE owner_id=? AND role='user' GROUP BY queued",
+            (owner_id,))}
+        inbox = self.connection.execute(
+            "SELECT count(*) AS n,min(received_at) AS oldest FROM telegram_inbox "
+            "WHERE json_extract(payload,'$.message.from.id')=? AND json_extract(payload,'$.message.chat.id')=?",
+            (owner_id, owner_id)).fetchone()
+        held_inbox = self.connection.execute(
+            "SELECT count(*) FROM telegram_uncertain WHERE json_extract(payload,'$.message.from.id')=? "
+            "AND json_extract(payload,'$.message.chat.id')=?", (owner_id, owner_id)).fetchone()[0]
+        outbox = {lane: {'pending': 0, 'sending': 0, 'held': 0, 'oldest_seconds': None}
+                  for lane in ('normal', 'system')}
+        for row in self.connection.execute(
+                "SELECT lane,delivery_state,count(*) AS n,min(created_at) AS oldest FROM telegram_outbox "
+                "WHERE chat_id=? GROUP BY lane,delivery_state", (owner_id,)):
+            if row['lane'] in outbox and row['delivery_state'] in ('pending', 'sending', 'held'):
+                lane = outbox[row['lane']]
+                lane[row['delivery_state']] = row['n']
+                if row['delivery_state'] == 'pending':
+                    lane['oldest_seconds'] = wall_age_seconds(row['oldest'], current)
+        diary = {row[0]: row[1] for row in self.connection.execute(
+            'SELECT delivery_state,count(*) FROM diary_entries GROUP BY delivery_state')}
+        return {'queued_messages': messages.get(1, 0), 'active_messages': messages.get(2, 0),
+                'held_messages': messages.get(3, 0), 'inbox': inbox['n'], 'held_inbox': held_inbox,
+                'inbox_oldest_seconds': wall_age_seconds(inbox['oldest'], current),
+                'outbox': outbox, 'diary_pending': diary.get('pending', 0),
+                'diary_uncertain': diary.get('uncertain', 0),
+                'paused': self.get_state('paused', '0') == '1',
+                'sleeping': self.get_state('sleeping', '0') == '1',
+                'model_halted': bool(self.get_state('autonomy_error', ''))}
 
     @database_locked
     def recent_activity(self, limit=10):

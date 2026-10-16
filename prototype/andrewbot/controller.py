@@ -17,8 +17,9 @@ class Controller:
                  monthly_reserve_usd=1.0, daily_target_usd=0.30,
                  timezone_name="America/Toronto", fallback_wake_time="09:00",
                  autonomous_enabled=False, fallback_enabled=False, memory_service=None, model_config=None,
-                 tool_runtime=None, visit_history=None, gmail_tools=None, conversation_idle_seconds=300):
+                 tool_runtime=None, visit_history=None, gmail_tools=None, conversation_idle_seconds=300, health_snapshot=None):
         self.store = store
+        self.health_snapshot = health_snapshot
         self.model = model
         self.owner_id = int(owner_id)
         self.monthly_limit_usd = float(monthly_limit_usd)
@@ -440,7 +441,35 @@ class Controller:
             except Exception as error:
                 logging.warning('Active turn cancellation failed (%s)', type(error).__name__)
 
+    def _health(self):
+        queues = self.store.health_snapshot(self.owner_id)
+        runtime = self.health_snapshot() if self.health_snapshot is not None else {}
+        def duration(value):
+            return 'unavailable' if value is None else f'{value:.1f}s'
+        lines = ['Health (local snapshots)',
+                 f"Lifecycle: paused={'yes' if queues['paused'] else 'no'}, "
+                 f"sleeping={'yes' if queues['sleeping'] else 'no'}, "
+                 f"model halted={'yes' if queues['model_halted'] else 'no'}",
+                 f"Queued messages: {queues['queued_messages']}; active={queues['active_messages']}; held={queues['held_messages']}",
+                 f"Inbox: {queues['inbox']}; held={queues['held_inbox']}; oldest={duration(queues['inbox_oldest_seconds'])}"]
+        for name in ('model', 'diary'):
+            worker = runtime.get(name) or {}
+            lines.append(f"{name.title()}: {worker.get('state', 'unavailable')}; "
+                         f"active={duration(worker.get('active_seconds'))}; "
+                         f"last completed={worker.get('last_completion_at') or 'unavailable'}")
+        for lane in ('normal', 'system'):
+            row = queues['outbox'][lane]
+            lines.append(f"Replies {lane}: pending={row['pending']}, sending={row['sending']}, held={row['held']}; "
+                         f"oldest pending={duration(row['oldest_seconds'])}")
+        lines.append(f"Diary: pending={queues['diary_pending']}, uncertain={queues['diary_uncertain']}")
+        for name, row in sorted(runtime.get('metrics', {}).items()):
+            lines.append(f"{name}: last={duration(row['last_seconds'])}, active={duration(row['oldest_active_seconds'])}, "
+                         f"failures={row['failures']}; last success age={duration(row['last_success_age_seconds'])}")
+        return '\n'.join(lines)
+
     def _command(self, command, text=""):
+        if command == '/health':
+            return self._health()
         if command == '/research':
             argument = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) == 2 else ''
             if argument == 'events':

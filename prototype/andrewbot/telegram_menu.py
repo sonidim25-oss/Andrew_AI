@@ -26,6 +26,7 @@ def command_keyboard():
 HELP_TEXT = (
     "Andrew · Your controls\n\n"
     "📊 /status — current state and next wake\n"
+    "/health — local worker, queue and latency diagnostics\n"
     "💰 /budget — spending and remaining allowance\n"
     "🌐 /history — recent browsing; /history example.com to search\n"
     "📖 /diary — latest entry; /diary YYYY-MM-DD for a date\n"

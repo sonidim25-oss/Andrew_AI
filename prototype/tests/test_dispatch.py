@@ -433,7 +433,8 @@ class ConcurrentOwnerControlsTests(unittest.TestCase):
                     self.assertEqual(store.pending_diary_deliveries(), [])
                 else:
                     self.assertFalse(cancelled.is_set())
-                    self.assertTrue(worker.is_alive())
+                    self.assertFalse(worker.is_alive())
+                    self.assertEqual(dispatch._model_worker.snapshot()['state'], 'running')
                 self.assertTrue(all_notified.wait(2), 'Control replies did not finish before shutdown')
                 return replies
             finally:

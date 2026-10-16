@@ -62,7 +62,7 @@ class TelegramLatencyTests(unittest.TestCase):
         self.assertEqual(snapshot['send']['count'], 2)
         self.assertEqual(snapshot['send']['total_seconds'], 8)
         self.assertEqual(snapshot['poll']['count'], 0)
-        self.assertEqual(calls, [('sendMessage', 35), ('sendMessage', 35), ('getUpdates', 35)])
+        self.assertEqual(calls, [('sendMessage', 5), ('sendMessage', 5), ('getUpdates', 6)])
 
     def test_send_failures_are_timed_and_remain_redacted(self):
         import io

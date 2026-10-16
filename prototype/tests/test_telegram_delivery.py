@@ -72,6 +72,7 @@ class MultipartDeliveryTests(unittest.TestCase):
                 deliver_pending_diary(self.api, self.store, 17)
         self.assertEqual(len(self.calls), 1)
         self.reopen()
+        self.store.recover_diary_claims()
         self.assertTrue(self.store.retry_uncertain_diary_delivery(entry_id))
         self.assertEqual(deliver_pending_diary(self.api, self.store, 17), 1)
         self.assertEqual(len(self.calls), 1)
