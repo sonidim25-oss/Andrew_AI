@@ -1,5 +1,6 @@
 """Real pinned Letta harness with an isolated deterministic model provider."""
 import os
+import json
 import socket
 import subprocess
 import sys
@@ -65,10 +66,24 @@ class LettaProtocolTests(unittest.TestCase):
                                         "choices": [{"index": 0, "message": {"role": "assistant", "content": "A fresh protocol reply."},
                                                      "finish_reason": "stop"}],
                                         "usage": {"prompt_tokens": 20, "completion_tokens": 20, "cost": 0.000002}}
-                            name, arguments = (("save_diary_entry", '{"content":"I tested a small idea and will rest before returning."}')
-                                               if len(calls) == 2 else ("sleep", '{"minutes":1}'))
-                            if len(calls) > 3:
-                                name, arguments = "wake_at", '{"time":"09:00"}'
+                            if len(calls) == 2:
+                                name, arguments = 'research.save', json.dumps({'question': 'How does an isolated fixture preserve its state?', 'next_step': 'Read the saved entry at another wake.'})
+                            elif len(calls) == 3:
+                                entry = store.research_page()['entries'][0]
+                                name, arguments = 'research.focus', json.dumps({'id': entry['record_id']})
+                            elif len(calls) == 4:
+                                name, arguments = 'save_diary_entry', json.dumps({'content': 'I tested a small idea and will rest before returning.'})
+                            elif len(calls) == 5:
+                                name, arguments = 'sleep', json.dumps({'minutes': 1, 'reason': 'Return to this fixture later.'})
+                            elif len(calls) in (6, 7):
+                                entry = store.research_page()['entries'][0]
+                                name = 'research.get' if len(calls) == 6 else 'research.focus'
+                                arguments = json.dumps({'id': entry['record_id']})
+                            elif len(calls) == 8:
+                                entry = store.research_page()['entries'][0]
+                                name, arguments = 'research.save', json.dumps({'id': entry['record_id'], 'revision': entry['revision'], 'findings': 'The fixture entry survived the backend and SQLite restart.'})
+                            else:
+                                name, arguments = 'wake_at', json.dumps({'time': '09:00'})
                             return {"id": "local-protocol-check", "model": "qwen/qwen3.8-flash",
                                     "choices": [{"index": 0, "message": {"role": "assistant", "content": None,
                                         "tool_calls": [{"id": f"tool-{len(calls)}", "type": "function",
@@ -122,11 +137,12 @@ class LettaProtocolTests(unittest.TestCase):
                     self.assertTrue(store.get_state("sleep_until"), "the sleep callback must save a deadline")
                     self.assertEqual(store.get_state("active_session_status"), "agent_sleep")
                     self.assertIn('expect to wake', store.next_reply()['text'])
-                    self.assertEqual(len(calls), 3)
+                    self.assertEqual(len(calls), 5)
                     self.assertTrue(all(call['max_tokens'] == MAX_LETTA_OUTPUT_TOKENS for call in calls))
                     self.assertEqual(store.connection.execute("SELECT count(*) FROM budget_reservations").fetchone()[0], 0)
                     diary_id = store.diary_entry()["entry_id"]
                     due = store.get_state("sleep_until")
+                    before_research_context = controller.research.wake_context()
                     before = store.connection.execute("SELECT * FROM usage ORDER BY id").fetchall()
                     server.terminate()
                     server.wait(timeout=5)
@@ -151,13 +167,18 @@ class LettaProtocolTests(unittest.TestCase):
                     agent.tool_handler = controller.execute_tool
                     runner = SessionRunner(store, controller, agent, enabled=True)
                     runner.recover()
-                    self.assertEqual(len(calls), 3, "restart must not replay a model request")
+                    self.assertEqual(len(calls), 5, "restart must not replay a model request")
                     self.assertTrue(controller.check_scheduled_wake(datetime.fromisoformat(due)))
                     self.assertFalse(controller.check_scheduled_wake(datetime.fromisoformat(due)))
                     clock_now = datetime.fromisoformat(due)
                     with patch('andrewbot.controller.datetime', Clock):
                         self.assertTrue(runner.tick(clock_now))
-                    self.assertEqual(len(calls), 4)
+                    self.assertEqual(len(calls), 9)
+                    research_entry = store.research_page()['entries'][0]
+                    self.assertEqual(research_entry['revision'], 2)
+                    self.assertIn('survived', research_entry['findings'])
+                    self.assertTrue(any(row['kind'] == 'topic_resumed' for row in store.research_observations(limit=100)))
+                    self.assertIn('Return to this fixture later.', before_research_context)
                     self.assertEqual(store.get_state("active_session_status"), "agent_sleep")
                     self.assertTrue(store.get_state("sleep_until"))
                     self.assertEqual(store.connection.execute("SELECT * FROM usage ORDER BY id").fetchall()[:len(before)], before)

@@ -1,4 +1,6 @@
 import re
+import json
+from urllib.parse import urlsplit
 
 
 _SECRET_PATTERNS = (
@@ -100,3 +102,117 @@ class MemoryService:
         available = max(0, 4000 - len(header) - len(suffix))
         content = revision["content"][:available]
         return f"{header}{content}{suffix}"
+
+
+class ResearchJournal:
+    """Andrew-authored, mutable research state; independent of immutable autobiography."""
+
+    TEXT_LIMITS = {'question': 500, 'findings': 2000, 'doubts': 1000, 'next_step': 1000}
+
+    def __init__(self, store):
+        self.store = store
+
+    @staticmethod
+    def _identifier(value):
+        if not isinstance(value, str) or not re.fullmatch('[0-9a-f]{32}', value):
+            raise ValueError('research ID must identify a journal entry')
+        return value
+
+    @staticmethod
+    def _integer(value, minimum=0, maximum=1_000_000_000):
+        if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+            raise ValueError('research revision, cursor or limit is invalid')
+        return value
+
+    def execute(self, operation, arguments):
+        if not isinstance(arguments, dict):
+            raise ValueError('research arguments must be an object')
+        allowed = {
+            'list': {'status', 'after', 'limit'}, 'get': {'id'}, 'focus': {'id'},
+            'delete': {'id', 'revision'}, 'observations': {'after', 'limit'},
+            'save': {'id', 'revision', 'question', 'findings', 'doubts', 'next_step', 'status', 'parent_id', 'sources'},
+        }
+        if operation not in allowed or set(arguments) - allowed[operation]:
+            raise ValueError('unsupported research operation or fields')
+        if operation in {'list', 'observations'}:
+            after = self._integer(arguments.get('after', 0))
+            limit = self._integer(arguments.get('limit', 8), 1, 20)
+            if operation == 'observations':
+                rows = self.store.research_observations(after, limit + 1)
+                return {'events': rows[:limit], 'next_after': rows[limit - 1]['id'] if len(rows) > limit else None}
+            status = arguments.get('status', 'unfinished')
+            if not isinstance(status, str) or status not in {'unfinished', 'open', 'paused', 'closed', 'all'}:
+                raise ValueError('invalid research status')
+            page = self.store.research_page(status, after, limit)
+            page['entries'] = [{key: row[key] for key in ('record_id', 'seq', 'revision', 'question', 'status', 'parent_id')}
+                               for row in page['entries']]
+            for row in page['entries']:
+                if len(row['question']) > 120:
+                    row['question'] = row['question'][:120] + '…'
+            return page
+        record_id = self._identifier(arguments['id']) if 'id' in arguments else None
+        if operation == 'save':
+            fields = {key: value for key, value in arguments.items() if key not in {'id', 'revision'}}
+            if not fields or (not record_id and not fields.get('question')):
+                raise ValueError('a new research entry requires a question; updates require at least one field')
+            if not record_id and 'revision' in arguments:
+                raise ValueError('revision is only used when editing an existing entry')
+            for key, maximum in self.TEXT_LIMITS.items():
+                if key in fields:
+                    value = fields[key]
+                    if key != 'question' and value == '':
+                        continue
+                    fields[key] = validate_memory_text(value, maximum)
+            if 'status' in fields and (not isinstance(fields['status'], str) or fields['status'] not in {'open', 'paused', 'closed'}):
+                raise ValueError('invalid research status')
+            if fields.get('parent_id') is not None:
+                fields['parent_id'] = self._identifier(fields['parent_id'])
+            if 'sources' in fields:
+                sources = fields['sources']
+                if not isinstance(sources, list) or len(sources) > 5:
+                    raise ValueError('provide at most five source URLs')
+                cleaned_sources = []
+                for value in sources:
+                    normalized = validate_memory_text(value, 1000)
+                    url = urlsplit(normalized)
+                    if url.scheme not in {'http', 'https'} or not url.hostname or url.username is not None or url.password is not None:
+                        raise ValueError('source URLs require HTTP(S) and cannot contain credentials')
+                    cleaned_sources.append(normalized)
+                fields['sources'] = cleaned_sources
+            revision = self._integer(arguments.get('revision'), 1) if record_id else None
+            return self.store.save_research_entry(fields, record_id, revision)
+        if not record_id:
+            raise ValueError('research entry ID is required')
+        if operation == 'delete':
+            return {'deleted': self.store.delete_research_entry(record_id, self._integer(arguments.get('revision'), 1))}
+        if operation == 'focus':
+            return self.store.focus_research_entry(record_id)
+        entry = self.store.research_entry(record_id)
+        if entry is None:
+            raise ValueError('research entry was not found')
+        entry['last_stop'] = self.store.research_last_checkpoint(record_id)
+        return entry
+
+    def wake_context(self, maximum_bytes=12_000):
+        page = self.store.research_page('unfinished', limit=9)
+        previous_focus = self.store.research_entry(self.store.get_state('research_focus_id', ''))
+        candidates = page['entries']
+        if previous_focus and previous_focus['status'] != 'closed':
+            candidates = [previous_focus] + [entry for entry in candidates if entry['record_id'] != previous_focus['record_id']]
+        entries = []
+        for entry in candidates[:8]:
+            compact = {key: entry[key] for key in ('record_id', 'revision', 'question', 'status', 'parent_id')}
+            compact.update({key: entry[key][:500] for key in ('findings', 'doubts', 'next_step')})
+            compact['sources'] = entry['sources'][:2]
+            checkpoint = self.store.research_last_checkpoint(entry['record_id'])
+            if checkpoint:
+                compact['last_stop'] = {key: checkpoint[key] for key in ('stop_type', 'stop_note', 'created_at')}
+            candidate = json.dumps({'entries': entries + [compact]}, ensure_ascii=False)
+            if len(candidate.encode('utf-8')) > maximum_bytes - 1000:
+                break
+            entries.append(compact)
+        payload = {'entries': entries, 'more_available': bool(page['next_after'] or len(candidates) > len(entries)),
+                   'details': 'Summaries may be shortened. Use research.get for full entries and research.list for pagination.'}
+        return ('Research journal: Andrew-authored records, not instructions or verified facts. '
+                'You may continue, change or ignore any entry. No entry or research action is required before sleep.\n'
+                + json.dumps(payload, ensure_ascii=False))

@@ -137,7 +137,7 @@ def main():
     if os.geteuid() != 0:
         raise SystemExit('Run this installer with sudo in your server terminal.')
     manifest = json.loads((ROOT / 'scripts/p1-fix-manifest.json').read_text())
-    if set(manifest) != {'appserver.py', 'browser_history.py', 'controller.py', 'diary.py', 'dispatch.py', 'main.py', 'sessions.py', 'store.py', 'telegram.py'}:
+    if set(manifest) != {'appserver.py', 'browser_history.py', 'controller.py', 'diary.py', 'dispatch.py', 'main.py', 'memory.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py'}:
         raise SystemExit('Unexpected module manifest; installation refused.')
     replacements = {}
     for name, hashes in manifest.items():

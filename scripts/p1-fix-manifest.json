@@ -1,7 +1,7 @@
 {
   "appserver.py": {
     "original": "afbf8ab950d77291f5566c481bb04b915c0dfb47ec56bb427406d004e31f5b5a",
-    "tested": "76b1e9f07d5d24ab6b151ddc1c19868fd173e5c8df004a11b1ebd847a543c976",
+    "tested": "775defb3023ec659ccb98879d0563b2728f0e3fee7676ceb76e51e725c699de9",
     "reviewed": {
       "afbf8ab950d77291f5566c481bb04b915c0dfb47ec56bb427406d004e31f5b5a": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
@@ -15,6 +15,9 @@
       ],
       "bbac174d1b5134de9b76947e6ae2cb65efd24cc163463f785cc738ff156b4a8e": [
         "locally-tested-incident-recovery-2026-10-16"
+      ],
+      "76b1e9f07d5d24ab6b151ddc1c19868fd173e5c8df004a11b1ebd847a543c976": [
+        "c6c09cb0e383c48908ee082ddd42a5514be78f19"
       ]
     }
   },
@@ -23,13 +26,16 @@
     "reviewed": {
       "a6640c5533e6f84992bb5f68fe74d44d80a57f25a5a5c43bb4ee068b74a60fbc": [
         "927d9e399a0cbab106e820075838bad54b30d73b"
+      ],
+      "d08b88c47117907370d521d3593a125c9f0d80e84f38238b9351e423bf100835": [
+        "c6c09cb0e383c48908ee082ddd42a5514be78f19"
       ]
     },
     "tested": "d08b88c47117907370d521d3593a125c9f0d80e84f38238b9351e423bf100835"
   },
   "controller.py": {
     "original": "5981f21f7de608c5b443eb7b60e7656e22134a318928456f69458f7c9a5b518a",
-    "tested": "ba3d09096d6b1394f33237e3f7a216493aa696df9855b55083bcef786c6fef94",
+    "tested": "ab15adfc231e7bd44b1417bd38e62d1b209ea9a7cce8fe48c075afbfafee715c",
     "reviewed": {
       "5981f21f7de608c5b443eb7b60e7656e22134a318928456f69458f7c9a5b518a": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
@@ -46,6 +52,9 @@
       ],
       "6cf9063287f58bbb5e26dea8aeb4ecaa7dd12b51e709602cd89b6e44f52121c4": [
         "927d9e399a0cbab106e820075838bad54b30d73b"
+      ],
+      "ba3d09096d6b1394f33237e3f7a216493aa696df9855b55083bcef786c6fef94": [
+        "c6c09cb0e383c48908ee082ddd42a5514be78f19"
       ]
     }
   },
@@ -101,12 +110,15 @@
       ],
       "32690b2f3f68f499144a37ca830c4c3895e9a1d49779a8ce1bfedd2dc0c2653f": [
         "locally-tested-incident-recovery-2026-10-16"
+      ],
+      "cf849c0d48da815efa9c7e18640317da60889c9d645f9cf0e76fd80c180262f8": [
+        "c6c09cb0e383c48908ee082ddd42a5514be78f19"
       ]
     }
   },
   "sessions.py": {
     "original": "e9801014987431ec9149c38019cab0499f93ec8b377ab79a639cfd805ca819dc",
-    "tested": "a0dcd5be2316cbc682bc2fc3cc5b835c52b61eea1b95db0999dd593d11b2fde4",
+    "tested": "0cea0bd8026023587aae974b46f0591133e0fc2df015ae0691c1cc1470e6aae6",
     "reviewed": {
       "e9801014987431ec9149c38019cab0499f93ec8b377ab79a639cfd805ca819dc": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
@@ -117,12 +129,15 @@
         "c4fd0621f95751237ecaad365c308f91e1206a55",
         "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
         "927d9e399a0cbab106e820075838bad54b30d73b"
+      ],
+      "a0dcd5be2316cbc682bc2fc3cc5b835c52b61eea1b95db0999dd593d11b2fde4": [
+        "c6c09cb0e383c48908ee082ddd42a5514be78f19"
       ]
     }
   },
   "store.py": {
     "original": "10548624b22ea55f2c67a1ee3a6eddea078660aba68a747048e051ca01257afd",
-    "tested": "464e42fe997b241b03398a5da9e3fc1c46f5c7da7c4d05dc016852528287a2c2",
+    "tested": "44c4f8d9ace93f44fc223d2c8dc8cf83cd546961fbe92f23893efb926a90f1d6",
     "reviewed": {
       "10548624b22ea55f2c67a1ee3a6eddea078660aba68a747048e051ca01257afd": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
@@ -137,6 +152,9 @@
       "494e6f0615bfd967abbe838b5320e1beb5abda663a3bdb1720a4c6fc7e2237fa": [
         "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
         "927d9e399a0cbab106e820075838bad54b30d73b"
+      ],
+      "464e42fe997b241b03398a5da9e3fc1c46f5c7da7c4d05dc016852528287a2c2": [
+        "c6c09cb0e383c48908ee082ddd42a5514be78f19"
       ]
     }
   },
@@ -155,6 +173,24 @@
       "48dc50395d6ff046f48ceb62663ceff7c0fadc40385397ac46cf37142ab93f73": [
         "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
         "927d9e399a0cbab106e820075838bad54b30d73b"
+      ]
+    }
+  },
+  "memory.py": {
+    "original": "12a5e1e3cc7dfc7a21f37917c9d105f2899061fe6a2a9da289d09a449ca23a71",
+    "tested": "7672f8dac01ad34b51e21e0c37d9381227f84610388fb6c6bc8b8876319f6a75",
+    "reviewed": {
+      "12a5e1e3cc7dfc7a21f37917c9d105f2899061fe6a2a9da289d09a449ca23a71": [
+        "c6c09cb0e383c48908ee082ddd42a5514be78f19"
+      ]
+    }
+  },
+  "telegram_menu.py": {
+    "original": "0df485e19b19a304dc26e47a7c585c6a741081be413794da1ca42c3900dbbe79",
+    "tested": "dbb4e13a9ce6fdadf25af10960baeab518af8c40fb85dfbaad971e4a4ef4b4eb",
+    "reviewed": {
+      "0df485e19b19a304dc26e47a7c585c6a741081be413794da1ca42c3900dbbe79": [
+        "c6c09cb0e383c48908ee082ddd42a5514be78f19"
       ]
     }
   }

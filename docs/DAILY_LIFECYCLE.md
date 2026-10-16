@@ -1,5 +1,7 @@
 # Independent daily lifecycle
 
+The [research journal](RESEARCH_JOURNAL.md) adds editable questions, restored unfinished context and observations across autonomous wakes. It introduces no required interests, research duration or rewards.
+
 ## Release scope
 
 The owner's 2026-10-14 request authorized Andrew's conversation and memory lifecycle without waiting for every future project phase. Subsequent owner instructions authorized the [browser/code runtime](BROWSER_RUNTIME.md) and separately controlled [Gmail integration](GMAIL.md). See [feature status](FEATURE_STATUS.md) for installed versions and evidence.

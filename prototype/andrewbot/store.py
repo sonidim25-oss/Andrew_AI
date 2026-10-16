@@ -158,6 +158,42 @@ class Store:
                 created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS budget_reservations_period ON budget_reservations(month, day);
+            CREATE TABLE IF NOT EXISTS research_entries (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                record_id TEXT NOT NULL UNIQUE,
+                revision INTEGER NOT NULL DEFAULT 1,
+                question TEXT NOT NULL,
+                findings TEXT NOT NULL DEFAULT '',
+                doubts TEXT NOT NULL DEFAULT '',
+                next_step TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL CHECK(status IN ('open','paused','closed')),
+                parent_id TEXT REFERENCES research_entries(record_id) ON DELETE SET NULL,
+                sources TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS research_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                entry_id TEXT NOT NULL DEFAULT '',
+                session_id TEXT NOT NULL DEFAULT '',
+                cycle_id TEXT NOT NULL DEFAULT '',
+                origin TEXT NOT NULL,
+                tool_name TEXT NOT NULL DEFAULT '',
+                outcome TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS research_checkpoints (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entry_id TEXT REFERENCES research_entries(record_id) ON DELETE CASCADE,
+                revision INTEGER NOT NULL,
+                session_id TEXT NOT NULL,
+                cycle_id TEXT NOT NULL,
+                stop_type TEXT NOT NULL,
+                stop_note TEXT NOT NULL DEFAULT '',
+                next_step TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
         """)
         self.connection.commit()
         try:
@@ -172,6 +208,163 @@ class Store:
     @staticmethod
     def now():
         return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    def _research_event(self, kind, entry_id='', tool_name='', outcome='', session_id=None, cycle_id=None):
+        """Caller holds the database lock and transaction; never store tool arguments."""
+        cycle_id = self.get_state('active_cycle_id', '') if cycle_id is None else cycle_id
+        origin = ('owner' if kind.startswith('owner_') else
+                  'controller' if kind in {'session_started', 'technical_failure', 'time_limit', 'cycle_limit'} else
+                  'autonomous' if cycle_id else 'interactive')
+        self.connection.execute(
+            'INSERT INTO research_events(kind,entry_id,session_id,cycle_id,origin,tool_name,outcome,created_at) '
+            'VALUES(?,?,?,?,?,?,?,?)',
+            (kind, entry_id, self.get_state('active_session_id', '') if session_id is None else session_id, cycle_id,
+             origin, tool_name, outcome, self.now()),
+        )
+
+    @database_locked
+    def research_tool_context(self):
+        return (self.get_state('active_session_id', ''), self.get_state('active_cycle_id', ''), self._focused_research_id())
+
+    @database_locked
+    def record_research_tool(self, name, outcome, context):
+        session_id, cycle_id, entry_id = context
+        if self.get_state('active_session_id', '') == session_id:
+            entry_id = self._focused_research_id()
+        with self.connection:
+            self._research_event('tool_used', entry_id, name, outcome, session_id=session_id, cycle_id=cycle_id)
+
+    def _focused_research_id(self):
+        session = self.get_state('active_session_id', '')
+        if self.get_state('research_focus_session', '') != session:
+            return ''
+        return self.get_state('research_focus_id', '')
+
+    def _research_checkpoint(self, stop_type, stop_note=''):
+        entry_id = self._focused_research_id()
+        self._research_event(stop_type, entry_id)
+        entry = self.research_entry(entry_id) if entry_id else None
+        self.connection.execute(
+            'INSERT INTO research_checkpoints(entry_id,revision,session_id,cycle_id,stop_type,stop_note,next_step,created_at) '
+            'VALUES(?,?,?,?,?,?,?,?)',
+            (entry_id if entry else None, entry['revision'] if entry else 0, self.get_state('active_session_id', ''),
+             self.get_state('active_cycle_id', ''), stop_type, stop_note, entry['next_step'] if entry else '', self.now()),
+        )
+
+    @database_locked
+    def research_last_checkpoint(self, record_id):
+        row = self.connection.execute('SELECT * FROM research_checkpoints WHERE entry_id=? ORDER BY id DESC LIMIT 1', (record_id,)).fetchone()
+        return dict(row) if row else None
+
+    @database_locked
+    def recent_research_observations(self, limit=20):
+        return [dict(row) for row in reversed(self.connection.execute(
+            'SELECT * FROM research_events ORDER BY id DESC LIMIT ?', (limit,)).fetchall())]
+
+    @database_locked
+    def research_entry(self, record_id):
+        row = self.connection.execute('SELECT * FROM research_entries WHERE record_id=?', (record_id,)).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result['sources'] = json.loads(result['sources'])
+        return result
+
+    @database_locked
+    def research_page(self, status='unfinished', after=0, limit=10):
+        condition = "status IN ('open','paused')" if status == 'unfinished' else 'status=?' if status != 'all' else '1=1'
+        args = [] if status in {'unfinished', 'all'} else [status]
+        rows = self.connection.execute(
+            f'SELECT record_id,seq FROM research_entries WHERE {condition} AND seq>? ORDER BY seq LIMIT ?',
+            [*args, after, limit + 1],
+        ).fetchall()
+        return {'entries': [self.research_entry(row['record_id']) for row in rows[:limit]],
+                'next_after': rows[limit - 1]['seq'] if len(rows) > limit else None}
+
+    @database_locked
+    def save_research_entry(self, fields, record_id=None, revision=None):
+        self._research_mutation_allowed()
+        allowed = {'question', 'findings', 'doubts', 'next_step', 'status', 'parent_id', 'sources'}
+        if set(fields) - allowed:
+            raise ValueError('unsupported research fields')
+        current = self.research_entry(record_id) if record_id else None
+        if record_id and (current is None or current['revision'] != revision):
+            raise ValueError('research entry is missing or changed; read it again before editing')
+        if not record_id and self.connection.execute('SELECT count(*) FROM research_entries').fetchone()[0] >= 500:
+            raise ValueError('research journal capacity reached; edit or delete existing entries')
+        if fields.get('parent_id') and (fields['parent_id'] == record_id or not self.research_entry(fields['parent_id'])):
+            raise ValueError('parent question must identify another existing research entry')
+        parent_id = fields.get('parent_id')
+        while parent_id:
+            if parent_id == record_id:
+                raise ValueError('parent questions cannot form a cycle')
+            parent_id = self.research_entry(parent_id)['parent_id']
+        combined = {**(current or {}), **fields}
+        if len(json.dumps(combined, ensure_ascii=False).encode('utf-8')) > 20_000:
+            raise ValueError('research entry exceeds its total byte limit')
+        now = self.now()
+        with self.connection:
+            if current:
+                assignments = ','.join(f'{key}=?' for key in fields)
+                values = [json.dumps(value, ensure_ascii=False) if key == 'sources' else value for key, value in fields.items()]
+                self.connection.execute(f'UPDATE research_entries SET {assignments},revision=revision+1,updated_at=? WHERE record_id=?',
+                                        [*values, now, record_id])
+                kind = 'question_updated'
+            else:
+                record_id = uuid.uuid4().hex
+                self.connection.execute(
+                    'INSERT INTO research_entries(record_id,question,findings,doubts,next_step,status,parent_id,sources,created_at,updated_at) '
+                    'VALUES(?,?,?,?,?,?,?,?,?,?)',
+                    (record_id, fields['question'], fields.get('findings', ''), fields.get('doubts', ''),
+                     fields.get('next_step', ''), fields.get('status', 'open'), fields.get('parent_id'),
+                     json.dumps(fields.get('sources', []), ensure_ascii=False), now, now),
+                )
+                kind = 'question_created'
+            self._research_event(kind, record_id, outcome=fields.get('status', current['status'] if current else 'open'))
+            if fields.get('status') == 'closed' and self.get_state('research_focus_id', '') == record_id:
+                self.connection.execute("DELETE FROM state WHERE key IN ('research_focus_id','research_focus_session')")
+        return self.research_entry(record_id)
+
+    @database_locked
+    def focus_research_entry(self, record_id):
+        self._research_mutation_allowed()
+        entry = self.research_entry(record_id)
+        if entry is None or entry['status'] == 'closed':
+            raise ValueError('select an existing open or paused question')
+        previous = self.connection.execute(
+            "SELECT 1 FROM research_events WHERE entry_id=? AND kind IN ('topic_selected','topic_resumed') LIMIT 1", (record_id,)
+        ).fetchone()
+        with self.connection:
+            for key, value in {'research_focus_id': record_id,
+                               'research_focus_session': self.get_state('active_session_id', '')}.items():
+                self.connection.execute('INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, value))
+            self._research_event('topic_resumed' if previous else 'topic_selected', record_id)
+        return entry
+
+    @database_locked
+    def delete_research_entry(self, record_id, revision):
+        self._research_mutation_allowed()
+        with self.connection:
+            self.connection.execute('UPDATE research_entries SET parent_id=NULL,revision=revision+1,updated_at=? WHERE parent_id=?',
+                                    (self.now(), record_id))
+            deleted = self.connection.execute('DELETE FROM research_entries WHERE record_id=? AND revision=?', (record_id, revision)).rowcount
+            if not deleted:
+                raise ValueError('research entry is missing or changed; read it again before deleting')
+            if self.get_state('research_focus_id', '') == record_id:
+                self.connection.execute("DELETE FROM state WHERE key IN ('research_focus_id','research_focus_session')")
+            self._research_event('question_deleted', record_id)
+        return True
+
+    def _research_mutation_allowed(self):
+        if (self.get_state('paused', '0') == '1' or self.get_state('sleeping', '0') == '1'
+                or self.get_state('autonomy_error', '')):
+            raise ValueError('research journal changes cannot override owner controls or a stopped session')
+
+    @database_locked
+    def research_observations(self, after=0, limit=50):
+        return [dict(row) for row in self.connection.execute(
+            'SELECT * FROM research_events WHERE id>? ORDER BY id LIMIT ?', (after, limit)
+        ).fetchall()]
 
     @database_locked
     def add_message(self, owner_id, role, content, queued=False):
@@ -310,10 +503,21 @@ class Store:
         self.connection.commit()
 
     @database_locked
-    def transition_state(self, updates, event, chat_id=None, notice=None):
+    def transition_state(self, updates, event, chat_id=None, notice=None, stop_note=''):
         if not isinstance(updates, dict) or not isinstance(event, str) or not event:
             raise ValueError("state transition requires updates and an event")
         with self.connection:
+            stop_type = ''
+            if str(updates.get('sleeping', '')) == '1':
+                stop_type = 'voluntary_sleep' if event.startswith('Andrew ') else 'owner_sleep'
+            elif str(updates.get('paused', '')) == '1':
+                stop_type = 'owner_pause'
+            elif updates.get('active_session_status') == 'error':
+                stop_type = 'technical_failure'
+            elif updates.get('active_session_status') in {'time_limit', 'cycle_limit', 'interrupted', 'owner_wake'}:
+                stop_type = updates['active_session_status']
+            if stop_type:
+                self._research_checkpoint(stop_type, stop_note)
             for key, value in updates.items():
                 self.connection.execute(
                     "INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -324,6 +528,10 @@ class Store:
             )
             if notice and chat_id is not None:
                 self.connection.execute("INSERT INTO telegram_outbox(chat_id,text) VALUES(?,?)", (chat_id, notice))
+            if updates.get('active_session_id'):
+                self._research_event('session_started')
+            if updates.get('active_session_id') == '':
+                self.connection.execute("DELETE FROM state WHERE key='active_cycle_id'")
 
     @database_locked
     def conversation_waiting(self, now):
@@ -388,12 +596,12 @@ class Store:
                 'will stay held unless you explicitly use /replay. Retrying could repeat completed actions.')
 
     @database_locked
-    def choose_sleep(self, updates, event, owner_id, notice, now):
+    def choose_sleep(self, updates, event, owner_id, notice, now, stop_note=''):
         if (self.get_state('paused', '0') == '1' or self.get_state('sleeping', '0') == '1'
                 or self.get_state('autonomy_error', '') or self.conversation_waiting(now)
                 or self.pending_owner_input(owner_id)):
             raise ValueError('Stay available for owner messages; sleep is unavailable during conversation or an error')
-        self.transition_state(updates, event, owner_id, notice)
+        self.transition_state(updates, event, owner_id, notice, stop_note)
 
     @database_locked
     def continue_activity_state(self):
@@ -490,22 +698,30 @@ class Store:
 
     @database_locked
     def begin_cycle(self, session_id, cycle_id, local_day, reserved_cost_usd=0.0):
-        self.connection.execute(
-            "INSERT INTO cycles(cycle_id,session_id,local_day,status,started_at,reserved_cost_usd) VALUES(?,?,?,?,?,?)",
-            (cycle_id, session_id, local_day, "running", self.now(), max(0.0, float(reserved_cost_usd))),
-        )
-        self.connection.commit()
+        with self.connection:
+            self.connection.execute(
+                "INSERT INTO cycles(cycle_id,session_id,local_day,status,started_at,reserved_cost_usd) VALUES(?,?,?,?,?,?)",
+                (cycle_id, session_id, local_day, "running", self.now(), max(0.0, float(reserved_cost_usd))),
+            )
+            self.connection.execute("INSERT INTO state(key,value) VALUES('active_cycle_id',?) "
+                                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (cycle_id,))
+            self._research_event('cycle_started', self._focused_research_id(), session_id=session_id, cycle_id=cycle_id)
 
     @database_locked
     def finish_cycle(self, cycle_id, status, actual_cost_usd=None):
-        if status not in {"complete", "failed", "interrupted", "stopped"}:
-            raise ValueError("invalid cycle status")
-        cursor = self.connection.execute(
-            "UPDATE cycles SET status=?,ended_at=?,actual_cost_usd=? WHERE cycle_id=? AND status='running'",
-            (status, self.now(), None if actual_cost_usd is None else max(0.0, float(actual_cost_usd)), cycle_id),
-        )
-        self.connection.commit()
-        return cursor.rowcount == 1
+        with self.connection:
+            if status not in {"complete", "failed", "interrupted", "stopped"}:
+                raise ValueError("invalid cycle status")
+            cursor = self.connection.execute(
+                "UPDATE cycles SET status=?,ended_at=?,actual_cost_usd=? WHERE cycle_id=? AND status='running'",
+                (status, self.now(), None if actual_cost_usd is None else max(0.0, float(actual_cost_usd)), cycle_id),
+            )
+            if cursor.rowcount:
+                session = self.connection.execute('SELECT session_id FROM cycles WHERE cycle_id=?', (cycle_id,)).fetchone()[0]
+                self._research_event('cycle_finished', outcome=status, session_id=session, cycle_id=cycle_id)
+                if status in {'complete', 'stopped'} and self.get_state('active_cycle_id', '') == cycle_id:
+                    self.connection.execute("DELETE FROM state WHERE key='active_cycle_id'")
+            return cursor.rowcount == 1
 
     @database_locked
     def cycle_count(self, local_day):

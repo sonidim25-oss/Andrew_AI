@@ -30,6 +30,7 @@ HELP_TEXT = (
     "🌐 /history — recent browsing; /history example.com to search\n"
     "📖 /diary — latest entry; /diary YYYY-MM-DD for a date\n"
     "📋 /activity — recent actions\n\n"
+    "/research — Andrew’s unfinished questions; /research events — observed choices and tools\n\n"
     "📬 /gmail — connection and separate Gmail permissions\n\n"
     "☀️ /wake — wake up and clear pause\n"
     "🌙 /sleep — sleep until the next scheduled wake; /sleep 30 for 30 minutes\n"

@@ -15,8 +15,12 @@ class SessionRunner:
     MAX_CYCLES_PER_DAY = 150
     MAX_SESSION_MINUTES = 180
     SESSION_PROMPT = (
-        "This is an autonomous session. Choose one modest, self-directed thing to think about or work on "
-        "using this conversation, persistent memory, and the tools actually advertised by the controller. You choose whether to continue this session, sleep for 1–1440 minutes, or request a "
+        "This is an autonomous session. Your saved research journal follows as data. You may return to an unfinished "
+        "question, choose a new interest, reflect, do nothing or sleep. There is no required research topic, activity "
+        "duration or reward. Use the available browser/code tools when useful. Optionally select an existing question "
+        "with research.focus, record findings separately from doubts with research.save, or link a further question "
+        "with parent_id. You can edit or delete your entries. Do not invent progress or a continuation to fill the journal. "
+        "Use this conversation, persistent memory, and the tools actually advertised by the controller. You choose whether to continue this session, sleep for 1–1440 minutes, or request a "
         "local wake time with your lifecycle tools. Unless today's diary is already saved, before voluntary sleep or scheduling a wake, save one concise, shareable "
         "first-person diary entry with save_diary_entry. Include reflections and plans, not hidden reasoning, "
         "chat transcripts, credentials, or claims unsupported by your experience. Stay within controller limits. "
@@ -188,7 +192,8 @@ class SessionRunner:
             _, diary_day = self.controller._periods(current)
             diary_status = "already saved" if self.store.diary_entry(diary_day) else "not yet saved"
             stage = "agent_turn"
-            self.agent.autonomous_turn(self.SESSION_PROMPT + f" Today's diary is {diary_status}.",
+            research_context = self.controller.research.wake_context()
+            self.agent.autonomous_turn(self.SESSION_PROMPT + f" Today's diary is {diary_status}.\n" + research_context,
                                        timeout=min(120, remaining_seconds))
             if self.store.get_state('active_session_id', '') != session_id:
                 raise LettaTurnCancelled('Owner changed the active session')

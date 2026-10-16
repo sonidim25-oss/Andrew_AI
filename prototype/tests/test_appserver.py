@@ -357,6 +357,7 @@ class AppServerWebSocketTests(unittest.TestCase):
         self.assertEqual(set(client.connection.sent[0]["payload"]["client_tool_allowlist"]), {
             "sleep", "wake_at", "continue_activity", "check_budget", "recent_activity", "save_diary_entry",
             "memory_search", "memory_add_experience", "memory_propose_personality_edit",
+            "research.list", "research.get", "research.save", "research.focus", "research.delete", "research.observations",
         })
 
     def test_model_step_stop_does_not_close_before_diary_and_sleep_callbacks(self):
@@ -438,6 +439,7 @@ class AppServerWebSocketTests(unittest.TestCase):
         self.assertEqual(set(names), {
             "sleep", "wake_at", "continue_activity", "check_budget", "recent_activity", "save_diary_entry",
             "memory_search", "memory_add_experience", "memory_propose_personality_edit",
+            "research.list", "research.get", "research.save", "research.focus", "research.delete", "research.observations",
         })
         schemas = {tool["name"]: tool["parameters"] for group in start["external_tools"] for tool in group["tools"]}
         self.assertEqual(schemas["memory_search"]["properties"]["limit"]["maximum"], 20)

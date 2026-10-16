@@ -5,7 +5,10 @@ from .budget import budget_snapshot
 from .configuration import MAX_LETTA_OUTPUT_TOKENS, ModelConfig, load_model_config
 from .diary import format_diary_entry, parse_diary_command, validate_diary_content
 from .telegram_menu import BUTTON_COMMANDS, HELP_TEXT
-from .appserver import LettaTurnError, LettaTurnCancelled
+from .appserver import AppServerClient, LettaTurnError, LettaTurnCancelled
+from .memory import ResearchJournal, validate_memory_text
+from .gmail_tools import GMAIL_TOOL_NAMES
+import json
 
 
 class Controller:
@@ -32,6 +35,10 @@ class Controller:
         if model_config is not None and not isinstance(model_config, ModelConfig):
             raise ValueError("model configuration is invalid")
         self.model_config = model_config or load_model_config({})
+
+    @property
+    def research(self):
+        return ResearchJournal(self.store)
 
     def _periods(self, now=None):
         zone = ZoneInfo(self.timezone_name)
@@ -277,18 +284,34 @@ class Controller:
             return self.failed_turn(error, owner_revision)
 
     def execute_tool(self, name, arguments):
+        known = (AppServerClient.SAFE_CONTROLLER_TOOL_NAMES | AppServerClient.EXTERNAL_TOOL_NAMES
+                 | GMAIL_TOOL_NAMES)
+        context = self.store.research_tool_context()
+        outcome = 'error'
+        try:
+            result = self._execute_tool(name, arguments)
+            outcome = 'returned'
+            return result
+        finally:
+            if name in known:
+                self.store.record_research_tool(name, outcome, context)
+
+    def _execute_tool(self, name, arguments):
         if not isinstance(arguments, dict):
             if name in {"memory_add_experience", "memory_propose_personality_edit"} and self.memory_service:
                 kind = "personality" if name == "memory_propose_personality_edit" else "experience"
                 self.memory_service.reject_edit_attempt(kind)
             raise ValueError("tool arguments must be an object")
-        if self.store.get_state("paused", "0") == "1" and name not in {"check_budget", "recent_activity", "memory_search", "gmail.status"}:
+        read_tools = {"check_budget", "recent_activity", "memory_search", "gmail.status", 'research.list', 'research.get', 'research.observations'}
+        if self.store.get_state("paused", "0") == "1" and name not in read_tools:
             raise ValueError("owner pause can only be cleared by the owner with /wake")
-        if self.store.get_state("sleeping", "0") == "1" and name not in {"check_budget", "recent_activity", "memory_search", "gmail.status"}:
+        if self.store.get_state("sleeping", "0") == "1" and name not in read_tools:
             raise ValueError("sleep can only end at a scheduled wake or an owner wake")
         if (name in {"sleep", "wake_at"} and self.store.get_state("active_session_id", "")
                 and not self.store.diary_entry(datetime.now(ZoneInfo("America/Toronto")).date().isoformat())):
             raise ValueError("save today's diary before requesting autonomous sleep")
+        if name.startswith('research.'):
+            return json.dumps(self.research.execute(name.split('.', 1)[1], arguments), ensure_ascii=False)
         if name in {"memory_search", "memory_add_experience", "memory_propose_personality_edit"}:
             if self.memory_service is None:
                 raise ValueError("memory service is unavailable")
@@ -320,6 +343,7 @@ class Controller:
             )
             return f"Personality revision saved ({revision_id}); previous revisions are preserved."
         if name == "sleep":
+            stop_note = validate_memory_text(arguments['reason'], 500) if arguments.get('reason') else ''
             minutes = arguments.get("minutes")
             if isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= 1440:
                 raise ValueError("sleep duration must be an integer from 1 to 1440 minutes")
@@ -327,10 +351,11 @@ class Controller:
             notice = f"I’m choosing to sleep. I expect to wake at {wake_at} (in {minutes} minutes)."
             self.store.choose_sleep(
                 {"sleeping": "1", "sleep_until": wake_at, "session_start_requested": ""},
-                "Andrew requested timed sleep", self.owner_id, notice, datetime.now(timezone.utc),
+                "Andrew requested timed sleep", self.owner_id, notice, datetime.now(timezone.utc), stop_note,
             )
             return f"Andrew is sleeping and will wake in {minutes} minutes."
         if name == "wake_at":
+            stop_note = validate_memory_text(arguments['reason'], 500) if arguments.get('reason') else ''
             value = arguments.get("time")
             if not isinstance(value, str) or len(value) != 5 or value[2] != ":":
                 raise ValueError("wake time must use local HH:MM format")
@@ -347,7 +372,7 @@ class Controller:
             self.store.choose_sleep(
                 {"sleeping": "1", "sleep_until": target.astimezone(timezone.utc).isoformat(timespec="seconds"),
                  "session_start_requested": ""},
-                "Andrew scheduled a local wake time", self.owner_id, notice, datetime.now(timezone.utc),
+                "Andrew scheduled a local wake time", self.owner_id, notice, datetime.now(timezone.utc), stop_note,
             )
             return f"Andrew is sleeping until {target.strftime('%H:%M')} {self.timezone_name}."
         if name == "continue_activity":
@@ -413,6 +438,23 @@ class Controller:
                 logging.warning('Active turn cancellation failed (%s)', type(error).__name__)
 
     def _command(self, command, text=""):
+        if command == '/research':
+            argument = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) == 2 else ''
+            if argument == 'events':
+                rows = self.store.recent_research_observations()
+                return ('Research observations (controller records; findings remain self-reported):\n' +
+                        ('\n'.join(f"{row['created_at']} · {row['origin']} · {row['kind']} · "
+                                   f"{row['tool_name'] or row['entry_id'] or 'session'} · {row['outcome']}" for row in rows)
+                         or 'No observations yet.'))
+            if argument:
+                try:
+                    return json.dumps(self.research.execute('get', {'id': argument}), ensure_ascii=False)
+                except ValueError:
+                    return 'Use /research for unfinished questions, /research <id> for details, or /research events.'
+            page = self.research.execute('list', {'limit': 8})
+            return ('Andrew’s unfinished questions (his own journal, not assigned tasks):\n' +
+                    ('\n'.join(f"{row['record_id']} · {row['status']} · {row['question']}" for row in page['entries'])
+                     or 'No saved questions yet.') + '\nUse /research <id> for details or /research events for activity.')
         if command in {"/help", "/start", "/menu"}:
             if command in {"/start", "/menu"}:
                 return ("Hello, I’m Andrew, your AI assistant.\n\n"

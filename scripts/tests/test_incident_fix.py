@@ -17,6 +17,16 @@ def load(name):
 
 
 class IncidentFixTests(unittest.TestCase):
+    def test_checked_in_deployment_manifest_matches_prepared_sources(self):
+        root = Path(__file__).resolve().parents[2]
+        manifest = json.loads((root / 'scripts/p1-fix-manifest.json').read_text())
+        self.assertIn('memory.py', manifest)
+        self.assertIn('telegram_menu.py', manifest)
+        for name, entry in manifest.items():
+            with self.subTest(name=name):
+                actual = hashlib.sha256((root / 'prototype/andrewbot' / name).read_bytes()).hexdigest()
+                self.assertEqual(entry['tested'], actual)
+
     def test_metadata_uses_pinned_letta_date_and_approval_schema(self):
         diagnostic = load('diagnose-session')
         result = diagnostic.message_metadata({
@@ -48,7 +58,7 @@ class IncidentFixTests(unittest.TestCase):
             manifest = {}
             installed_data = (b'# unreviewed change\n' if unknown_installed else
                               b'# reviewed intermediate\n' if intermediate else b'# original\n')
-            names = (['appserver.py', 'browser_history.py', 'controller.py', 'diary.py', 'dispatch.py', 'main.py', 'sessions.py', 'store.py', 'telegram.py']
+            names = (['appserver.py', 'browser_history.py', 'controller.py', 'diary.py', 'dispatch.py', 'main.py', 'memory.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py']
                      if p1 else ['appserver.py', 'configuration.py', 'gateway.py', 'sessions.py'])
             for name in names:
                 (source / name).write_bytes(b'# tested\n')
