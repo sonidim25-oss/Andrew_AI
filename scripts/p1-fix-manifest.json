@@ -63,7 +63,7 @@
   },
   "diary.py": {
     "original": "fa8d71bc5057859623098c1e650ef69d3fe4de7c2c644c7b4de9e36bf2cbcaf2",
-    "tested": "cab663bd72d290801b8889f79df3231f6889151d1fb2dd86af78fe5d59d942e0",
+    "tested": "8d75146d0f059af29ae114145c3b1320e0b93a94ed6fc2d35ef15d9433af3b5f",
     "reviewed": {
       "fa8d71bc5057859623098c1e650ef69d3fe4de7c2c644c7b4de9e36bf2cbcaf2": [
         "f732cfcb669c2776d8b33344749011a3e928ad50",
@@ -74,12 +74,15 @@
       "5db0cd5ee78b607cd12125be42214f545cc08a6af6a9a6f32bcc81d23fdcb369": [
         "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
         "927d9e399a0cbab106e820075838bad54b30d73b"
+      ],
+      "cab663bd72d290801b8889f79df3231f6889151d1fb2dd86af78fe5d59d942e0": [
+        "b5708ac"
       ]
     }
   },
   "dispatch.py": {
     "original": "c3b1b1cafc3629cdba7c4badeb8c7bb2158c8dd13536ecf84dd4c966276cd8ab",
-    "tested": "ffec25f6f5f629f7287c46ce4359c44e0654f18ebe645a6790599b29b3ba9584",
+    "tested": "f0241ccb00958c4b19c5c48bc1f677614738e82e45890e68cf808122228a4a53",
     "reviewed": {
       "c3b1b1cafc3629cdba7c4badeb8c7bb2158c8dd13536ecf84dd4c966276cd8ab": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
@@ -94,12 +97,15 @@
       "f67b31fc163e647552493e063fbf377f800ef4ae21458102e9003bc2cb2025a4": [
         "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
         "927d9e399a0cbab106e820075838bad54b30d73b"
+      ],
+      "ffec25f6f5f629f7287c46ce4359c44e0654f18ebe645a6790599b29b3ba9584": [
+        "b5708ac"
       ]
     }
   },
   "main.py": {
     "original": "3d7d58c1c00cc21f6841525d9db7d8b0554b0239b311908ea5c150cbbaa83527",
-    "tested": "041d5da80b234677c05cce5717997c5a72f78079a096786b4bfdd1e3ba8996fe",
+    "tested": "de847fa5bb0cfb8158a4f1ca745e5c67856385214d8bb818e9526a76f98ee655",
     "reviewed": {
       "3d7d58c1c00cc21f6841525d9db7d8b0554b0239b311908ea5c150cbbaa83527": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
@@ -116,6 +122,9 @@
       ],
       "cf849c0d48da815efa9c7e18640317da60889c9d645f9cf0e76fd80c180262f8": [
         "c6c09cb0e383c48908ee082ddd42a5514be78f19"
+      ],
+      "041d5da80b234677c05cce5717997c5a72f78079a096786b4bfdd1e3ba8996fe": [
+        "b5708ac"
       ]
     }
   },
@@ -143,7 +152,7 @@
   },
   "store.py": {
     "original": "10548624b22ea55f2c67a1ee3a6eddea078660aba68a747048e051ca01257afd",
-    "tested": "0ad53894ecfdd82f10e702f703cb83f180dec00f8649df40404c7543902de731",
+    "tested": "5e22e4c8dbd15c5915b29f220705f58a180e667c64a620a4e00f1f588d2097d2",
     "reviewed": {
       "10548624b22ea55f2c67a1ee3a6eddea078660aba68a747048e051ca01257afd": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
@@ -164,12 +173,15 @@
       ],
       "44c4f8d9ace93f44fc223d2c8dc8cf83cd546961fbe92f23893efb926a90f1d6": [
         "previous-reviewed-manifest"
+      ],
+      "0ad53894ecfdd82f10e702f703cb83f180dec00f8649df40404c7543902de731": [
+        "b5708ac"
       ]
     }
   },
   "telegram.py": {
     "original": "f4b356b42cff1ae8ef69fdf9c25c3f910110dd5dcc254d35643f6558cf16e0d0",
-    "tested": "c6a4e6574d93a64d91cdb28c707ab873b7b85970e5783495ad65cd37ae46ff68",
+    "tested": "1d76eaacf856b55915369ed0998ca339e93abce83a923d4d4d69dd3b79553867",
     "reviewed": {
       "f4b356b42cff1ae8ef69fdf9c25c3f910110dd5dcc254d35643f6558cf16e0d0": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
@@ -182,6 +194,9 @@
       "48dc50395d6ff046f48ceb62663ceff7c0fadc40385397ac46cf37142ab93f73": [
         "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
         "927d9e399a0cbab106e820075838bad54b30d73b"
+      ],
+      "c6a4e6574d93a64d91cdb28c707ab873b7b85970e5783495ad65cd37ae46ff68": [
+        "b5708ac"
       ]
     }
   },

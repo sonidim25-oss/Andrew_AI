@@ -40,7 +40,7 @@ class IncidentFixTests(unittest.TestCase):
         self.assertNotIn('private text', json.dumps(result))
 
     def exercise_installer(self, fail_start=False, changed_source=False, fail_acceptance=False, fail_proof=False,
-                           p1=False, intermediate=False, unknown_installed=False, runtime_patch=False, new_module=False):
+                           p1=False, intermediate=False, unknown_installed=False, runtime_patch=False, new_module=False, fail_verify=False):
         installer = load('install-p1-fixes' if p1 else 'install-incident-fix')
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -87,6 +87,10 @@ class IncidentFixTests(unittest.TestCase):
                     starts.append(args)
                     if fail_start and len(starts) == 1:
                         raise RuntimeError('startup failed')
+                if fail_verify and args[0] == 'journalctl':
+                    return 'Startup validation failed: fixture'
+                if fail_verify and args[:3] == ('systemctl', 'show', installer.SERVICE) and 'ActiveState' in args:
+                    return 'failed'
                 return 'Andrew Telegram controller started' if args[0] == 'journalctl' else 'active'
             def accept(*args):
                 if runtime_patch:
@@ -95,6 +99,11 @@ class IncidentFixTests(unittest.TestCase):
                                         for call in commands.call_args_list))
                 if fail_acceptance:
                     raise RuntimeError('failed acceptance')
+            def replace_file(path, data, gid, **kwargs):
+                if p1 and (fail_start or fail_verify) and path.parent == target and data == installed_data:
+                    self.assertIn(('systemctl', 'disable', installer.SERVICE), [call.args for call in commands.call_args_list],
+                                  'Disable boot startup before restoring code that ignores held state')
+                path.write_bytes(data)
             with patch.object(installer, 'ROOT', root), patch.object(installer, 'TARGET', target), \
                  patch.object(installer.os, 'geteuid', return_value=0), \
                  patch.object(installer.grp, 'getgrnam', return_value=types.SimpleNamespace(gr_gid=1000)), \
@@ -106,9 +115,9 @@ class IncidentFixTests(unittest.TestCase):
                  patch.object(installer, 'acceptance', side_effect=accept) as acceptance, \
                  patch.object(installer, 'renew_proof', side_effect=RuntimeError('failed proof') if fail_proof else None) as renewal, \
                  patch.object(installer.tempfile, 'mkdtemp', return_value=str(backup)), \
-                 patch.object(installer, 'replace', side_effect=lambda path, data, gid, **kwargs: path.write_bytes(data)), \
+                 patch.object(installer, 'replace', side_effect=replace_file), \
                  patch('builtins.print'):
-                if fail_start or changed_source or fail_acceptance or fail_proof or unknown_installed:
+                if fail_start or fail_verify or changed_source or fail_acceptance or fail_proof or unknown_installed:
                     with self.assertRaises(SystemExit):
                         installer.main()
                 else:
@@ -129,19 +138,30 @@ class IncidentFixTests(unittest.TestCase):
                         start = actions.index(('systemctl', 'start', installer.SERVICE))
                         self.assertLess(stop, restart)
                         self.assertLess(restart, start)
-            expected = installed_data if fail_start or changed_source or fail_acceptance or fail_proof or unknown_installed else b'# tested\n'
+            expected = installed_data if fail_start or fail_verify or changed_source or fail_acceptance or fail_proof or unknown_installed else b'# tested\n'
             self.assertTrue(all((target / name).read_bytes() == expected for name in names
                                 if not (new_module and name == 'latency.py')))
             if new_module:
-                if fail_start or fail_acceptance or fail_proof:
+                if fail_start or fail_verify or fail_acceptance or fail_proof:
                     self.assertFalse((target / 'latency.py').exists())
                 else:
                     self.assertEqual((target / 'latency.py').read_bytes(), b'# tested\n')
-            if fail_start:
-                self.assertEqual(len(starts), 2)
+            if fail_start or fail_verify:
+                self.assertEqual(len(starts), 1 if p1 else 2)
+                if p1:
+                    actions = [call.args for call in commands.call_args_list]
+                    last_start = max(i for i, action in enumerate(actions) if action == ('systemctl', 'start', installer.SERVICE))
+                    self.assertIn(('systemctl', 'stop', installer.SERVICE), actions[last_start + 1:])
+                    self.assertIn(('systemctl', 'disable', installer.SERVICE), actions[last_start + 1:])
+                    self.assertFalse(any(action == ('systemctl', 'start', installer.SERVICE) for action in actions[last_start + 1:]))
+                    self.assertEqual(json.loads((backup / 'rollback-state.json').read_text()),
+                                     {'controller': 'stopped', 'boot_start': 'disabled', 'reason': 'delivery_state_requires_compatible_sender'})
             self.assertEqual(proof_path.read_bytes(), b'{}')
-            self.assertEqual(runtime_path.read_bytes(), b'# runtime original\n' if fail_start or fail_acceptance or fail_proof else
+            self.assertEqual(runtime_path.read_bytes(), b'# runtime original\n' if fail_start or fail_verify or fail_acceptance or fail_proof else
                              b'# runtime tested\n' if runtime_patch else b'# runtime original\n')
+
+    def test_p1_post_launch_failure_never_restarts_older_retry_behavior(self):
+        self.exercise_installer(p1=True, fail_verify=True)
 
     def test_new_dependency_is_installed(self):
         self.exercise_installer(p1=True, new_module=True)

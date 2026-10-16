@@ -121,3 +121,22 @@ The existing explicit owner retry path continues to finalize such diaries withou
 resending acknowledged parts.
 
 Final `git diff --check` passed. No commits, push or deployment were performed in this increment.
+
+## Authorized deployment preparation
+
+After the source commit `6ebf056`, the owner authorized deployment. The manifest
+now includes the five reviewed delivery-source hashes and retains the prior
+installed hashes for validation. The full core suite passed 283 tests with two
+optional skips; all 59 script tests pass, including 31 installer tests.
+
+Rollback changes protect held records: after attempting to launch the new sender,
+any failure stops the controller and disables boot startup before restoring older
+code or proof. It leaves that controller stopped and disabled rather than run a
+sender that ignores held-state metadata. The database is never overwritten from
+its snapshot. A failing disable command prevents restoring older sender code.
+Before any new launch, the existing safe rollback/restart path remains available.
+
+Independent review identified the rollback-ordering hazard. A regression asserted
+that disabling precedes each old-module restoration; it failed before the order
+fix and passed afterward. The author verified the corrected branch and full test
+results; the reviewer's session ended before a final follow-up verdict.

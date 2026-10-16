@@ -223,6 +223,7 @@ def main():
     print('Original modules backed up in ' + str(backup), flush=True)
     controller_stopped = False
     runtime_changed = False
+    new_controller_attempted = False
     stage = 'acceptance'
     try:
         if runtime:
@@ -265,6 +266,7 @@ def main():
         else:
             renew_proof(readiness, original_proof, before, backup)
         stage = 'controller_start'
+        new_controller_attempted = True
         command('systemctl', 'start', SERVICE)
         stage = 'controller_startup_verification'
         verify_controller_startup(backup)
@@ -274,6 +276,10 @@ def main():
         if not controller_stopped:
             raise SystemExit('Acceptance failed before installation; controller left running unchanged. Evidence: ' + str(backup))
         command('systemctl', 'stop', SERVICE)
+        if new_controller_attempted:
+            # Disable boot startup before restoring older sender code. A crash
+            # during rollback must not revive automatic uncertain-message retries.
+            command('systemctl', 'disable', SERVICE)
         for name, original in originals.items():
             if original is None:
                 (TARGET / name).unlink(missing_ok=True)
@@ -284,6 +290,15 @@ def main():
             replace(runtime['path'], runtime['original'], 0, mode=0o644)
             command('systemctl', 'start', 'andrew-runner.service')
         replace(readiness.PROOF, original_proof_bytes, 0, mode=0o644)
+        if new_controller_attempted:
+            # A new sender may have persisted held/claimed deliveries. The older
+            # sender ignores them and must not run automatically, including at boot.
+            (backup / 'rollback-state.json').write_text(json.dumps({
+                'controller': 'stopped', 'boot_start': 'disabled',
+                'reason': 'delivery_state_requires_compatible_sender'}) + '\n')
+            raise SystemExit('Installation failed at ' + stage + ' (' + type(error).__name__ + '); '
+                             'code and proof restored, database preserved. Controller left stopped and disabled '
+                             'to protect uncertain deliveries; do not start the older sender. Evidence: ' + str(backup))
         command('systemctl', 'start', SERVICE)
         raise SystemExit('Installation failed at ' + stage + ' (' + type(error).__name__ + '); '
                          'backed-up modules and acceptance record restored, controller restarted. Evidence: ' + str(backup))
