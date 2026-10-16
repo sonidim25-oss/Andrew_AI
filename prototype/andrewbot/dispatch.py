@@ -61,6 +61,11 @@ class ControllerDispatch:
 
     def _poll_loop(self):
         while not self._poll_stop.is_set() and not self.should_stop():
+            # Saved owner controls must run even when the next network poll
+            # blocks or fails. The main thread leaves these to this worker.
+            self.guarded('Saved owner controls', lambda: self.process_updates(controls_only=True))
+            if self._poll_stop.is_set() or self.should_stop():
+                return
             try:
                 offset = self.store.last_update_id()
                 updates = self.telegram.get_updates(offset=None if offset is None else offset + 1, poll_timeout=1)

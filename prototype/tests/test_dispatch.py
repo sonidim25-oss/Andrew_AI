@@ -133,6 +133,66 @@ class DispatchTests(unittest.TestCase):
 
 
 class ConcurrentOwnerControlsTests(unittest.TestCase):
+    def test_saved_pause_cancels_blocked_turn_despite_failed_telegram_polls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / 'state.sqlite3')
+            entered, cancelled, release, polling, fail_poll, notified = (
+                threading.Event() for _ in range(6))
+            class Telegram:
+                def get_updates(self, **kwargs):
+                    polling.set()
+                    fail_poll.wait(5)
+                    raise RuntimeError('fixture Telegram outage')
+                def send_message(self, owner, text):
+                    if 'Paused' in text:
+                        notified.set()
+            class Agent:
+                calls = 0
+                def autonomous_turn(self, prompt, timeout):
+                    self.calls += 1
+                    entered.set()
+                    release.wait(5)
+                    if cancelled.is_set():
+                        raise LettaTurnCancelled('Owner control')
+                def cancel_active_turn(self):
+                    cancelled.set()
+                    release.set()
+            agent = Agent()
+            controller = Controller(store, agent, 17, autonomous_enabled=True)
+            runner = SessionRunner(store, controller, agent, enabled=True)
+            store.set_state('session_start_requested', 'owner_wake')
+            dispatch = ControllerDispatch(store, controller, Telegram(), runner,
+                                         OwnerRateLimit(), 17, True, False)
+            worker = threading.Thread(target=dispatch.step)
+            dispatch.start()
+            dispatch._updates_ready.set()
+            try:
+                self.assertTrue(polling.wait(1))
+                worker.start()
+                self.assertTrue(entered.wait(1))
+                # Simulate an input saved just before a poll failure. A normal
+                # inbox backlog must not hide the already persisted pause.
+                for number in range(1, 101):
+                    store.enqueue_update(update(number))
+                store.enqueue_update(update(101, '/pause'))
+                fail_poll.set()
+                self.assertTrue(cancelled.wait(3), 'Saved pause depended on a successful Telegram poll')
+                self.assertTrue(notified.wait(1))
+                worker.join(1)
+                self.assertFalse(worker.is_alive())
+                self.assertEqual(store.get_state('paused'), '1')
+                self.assertEqual(store.pending_owner_controls(17), [])
+                self.assertEqual(store.connection.execute('SELECT status FROM cycles').fetchone()[0], 'stopped')
+                self.assertFalse(runner.tick())
+                self.assertEqual(agent.calls, 1)
+            finally:
+                fail_poll.set()
+                release.set()
+                if worker.ident is not None:
+                    worker.join(5)
+                dispatch.stop()
+                store.close()
+
     def run_control(self, controls):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / 'state.sqlite3')
