@@ -115,3 +115,20 @@ Final review: both Important findings were fixed in one RED→GREEN pass and the
 full core suite rerun. No Critical or Minor findings were reported. Deployment
 is not ready: the preserved manifest guard fails as documented. No merge, commit,
 installation, or production service operation was performed.
+
+
+## Subsequent authorized deployment
+
+The later owner request authorized deployment of `e4f88e5` plus the requested
+6,000-token fix. Revision `b5708ac` added the new dependencies to the reviewed
+manifest and safe installation from a halted error state. All 58 script tests now
+pass; the core suite passes 267 tests with two optional skips. An existing control
+reply test fixture now waits for all expected replies before stopping its sender.
+
+Production installation and startup succeeded at 23:08 UTC on 2026-10-16. All
+installed manifest hashes and acceptance bindings validate. Exact database row
+comparisons confirmed preserved messages, memory, research, diary and spending;
+conversation IDs and lifecycle state are unchanged. Saved Letta allowance is 6,000.
+Evidence: `/var/backups/andrew-incident-7kva81q5`. No wake/replay was requested.
+The no-deployment scope above described the original source-only increment and
+was superseded only by that separate explicit deployment instruction.

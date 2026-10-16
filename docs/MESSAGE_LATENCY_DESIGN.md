@@ -1,6 +1,6 @@
 # Message latency: proposed implementation design
 
-Status: design approved by the owner; first-increment timing implemented in source. Production unchanged.
+Status: design approved; first-increment timing installed on production at 23:08 UTC on 2026-10-16 after separate owner authorization. Later increments remain pending.
 
 ## Intent and constraints
 
