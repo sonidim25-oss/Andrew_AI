@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from typing import Mapping
 
 
-MAX_LETTA_OUTPUT_TOKENS = 2048
+# The 2,048-token allowance was exhausted by a confirmed live turn.
+# Gateway reservation and Letta startup settings share this bounded allowance.
+MAX_LETTA_OUTPUT_TOKENS = 6000
 
 
 _MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}/[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}")

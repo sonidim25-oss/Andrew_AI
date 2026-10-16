@@ -103,12 +103,30 @@ def renew_proof(readiness, original, before, backup, expected_service_code=None)
     readiness.validate_runtime_proof()
 
 
-def check_idle():
-    with sqlite3.connect('file:/var/lib/andrew/control/controller.sqlite3?mode=ro', uri=True) as db:
+def check_idle(database=Path('/var/lib/andrew/control/controller.sqlite3')):
+    with sqlite3.connect(Path(database).resolve().as_uri() + '?mode=ro', uri=True) as db:
         state = dict(db.execute("SELECT key,value FROM state WHERE key IN "
-                               "('sleeping','active_session_id','session_start_requested')"))
-    if state.get('sleeping') != '1' or state.get('active_session_id') or state.get('session_start_requested'):
-        raise RuntimeError('Andrew is no longer idle and asleep; installation refused')
+                               "('sleeping','active_session_id','session_start_requested',"
+                               "'active_session_status','autonomy_error')"))
+        halted = (state.get('active_session_status') == 'error' and bool(state.get('autonomy_error')))
+        if (state.get('sleeping') != '1' and not halted) or state.get('active_session_id') or state.get('session_start_requested'):
+            raise RuntimeError('Andrew must be idle and asleep or halted by error; installation refused')
+        for query in ("SELECT count(*) FROM cycles WHERE status='running'",
+                      "SELECT count(*) FROM messages WHERE queued=2",
+                      "SELECT count(*) FROM telegram_claims",
+                      "SELECT count(*) FROM telegram_inbox",
+                      "SELECT count(*) FROM telegram_outbox",
+                      "SELECT count(*) FROM telegram_delivery_progress WHERE chunk_attempts>0"):
+            if db.execute(query).fetchone()[0]:
+                raise RuntimeError('Pending work or uncertain delivery prevents safe installation')
+
+
+def snapshot_store(backup, database=Path('/var/lib/andrew/control/controller.sqlite3')):
+    destination = backup / 'controller-before.sqlite3'
+    with sqlite3.connect(Path(database).resolve().as_uri() + '?mode=ro', uri=True) as source:
+        with sqlite3.connect(destination) as target:
+            source.backup(target)
+    destination.chmod(0o600)
 
 
 def wait_for_letta(timeout=30):
@@ -159,20 +177,28 @@ def main():
     if os.geteuid() != 0:
         raise SystemExit('Run this installer with sudo in your server terminal.')
     manifest = json.loads((ROOT / 'scripts/p1-fix-manifest.json').read_text())
-    if set(manifest) != {'appserver.py', 'browser_history.py', 'controller.py', 'diary.py', 'dispatch.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py'}:
+    if set(manifest) != {'appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py'}:
         raise SystemExit('Unexpected module manifest; installation refused.')
     replacements = {}
+    originals = {}
     for name, hashes in manifest.items():
         data = (ROOT / 'prototype/andrewbot' / name).read_bytes()
         ast.parse(data)
         if hashlib.sha256(data).hexdigest() != hashes['tested']:
             raise SystemExit('Source changed since testing; installation refused: ' + name)
-        installed_hash = hashlib.sha256((TARGET / name).read_bytes()).hexdigest()
+        path = TARGET / name
+        if path.is_symlink():
+            raise SystemExit('Symlink in installed module; installation refused: ' + name)
+        original = path.read_bytes() if path.exists() else None
+        installed_hash = hashlib.sha256(original).hexdigest() if original is not None else None
+        if installed_hash is None and (name != 'latency.py' or hashes['original'] is not None):
+            raise SystemExit('Required installed module missing; installation refused: ' + name)
         reviewed_hashes = {hashes['original'], hashes['tested'], *hashes.get('reviewed', {}).keys()}
         if installed_hash not in reviewed_hashes:
             raise SystemExit('Installed code differs from every reviewed version; installation refused: '
                              + name + ' (SHA-256 ' + installed_hash + ')')
         replacements[name] = data
+        originals[name] = original
     check_idle()
     command('systemctl', 'is-active', SERVICE)
     readiness = load_readiness()
@@ -187,8 +213,10 @@ def main():
             raise SystemExit('Unchanged module differs from checkout; installation refused: ' + path.name)
     gid = grp.getgrnam('andrew-control').gr_gid
     backup = Path(tempfile.mkdtemp(prefix='andrew-incident-', dir='/var/backups'))
-    for name in replacements:
-        shutil.copy2(TARGET / name, backup / name)
+    for name, original in originals.items():
+        if original is not None:
+            shutil.copy2(TARGET / name, backup / name)
+    (backup / 'module-presence.json').write_text(json.dumps({name: data is not None for name, data in originals.items()}) + '\n')
     (backup / 'runtime-proof.json').write_bytes(original_proof_bytes)
     if runtime:
         (backup / 'runtime-runner_service.py').write_bytes(runtime['original'])
@@ -219,6 +247,8 @@ def main():
             controller_stopped = True
         stage = 'idle_recheck'
         check_idle()
+        stage = 'database_snapshot'
+        snapshot_store(backup)
         # The local backend keeps active-run bookkeeping in memory. A controller
         # restart alone cannot clear an orphaned run left by an old transport.
         stage = 'backend_restart'
@@ -244,8 +274,11 @@ def main():
         if not controller_stopped:
             raise SystemExit('Acceptance failed before installation; controller left running unchanged. Evidence: ' + str(backup))
         command('systemctl', 'stop', SERVICE)
-        for name in replacements:
-            replace(TARGET / name, (backup / name).read_bytes(), gid)
+        for name, original in originals.items():
+            if original is None:
+                (TARGET / name).unlink(missing_ok=True)
+            else:
+                replace(TARGET / name, (backup / name).read_bytes(), gid)
         if runtime_changed:
             command('systemctl', 'stop', 'andrew-runner.service')
             replace(runtime['path'], runtime['original'], 0, mode=0o644)

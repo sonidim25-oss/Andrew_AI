@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import json
+import sqlite3
 from pathlib import Path
 import tempfile
 import types
@@ -39,7 +40,7 @@ class IncidentFixTests(unittest.TestCase):
         self.assertNotIn('private text', json.dumps(result))
 
     def exercise_installer(self, fail_start=False, changed_source=False, fail_acceptance=False, fail_proof=False,
-                           p1=False, intermediate=False, unknown_installed=False, runtime_patch=False):
+                           p1=False, intermediate=False, unknown_installed=False, runtime_patch=False, new_module=False):
         installer = load('install-p1-fixes' if p1 else 'install-incident-fix')
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -65,7 +66,7 @@ class IncidentFixTests(unittest.TestCase):
             manifest = {}
             installed_data = (b'# unreviewed change\n' if unknown_installed else
                               b'# reviewed intermediate\n' if intermediate else b'# original\n')
-            names = (['appserver.py', 'browser_history.py', 'controller.py', 'diary.py', 'dispatch.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py']
+            names = (['appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py']
                      if p1 else ['appserver.py', 'configuration.py', 'gateway.py', 'sessions.py'])
             for name in names:
                 (source / name).write_bytes(b'# tested\n')
@@ -74,6 +75,9 @@ class IncidentFixTests(unittest.TestCase):
                                   [('tested', b'# tested\n'), ('original', b'# original\n')]}
                 if p1:
                     manifest[name]['reviewed'] = {hashlib.sha256(b'# reviewed intermediate\n').hexdigest(): ['fixture-revision']}
+            if new_module:
+                (target / 'latency.py').unlink()
+                manifest['latency.py']['original'] = None
             (root / 'scripts' / ('p1-fix-manifest.json' if p1 else 'incident-fix-manifest.json')).write_text(json.dumps(manifest))
             if changed_source:
                 (source / names[0]).write_bytes(b'# untested change\n')
@@ -97,6 +101,7 @@ class IncidentFixTests(unittest.TestCase):
                  patch.object(installer, 'check_idle'), patch.object(installer, 'command', side_effect=command) as commands, \
                  patch.object(installer, 'runtime_patch', return_value=runtime, create=True), \
                  patch.object(installer, 'wait_for_letta', create=True), \
+                 patch.object(installer, 'snapshot_store', create=True), \
                  patch.object(installer, 'load_readiness', return_value=readiness), \
                  patch.object(installer, 'acceptance', side_effect=accept) as acceptance, \
                  patch.object(installer, 'renew_proof', side_effect=RuntimeError('failed proof') if fail_proof else None) as renewal, \
@@ -125,12 +130,73 @@ class IncidentFixTests(unittest.TestCase):
                         self.assertLess(stop, restart)
                         self.assertLess(restart, start)
             expected = installed_data if fail_start or changed_source or fail_acceptance or fail_proof or unknown_installed else b'# tested\n'
-            self.assertTrue(all((target / name).read_bytes() == expected for name in names))
+            self.assertTrue(all((target / name).read_bytes() == expected for name in names
+                                if not (new_module and name == 'latency.py')))
+            if new_module:
+                if fail_start or fail_acceptance or fail_proof:
+                    self.assertFalse((target / 'latency.py').exists())
+                else:
+                    self.assertEqual((target / 'latency.py').read_bytes(), b'# tested\n')
             if fail_start:
                 self.assertEqual(len(starts), 2)
             self.assertEqual(proof_path.read_bytes(), b'{}')
             self.assertEqual(runtime_path.read_bytes(), b'# runtime original\n' if fail_start or fail_acceptance or fail_proof else
                              b'# runtime tested\n' if runtime_patch else b'# runtime original\n')
+
+    def test_new_dependency_is_installed(self):
+        self.exercise_installer(p1=True, new_module=True)
+
+    def test_new_dependency_is_removed_on_startup_rollback(self):
+        self.exercise_installer(p1=True, new_module=True, fail_start=True)
+
+    def test_new_dependency_is_removed_on_proof_rollback(self):
+        self.exercise_installer(p1=True, new_module=True, fail_proof=True)
+
+    def test_idle_accepts_halted_error_without_changing_lifecycle(self):
+        installer = load('install-p1-fixes')
+        from andrewbot.store import Store
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'controller.sqlite3'
+            store = Store(path)
+            try:
+                for key, value in {'sleeping': '0', 'active_session_id': '',
+                        'session_start_requested': '', 'active_session_status': 'error',
+                        'autonomy_error': 'output_token_limit'}.items():
+                    store.set_state(key, value)
+                installer.check_idle(path)
+                self.assertEqual(store.get_state('sleeping'), '0')
+                for key, value in (('autonomy_error', ''), ('active_session_id', 'running'),
+                                   ('session_start_requested', 'owner_wake')):
+                    original = store.get_state(key)
+                    store.set_state(key, value)
+                    with self.assertRaises(RuntimeError):
+                        installer.check_idle(path)
+                    store.set_state(key, original)
+                store.queue_reply(17, 'fixture')
+                store.prepare_telegram_delivery('reply', 1, 'fixture')
+                store.attempt_telegram_chunk('reply', 1, 0)
+                with self.assertRaises(RuntimeError):
+                    installer.check_idle(path)
+            finally:
+                store.close()
+
+    def test_snapshot_preserves_database_without_modifying_original(self):
+        installer = load('install-p1-fixes')
+        from andrewbot.store import Store
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'controller.sqlite3'
+            backup = Path(directory) / 'backup'
+            backup.mkdir()
+            store = Store(path)
+            try:
+                store.add_message(17, 'user', 'fixture held input', queued=True)
+                installer.snapshot_store(backup, path)
+                with sqlite3.connect(backup / 'controller-before.sqlite3') as copy:
+                    self.assertEqual(copy.execute('SELECT content FROM messages').fetchone()[0], 'fixture held input')
+                self.assertEqual(store.connection.execute('SELECT count(*) FROM messages').fetchone()[0], 1)
+                self.assertEqual((backup / 'controller-before.sqlite3').stat().st_mode & 0o777, 0o600)
+            finally:
+                store.close()
 
     def test_runtime_deadline_patch_is_installed_before_acceptance(self):
         self.exercise_installer(p1=True, runtime_patch=True)

@@ -381,7 +381,7 @@ class ConcurrentOwnerControlsTests(unittest.TestCase):
     def run_control(self, controls):
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / 'state.sqlite3')
-            entered, cancelled, release, notified = (threading.Event() for _ in range(4))
+            entered, cancelled, release, notified, all_notified = (threading.Event() for _ in range(5))
             inbox = queue.Queue()
             replies = []
             class Telegram:
@@ -393,6 +393,8 @@ class ConcurrentOwnerControlsTests(unittest.TestCase):
                 def send_message(self, owner, text):
                     replies.append(text)
                     notified.set()
+                    if len(replies) >= len(controls):
+                        all_notified.set()
             class Agent:
                 def autonomous_turn(self, prompt, timeout):
                     entered.set()
@@ -432,6 +434,7 @@ class ConcurrentOwnerControlsTests(unittest.TestCase):
                 else:
                     self.assertFalse(cancelled.is_set())
                     self.assertTrue(worker.is_alive())
+                self.assertTrue(all_notified.wait(2), 'Control replies did not finish before shutdown')
                 return replies
             finally:
                 release.set()

@@ -35,7 +35,7 @@
   },
   "controller.py": {
     "original": "5981f21f7de608c5b443eb7b60e7656e22134a318928456f69458f7c9a5b518a",
-    "tested": "ab15adfc231e7bd44b1417bd38e62d1b209ea9a7cce8fe48c075afbfafee715c",
+    "tested": "4ee67591b306c56fd5070bf6403702e0b284f0ecdfd536074d3e09f7d0bee2ac",
     "reviewed": {
       "5981f21f7de608c5b443eb7b60e7656e22134a318928456f69458f7c9a5b518a": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
@@ -55,12 +55,15 @@
       ],
       "ba3d09096d6b1394f33237e3f7a216493aa696df9855b55083bcef786c6fef94": [
         "c6c09cb0e383c48908ee082ddd42a5514be78f19"
+      ],
+      "ab15adfc231e7bd44b1417bd38e62d1b209ea9a7cce8fe48c075afbfafee715c": [
+        "previous-reviewed-manifest"
       ]
     }
   },
   "diary.py": {
     "original": "fa8d71bc5057859623098c1e650ef69d3fe4de7c2c644c7b4de9e36bf2cbcaf2",
-    "tested": "5db0cd5ee78b607cd12125be42214f545cc08a6af6a9a6f32bcc81d23fdcb369",
+    "tested": "cab663bd72d290801b8889f79df3231f6889151d1fb2dd86af78fe5d59d942e0",
     "reviewed": {
       "fa8d71bc5057859623098c1e650ef69d3fe4de7c2c644c7b4de9e36bf2cbcaf2": [
         "f732cfcb669c2776d8b33344749011a3e928ad50",
@@ -76,7 +79,7 @@
   },
   "dispatch.py": {
     "original": "c3b1b1cafc3629cdba7c4badeb8c7bb2158c8dd13536ecf84dd4c966276cd8ab",
-    "tested": "f67b31fc163e647552493e063fbf377f800ef4ae21458102e9003bc2cb2025a4",
+    "tested": "ffec25f6f5f629f7287c46ce4359c44e0654f18ebe645a6790599b29b3ba9584",
     "reviewed": {
       "c3b1b1cafc3629cdba7c4badeb8c7bb2158c8dd13536ecf84dd4c966276cd8ab": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
@@ -96,7 +99,7 @@
   },
   "main.py": {
     "original": "3d7d58c1c00cc21f6841525d9db7d8b0554b0239b311908ea5c150cbbaa83527",
-    "tested": "cf849c0d48da815efa9c7e18640317da60889c9d645f9cf0e76fd80c180262f8",
+    "tested": "041d5da80b234677c05cce5717997c5a72f78079a096786b4bfdd1e3ba8996fe",
     "reviewed": {
       "3d7d58c1c00cc21f6841525d9db7d8b0554b0239b311908ea5c150cbbaa83527": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
@@ -118,7 +121,7 @@
   },
   "sessions.py": {
     "original": "e9801014987431ec9149c38019cab0499f93ec8b377ab79a639cfd805ca819dc",
-    "tested": "0cea0bd8026023587aae974b46f0591133e0fc2df015ae0691c1cc1470e6aae6",
+    "tested": "a0235ba3379dbcf015c7dc78d42da64dd350c5dad4e628f1484ebe7192432b91",
     "reviewed": {
       "e9801014987431ec9149c38019cab0499f93ec8b377ab79a639cfd805ca819dc": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
@@ -132,12 +135,15 @@
       ],
       "a0dcd5be2316cbc682bc2fc3cc5b835c52b61eea1b95db0999dd593d11b2fde4": [
         "c6c09cb0e383c48908ee082ddd42a5514be78f19"
+      ],
+      "0cea0bd8026023587aae974b46f0591133e0fc2df015ae0691c1cc1470e6aae6": [
+        "previous-reviewed-manifest"
       ]
     }
   },
   "store.py": {
     "original": "10548624b22ea55f2c67a1ee3a6eddea078660aba68a747048e051ca01257afd",
-    "tested": "44c4f8d9ace93f44fc223d2c8dc8cf83cd546961fbe92f23893efb926a90f1d6",
+    "tested": "0ad53894ecfdd82f10e702f703cb83f180dec00f8649df40404c7543902de731",
     "reviewed": {
       "10548624b22ea55f2c67a1ee3a6eddea078660aba68a747048e051ca01257afd": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
@@ -155,12 +161,15 @@
       ],
       "464e42fe997b241b03398a5da9e3fc1c46f5c7da7c4d05dc016852528287a2c2": [
         "c6c09cb0e383c48908ee082ddd42a5514be78f19"
+      ],
+      "44c4f8d9ace93f44fc223d2c8dc8cf83cd546961fbe92f23893efb926a90f1d6": [
+        "previous-reviewed-manifest"
       ]
     }
   },
   "telegram.py": {
     "original": "f4b356b42cff1ae8ef69fdf9c25c3f910110dd5dcc254d35643f6558cf16e0d0",
-    "tested": "48dc50395d6ff046f48ceb62663ceff7c0fadc40385397ac46cf37142ab93f73",
+    "tested": "c6a4e6574d93a64d91cdb28c707ab873b7b85970e5783495ad65cd37ae46ff68",
     "reviewed": {
       "f4b356b42cff1ae8ef69fdf9c25c3f910110dd5dcc254d35643f6558cf16e0d0": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
@@ -202,5 +211,13 @@
         "55026819e5eaa11876694dd2e0253a3b10b50a13"
       ]
     }
+  },
+  "configuration.py": {
+    "original": "c0265f879f8b7ff662b40eb2f0405fa80080b8f7a6c7581c716173e290f072b7",
+    "tested": "bf9c0d15581caa614c6304f30f245fc21a899a1f5b7947c1adff2e304dedac37"
+  },
+  "latency.py": {
+    "original": null,
+    "tested": "1de09fcfc1d0c9accf047ac91129767b975f3ef134c390a8dddff7835b75cd19"
   }
 }

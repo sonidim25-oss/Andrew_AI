@@ -78,7 +78,9 @@ def incident_summary(session_id, reason, activity):
         except ValueError:
             continue
     if safe_events:
-        lines.append("Last recorded objective events: " + " | ".join(safe_events[-4:]))
+        # Store.recent_activity is newest first. Select the newest safe events,
+        # then render that subset chronologically; the tail contains older incidents.
+        lines.append("Last recorded objective events: " + " | ".join(reversed(safe_events[:4])))
     else:
         lines.append("No additional safe objective event details were available.")
     lines.append("No first-person diary was saved before this interruption.")

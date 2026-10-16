@@ -233,6 +233,26 @@ class ModelGatewayTests(unittest.TestCase):
         finally:
             thread.close()
 
+    def test_response_needing_more_than_4096_tokens_can_finish_once_with_reserved_budget(self):
+        def completion(payload):
+            self.provider.calls.append(payload)
+            reservation = self.store.connection.execute(
+                'SELECT cost_usd FROM budget_reservations').fetchone()
+            self.assertGreaterEqual(reservation[0], 6000 * self.gateway.output_rate)
+            allowance = payload['max_tokens']
+            return {'choices': [{'message': {'role': 'assistant', 'content': 'Fixture completed.'},
+                                  'finish_reason': 'stop' if allowance >= 5000 else 'length'}],
+                    'usage': {'prompt_tokens': 20, 'completion_tokens': min(5000, allowance), 'cost': 0.0015}}
+        self.provider.complete = completion
+        status, result = self.gateway.complete('Bearer gateway-test-token',
+            {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'fixture'}],
+             'max_tokens': 6000})
+        self.assertEqual(status, 200)
+        self.assertEqual(result['choices'][0]['finish_reason'], 'stop')
+        self.assertEqual(len(self.provider.calls), 1)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 1)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
