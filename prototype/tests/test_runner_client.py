@@ -95,5 +95,41 @@ class RunnerClientTests(unittest.TestCase):
             module.RunnerClient(self.socket_path).run({"type": "python", "code": "pass"})
 
 
+    def test_turn_cancellation_interrupts_an_unlimited_response_wait(self):
+        from andrewbot import runner_client as module
+        self.assertTrue(hasattr(module, 'TOOL_CANCELLATION'), 'turn cancellation context is missing')
+        entered, cancelled, disconnected = threading.Event(), threading.Event(), threading.Event()
+        errors = []
+        def serve():
+            connection, _ = self.server.accept()
+            with connection:
+                connection.recv(65536)
+                entered.set()
+                connection.settimeout(2)
+                if connection.recv(1) == b'':
+                    disconnected.set()
+        server = self.run_server(serve)
+        def request():
+            token = module.TOOL_CANCELLATION.set(cancelled)
+            try:
+                module.RunnerClient(self.socket_path).run({'type': 'python', 'code': 'pass'})
+            except module.RunnerProtocolError as error:
+                errors.append(str(error))
+            finally:
+                module.TOOL_CANCELLATION.reset(token)
+        client = threading.Thread(target=request)
+        client.start()
+        try:
+            self.assertTrue(entered.wait(1))
+            cancelled.set()
+            client.join(2)
+            self.assertFalse(client.is_alive())
+            self.assertTrue(disconnected.wait(1))
+            self.assertEqual(errors, ['runner request cancelled'])
+        finally:
+            cancelled.set()
+            client.join(2)
+            server.join(2)
+
 if __name__ == "__main__":
     unittest.main()

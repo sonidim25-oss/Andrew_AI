@@ -262,12 +262,12 @@ class ConversationLifecycleTests(unittest.TestCase):
                     self.assertFalse(self.runner.tick(self.now))
         self.assertEqual(self.autonomous_calls, [])
 
-    def test_session_limits_end_work_without_inventing_sleep(self):
+    def test_session_continues_after_old_time_limit_without_inventing_sleep(self):
         self.controller._command('/wake')
-        self.runner.start('owner_wake', self.now)
-        self.now += timedelta(minutes=180)
-        self.assertFalse(self.runner.tick(self.now))
-        self.assertEqual(self.store.get_state('active_session_status'), 'time_limit')
+        session = self.runner.start('owner_wake', self.now)
+        self.now += timedelta(minutes=181)
+        self.assertTrue(self.runner.tick(self.now))
+        self.assertEqual(self.runner.active_session_id, session)
         self.assertEqual(self.store.get_state('sleeping'), '0')
-        self.assertFalse(self.runner.tick(self.now))
+        self.assertEqual(len(self.autonomous_calls), 1)
         self.assertIsNone(self.store.next_reply())

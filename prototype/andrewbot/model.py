@@ -8,7 +8,7 @@ class OpenRouterModel:
     endpoint = "https://openrouter.ai/api/v1/chat/completions"
     model_id = "qwen/qwen3.8-flash"
 
-    def __init__(self, api_key, timeout=45, model_config=None):
+    def __init__(self, api_key, timeout=120, model_config=None):
         self.api_key = api_key
         self.timeout = timeout
         if model_config is not None and not isinstance(model_config, ModelConfig):

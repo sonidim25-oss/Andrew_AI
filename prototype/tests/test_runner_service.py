@@ -33,9 +33,8 @@ class RunnerServiceTests(unittest.TestCase):
         service = module.RunnerService(config)
         args = service._podman_args("worker-test")
         self.assertIn("--network=none", args)
-        backup_timeout = next(int(arg.split('=', 1)[1]) for arg in args if arg.startswith('--timeout='))
-        self.assertGreater(backup_timeout, config.timeout_seconds,
-                           'Podman must not win the runner watchdog deadline and hide a timeout as exit 255')
+        self.assertIsNone(config.timeout_seconds)
+        self.assertFalse(any(arg.startswith('--timeout=') for arg in args))
         self.assertIn("--log-driver=none", args)
         self.assertIn("--pull=never", args)
         self.assertIn("--group-add=keep-groups", args)
@@ -89,7 +88,7 @@ class RunnerServiceTests(unittest.TestCase):
         from andrewbot.process_limits import ProcessResult
         with patch("andrewbot.runner_service.run_bounded", return_value=ProcessResult(-9, b"", b"", timed_out=True)) as bounded, patch("andrewbot.runner_service.subprocess.run") as mocked:
             result = service.run({"type": "python", "code": "pass"})
-        self.assertEqual(bounded.call_args.kwargs['timeout'], 120, 'the hard runner deadline must remain 120 seconds')
+        self.assertIsNone(bounded.call_args.kwargs['timeout'])
         self.assertEqual(result["safe_error"], "timeout")
         self.assertTrue(any("rm" in call.args[0] for call in mocked.call_args_list))
 
@@ -114,7 +113,7 @@ class RunnerConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         release = threading.Event()
         count = []
         class Runner:
-            def run(self, request):
+            def run(self, request, cancel_event=None):
                 count.append(request)
                 loop.call_soon_threadsafe(started.set)
                 release.wait(timeout=2)
@@ -147,3 +146,42 @@ class RunnerConcurrencyTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class RunnerDisconnectTests(unittest.IsolatedAsyncioTestCase):
+    async def test_disconnected_peer_cancels_job_and_waits_for_cleanup_before_releasing_owner(self):
+        module = runner_module(self)
+        loop = asyncio.get_running_loop()
+        entered = asyncio.Event()
+        stopped = threading.Event()
+        cleanup = threading.Event()
+        class Runner:
+            def run(self, request, cancel_event=None):
+                loop.call_soon_threadsafe(entered.set)
+                if cancel_event is not None and cancel_event.wait(2):
+                    stopped.set()
+                cleanup.wait(2)
+                return {'status': 'error', 'stdout': '', 'stderr': '', 'artifacts': [], 'safe_error': 'cancelled'}
+        class Writer:
+            def write(self, data):
+                pass
+            async def drain(self):
+                pass
+            def close(self):
+                pass
+            async def wait_closed(self):
+                pass
+        reader = asyncio.StreamReader()
+        raw = json.dumps({'type': 'python', 'code': 'pass'}).encode()
+        reader.feed_data(struct.pack('!I', len(raw)) + raw)
+        server = module.RunnerSocketServer(Runner())
+        task = asyncio.create_task(server.handle(reader, Writer()))
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            reader.feed_eof()
+            cancelled = await asyncio.to_thread(stopped.wait, 1)
+            self.assertTrue(cancelled, 'disconnect did not cancel the running job')
+            self.assertTrue(server._busy, 'runner ownership released before cleanup')
+        finally:
+            cleanup.set()
+            await task
+        self.assertFalse(server._busy)

@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 from .configuration import MAX_LETTA_OUTPUT_TOKENS, ModelConfig, load_model_config
 from .gmail_tools import GMAIL_TOOLS, GMAIL_TOOL_NAMES
 from .gmail_policy import load_permissions as gmail_permissions
+from .runner_client import TOOL_CANCELLATION
 
 
 class StartupValidationError(RuntimeError):
@@ -157,6 +158,9 @@ class AppServerConnection:
                 if remaining <= 0:
                     raise TimeoutError('Letta response deadline reached')
                 self.socket.settimeout(min(self.read_timeout, remaining))
+            else:
+                # No turn deadline means no hidden socket read deadline either.
+                self.socket.settimeout(None)
             chunk = self.socket.recv(count - len(result))
             if not chunk:
                 raise RuntimeError("Letta WebSocket closed unexpectedly")
@@ -374,7 +378,7 @@ class AppServerClient:
                 "exclude_interactive_tools": True,
             },
         })
-        deadline = time.monotonic() + timeout
+        deadline = None if timeout is None else time.monotonic() + timeout
         failure = False
         active_run_conflict = False
         output_limit = False
@@ -382,7 +386,7 @@ class AppServerClient:
         early_reply = None
         abort_request_id = None
         input_accepted = not getattr(self, 'require_input_ack', False)
-        while time.monotonic() < deadline:
+        while deadline is None or time.monotonic() < deadline:
             self.connection.deadline = deadline
             event = self.connection.recv_json()
             if event.get("runtime") and event["runtime"] != runtime:
@@ -703,7 +707,11 @@ class LettaAgent:
             def tool_handler(name, arguments):
                 if cancelled.is_set():
                     raise LettaTurnCancelled('Owner cancelled this turn')
-                return self.tool_handler(name, arguments)
+                token = TOOL_CANCELLATION.set(cancelled)
+                try:
+                    return self.tool_handler(name, arguments)
+                finally:
+                    TOOL_CANCELLATION.reset(token)
             reply = client.send_user_turn(runtime, text, tool_handler=tool_handler if self.tool_handler else None, timeout=timeout)
             if cancelled.is_set():
                 raise LettaTurnCancelled('Owner cancelled this turn')
@@ -727,7 +735,7 @@ class LettaAgent:
             if client is not None:
                 client.close()
 
-    def autonomous_turn(self, prompt, timeout=120):
+    def autonomous_turn(self, prompt, timeout=None):
         if not isinstance(prompt, str) or not prompt:
             raise ValueError("autonomous turn prompt must be non-empty")
         return self.reply([{"role": "user", "content": prompt}], timeout=timeout)

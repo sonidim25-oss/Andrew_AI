@@ -160,18 +160,19 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(len(self.store.pending_diary_deliveries()), 1)
         self.assertEqual(self.store.pending_diary_deliveries()[0]["record_type"], "incident_summary")
 
-    def test_cycle_and_time_limits_block_provider_calls(self):
+    def test_autonomy_continues_past_old_cycle_and_time_limits(self):
         session = self.runner.start("scheduled_wake", self.now)
         for cycle in range(150):
             self.store.begin_cycle(session, str(cycle), "2026-10-14")
             self.store.finish_cycle(str(cycle), "complete")
-        self.assertFalse(self.runner.tick(self.now))
-        self.assertEqual(self.store.get_state("active_session_status"), "cycle_limit")
-        self.store.set_state("sleeping", "0")
-        self.runner.start("scheduled_wake", self.now + timedelta(days=1))
-        self.assertFalse(self.runner.tick(self.now + timedelta(days=1, minutes=180)))
-        self.assertEqual(self.store.get_state("active_session_status"), "time_limit")
-        self.assertEqual(self.calls, [])
+        self.assertTrue(self.runner.tick(self.now + timedelta(minutes=181)))
+        self.assertEqual(self.runner.active_session_id, session)
+        self.assertEqual(len(self.calls), 1)
+        self.assertIsNone(self.calls[0][1], 'autonomous turns must have no total deadline')
+        self.assertTrue(self.runner.tick(self.now + timedelta(days=1)))
+        self.assertEqual(self.runner.active_session_id, session)
+        self.assertNotIn('/150', self.controller._command('/status'))
+        self.assertNotIn('/150', self.controller._command('/budget'))
 
     def test_provider_failure_reports_error_and_records_incident_without_retry(self):
         def fail():

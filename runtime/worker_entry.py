@@ -90,7 +90,7 @@ def _artifacts(workspace):
     return found
 
 
-def _run_child(command, environment, cwd, timeout=120):
+def _run_child(command, environment, cwd, timeout=None):
     process = subprocess.Popen(command, cwd=cwd, env=environment, stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                start_new_session=True, close_fds=True)
@@ -99,18 +99,18 @@ def _run_child(command, environment, cwd, timeout=120):
     for stream in outputs:
         os.set_blocking(stream.fileno(), False)
         selector.register(stream, selectors.EVENT_READ)
-    deadline = time.monotonic() + timeout
+    deadline = None if timeout is None else time.monotonic() + timeout
     timed_out = False
     while selector.get_map():
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
             timed_out = True
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
             break
-        for key, _ in selector.select(timeout=min(remaining, 0.25)):
+        for key, _ in selector.select(timeout=0.25 if remaining is None else min(remaining, 0.25)):
             try:
                 chunk = key.fileobj.read(4096)
             except BlockingIOError:
@@ -127,7 +127,17 @@ def _run_child(command, environment, cwd, timeout=120):
     if timed_out:
         process.wait(timeout=5)
         return -1, bytes(outputs[process.stdout]), bytes(outputs[process.stderr]), True
-    return process.wait(timeout=5), bytes(outputs[process.stdout]), bytes(outputs[process.stderr]), False
+    selector.close()
+    remaining = None if deadline is None else max(0.001, deadline - time.monotonic())
+    try:
+        return process.wait(timeout=remaining), bytes(outputs[process.stdout]), bytes(outputs[process.stderr]), False
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=5)
+        return -1, bytes(outputs[process.stdout]), bytes(outputs[process.stderr]), True
 
 
 def _browser(url, proxy_url, environment, cwd):
@@ -170,7 +180,7 @@ with sync_playwright() as p:
     return _result(stdout=output, visit=visit)
 
 
-def execute_request(request, proxy_url=None, workspace=None, timeout=120):
+def execute_request(request, proxy_url=None, workspace=None, timeout=None):
     if not isinstance(request, dict) or request.get("type") not in REQUEST_FIELDS or set(request) != REQUEST_FIELDS.get(request.get("type"), set()):
         return _result("error", safe_error="invalid_request")
     kind = request["type"]

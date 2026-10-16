@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Developer proof with temporary Unix sockets and the invoking user's rootless Podman.
-No privileged host firewall/production workspace claim. Runs real 120-second timeout.
+No privileged host firewall/production workspace claim. Runs a real 130-second job across the former 120-second deadline.
 """
 import asyncio
 import importlib.util

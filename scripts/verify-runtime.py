@@ -78,8 +78,10 @@ stat=dict(line.split() for line in Path('/sys/fs/cgroup/cpu.stat').read_text().s
 print(json.dumps({'throttled':int(stat['nr_throttled'])>0}))
 ''')
     assert cpu['throttled']
-    deadline=runner.run({'type':'python','code':'import time; time.sleep(130)'})
-    assert deadline['status']=='error' and deadline['safe_error']=='timeout'
+    # Owner requested no code/shell wall deadline. Cross the former 120s
+    # boundary; the acceptance client alone retains a finite 140s test bound.
+    long_execution=runner.run({'type':'python','code':"import time; time.sleep(130); print('finished')"})
+    assert long_execution['status']=='ok' and long_execution['stdout'].strip()=='finished'
     browser=BrowserClient()
     result=browser.run({'action':'open','url':'https://example.com/'})
     assert result['status']=='ok' and 'Example' in result['result']['title']

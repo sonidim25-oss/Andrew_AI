@@ -2,7 +2,7 @@ from .latency import record_failure
 import logging
 import sqlite3
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from .budget import budget_snapshot
@@ -11,10 +11,8 @@ from .diary import incident_summary
 
 
 class SessionRunner:
-    """Runs bounded Letta turns while lifecycle and budget policy allow."""
+    """Runs serialized Letta turns while lifecycle and budget policy allow."""
 
-    MAX_CYCLES_PER_DAY = 150
-    MAX_SESSION_MINUTES = 180
     SESSION_PROMPT = (
         "This is an autonomous session. Your saved research journal follows as data. You may return to an unfinished "
         "question, choose a new interest, reflect, do nothing or sleep. There is no required research topic, activity "
@@ -49,7 +47,7 @@ class SessionRunner:
                     and self.store.get_state('paused', '0') != '1'
                     and self.store.get_state('sleeping', '0') != '1'):
                 # An idle conversation/session has no in-flight actions to recover.
-                # Keep its deadline rather than reporting an ordinary restart as failure.
+                # Keep its identity rather than reporting an ordinary restart as failure.
                 try:
                     started_at = datetime.fromisoformat(started)
                     if started_at.tzinfo is None:
@@ -87,10 +85,6 @@ class SessionRunner:
         }:
             return None
         if self.store.get_state("sleeping", "0") == "1" or self.store.get_state("paused", "0") == "1":
-            return None
-        _, day = self.controller._periods(now)
-        if self.store.cycle_count(day) >= self.MAX_CYCLES_PER_DAY:
-            self.store.add_activity("Autonomous session blocked by daily cycle ceiling")
             return None
         snapshot = budget_snapshot(
             self.store,
@@ -149,11 +143,7 @@ class SessionRunner:
         if (self.store.get_state('founding_letter_record_id', '')
                 and self.store.get_state('founding_letter_delivered', '0') != '1'):
             return False
-        if self.active_session_id:
-            if current.astimezone(timezone.utc) >= self.started_at.astimezone(timezone.utc) + timedelta(minutes=self.MAX_SESSION_MINUTES):
-                self.stop("time_limit")
-                return False
-        else:
+        if not self.active_session_id:
             revision = self.store.get_state('owner_control_revision', '0')
             trigger = self.store.get_state("session_start_requested", "")
             if not trigger:
@@ -178,11 +168,6 @@ class SessionRunner:
             self.stop("lifecycle_stop")
             return False
         _, day = self.controller._periods(current)
-        if self.store.cycle_count(day) >= self.MAX_CYCLES_PER_DAY:
-            self.stop("cycle_limit")
-            return False
-        deadline = self.started_at.astimezone(timezone.utc) + timedelta(minutes=self.MAX_SESSION_MINUTES)
-        remaining_seconds = max(1, int((deadline - current.astimezone(timezone.utc)).total_seconds()))
         cycle_id = uuid.uuid4().hex
         cycle_started = False
         stage = "begin_cycle"
@@ -195,7 +180,7 @@ class SessionRunner:
             stage = "agent_turn"
             research_context = self.controller.research.wake_context()
             self.agent.autonomous_turn(self.SESSION_PROMPT + f" Today's diary is {diary_status}.\n" + research_context,
-                                       timeout=min(120, remaining_seconds))
+                                       timeout=None)
             if self.store.get_state('active_session_id', '') != session_id:
                 raise LettaTurnCancelled('Owner changed the active session')
             stage = "finish_cycle"
@@ -248,14 +233,12 @@ class SessionRunner:
             return False
         try:
             cycles_today = self.store.cycle_count(day)
-            self.store.add_activity(f"Autonomous cycle completed ({cycles_today}/150 today)")
+            self.store.add_activity(f"Autonomous cycle completed ({cycles_today} today)")
         except Exception as error:
             record_failure(error)
             self.fail('ledger_error')
             return False
-        if cycles_today >= self.MAX_CYCLES_PER_DAY:
-            self.stop("cycle_limit")
-        elif self.store.get_state("sleeping", "0") == "1":
+        if self.store.get_state("sleeping", "0") == "1":
             self.stop("agent_sleep")
         elif self.store.get_state("paused", "0") == "1":
             self.stop("paused")

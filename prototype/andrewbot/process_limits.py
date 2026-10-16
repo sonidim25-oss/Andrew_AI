@@ -14,6 +14,7 @@ class ProcessResult:
     stderr: bytes
     timed_out: bool = False
     output_exceeded: bool = False
+    cancelled: bool = False
 
 
 def child_environment():
@@ -22,14 +23,16 @@ def child_environment():
             if key not in {'LISTEN_PID','LISTEN_FDS','LISTEN_FDNAMES'}}
 
 
-def run_bounded(argv, payload=b"", timeout=120, output_limit=40 * 1024, stderr_limit=4096):
+def run_bounded(argv, payload=b"", timeout=120, output_limit=40 * 1024, stderr_limit=4096, cancel_event=None):
+    if cancel_event is not None and cancel_event.is_set():
+        return ProcessResult(-9, b"", b"", cancelled=True)
     process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                start_new_session=True, close_fds=True, env=child_environment())
     outputs = {process.stdout: bytearray(), process.stderr: bytearray()}
     limits = {process.stdout: output_limit, process.stderr: stderr_limit}
     pending = memoryview(payload)
-    deadline = time.monotonic() + timeout
-    timed_out = output_exceeded = False
+    deadline = None if timeout is None else time.monotonic() + timeout
+    timed_out = output_exceeded = cancelled = False
     selector = selectors.DefaultSelector()
     streams = (process.stdin, process.stdout, process.stderr)
     try:
@@ -42,11 +45,14 @@ def run_bounded(argv, payload=b"", timeout=120, output_limit=40 * 1024, stderr_l
         else:
             process.stdin.close()
         while selector.get_map():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            if cancel_event is not None and cancel_event.is_set():
+                cancelled = True
+                break
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
                 timed_out = True
                 break
-            for key, _ in selector.select(min(remaining, 0.25)):
+            for key, _ in selector.select(0.25 if remaining is None else min(remaining, 0.25)):
                 stream = key.fileobj
                 if stream is process.stdin:
                     try:
@@ -73,14 +79,21 @@ def run_bounded(argv, payload=b"", timeout=120, output_limit=40 * 1024, stderr_l
                     break
             if output_exceeded:
                 break
-        if not timed_out and not output_exceeded:
-            try:
-                process.wait(timeout=max(0.001, deadline - time.monotonic()))
-            except subprocess.TimeoutExpired:
+        while not timed_out and not output_exceeded and not cancelled and process.poll() is None:
+            if cancel_event is not None and cancel_event.is_set():
+                cancelled = True
+                break
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
                 timed_out = True
+                break
+            try:
+                process.wait(timeout=0.25 if remaining is None else min(0.25, remaining))
+            except subprocess.TimeoutExpired:
+                continue
     finally:
         selector.close()
-        if timed_out or output_exceeded or process.poll() is None:
+        if timed_out or output_exceeded or cancelled or process.poll() is None:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -90,4 +103,4 @@ def run_bounded(argv, payload=b"", timeout=120, output_limit=40 * 1024, stderr_l
             if not stream.closed:
                 stream.close()
     return ProcessResult(process.returncode, bytes(outputs[process.stdout]), bytes(outputs[process.stderr]),
-                         timed_out, output_exceeded)
+                         timed_out, output_exceeded, cancelled)

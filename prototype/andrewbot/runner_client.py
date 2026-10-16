@@ -1,8 +1,14 @@
 """Bounded, secret-free client for the isolated Andrew tool runner."""
 
 import json
+import select
+import time
+from contextvars import ContextVar
 import socket
 import struct
+
+
+TOOL_CANCELLATION = ContextVar("runner_tool_cancellation", default=None)
 
 
 MAX_REQUEST_BYTES = 64 * 1024
@@ -13,41 +19,59 @@ _REQUEST_FIELDS = {
     "shell": {"type", "command"},
     "browser_open": {"type", "url"},
 }
-_SAFE_ERRORS = {"invalid_request", "unsupported_tool", "execution_failed", "timeout", "proxy_unavailable", "policy_rejected", "worker_unavailable"}
+_SAFE_ERRORS = {"invalid_request", "unsupported_tool", "execution_failed", "timeout", "cancelled", "proxy_unavailable", "policy_rejected", "worker_unavailable"}
 
 
 class RunnerProtocolError(RuntimeError):
     """A safe, bounded runner transport or response error."""
 
 
-def _read_exactly(connection, length):
+def _read_exactly(connection, length, cancel_event=None):
     result = bytearray()
+    timeout = connection.gettimeout()
+    deadline = None if timeout is None else time.monotonic() + timeout
     while len(result) < length:
+        if cancel_event is not None:
+            if cancel_event.is_set():
+                raise RunnerProtocolError("runner request cancelled")
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                raise socket.timeout()
+            if not select.select([connection], [], [], 0.25 if remaining is None else min(0.25, remaining))[0]:
+                continue
         chunk = connection.recv(length - len(result))
         if not chunk:
             raise RunnerProtocolError("runner response was incomplete")
         result.extend(chunk)
+        if timeout is not None:
+            deadline = time.monotonic() + timeout
     return bytes(result)
 
 
 class RunnerClient:
-    def __init__(self, socket_path: str, timeout_seconds: int = 120):
-        if not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0:
-            raise ValueError("timeout must be positive")
+    def __init__(self, socket_path: str, timeout_seconds: int | None = None):
+        if timeout_seconds is not None and (not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0):
+            raise ValueError("timeout must be positive or None")
         self.socket_path = socket_path
         self.timeout_seconds = timeout_seconds
 
     def run(self, request: dict) -> dict:
         payload = self._encode_request(request)
+        cancel_event = TOOL_CANCELLATION.get()
+        if cancel_event is not None and cancel_event.is_set():
+            raise RunnerProtocolError("runner request cancelled")
         connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            connection.settimeout(self.timeout_seconds)
+            connection.settimeout(5)
             connection.connect(self.socket_path)
+            if cancel_event is not None and cancel_event.is_set():
+                raise RunnerProtocolError("runner request cancelled")
             connection.sendall(struct.pack("!I", len(payload)) + payload)
-            size = struct.unpack("!I", _read_exactly(connection, 4))[0]
+            connection.settimeout(self.timeout_seconds)
+            size = struct.unpack("!I", _read_exactly(connection, 4, cancel_event))[0]
             if size == 0 or size > MAX_RESPONSE_BYTES:
                 raise RunnerProtocolError("runner response exceeded protocol limits")
-            raw = _read_exactly(connection, size)
+            raw = _read_exactly(connection, size, cancel_event)
             try:
                 result = json.loads(raw.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError):

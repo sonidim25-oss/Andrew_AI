@@ -658,7 +658,7 @@ class Controller:
                 letter_status = f' Owner letter: {receipt}.'
             return (f"Andrew is {state}. Session: {session}. Autonomous schedule: {schedule}; fallback: {fallback}. "
                     f"Next self-scheduled wake: {wake_display}. "
-                    f"Autonomous cycles today: {cycles}/150. Queued messages: {self.store.pending_message_count(self.owner_id)} "
+                    f"Autonomous cycles today: {cycles}. Queued messages: {self.store.pending_message_count(self.owner_id)} "
                     f"({uncertain} with uncertain prior delivery). Latest diary: {diary_state}." + letter_status)
         if command == "/budget":
             snapshot = budget_snapshot(
@@ -671,7 +671,7 @@ class Controller:
             return (f"This month: ${snapshot['monthly_cost']:.4f} of ${self.monthly_limit_usd:.2f}. "
                     f"Protected reserve: ${self.monthly_reserve_usd:.2f}. Spent today: ${snapshot['daily_cost']:.4f}. "
                     f"Month allowance accrued: ${snapshot['accrued_allowance']:.2f}; remaining ordinary allowance: "
-                    f"${snapshot['remaining_ordinary']:.4f}. Autonomous cycles: {cycles}/150.")
+                    f"${snapshot['remaining_ordinary']:.4f}. Autonomous cycles: {cycles}.")
         if command == "/activity":
             entries = self.store.recent_activity(8)
             return "Recent objective activity (event ID — summary):\n" + (

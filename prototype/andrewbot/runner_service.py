@@ -8,6 +8,7 @@ import socket
 import struct
 import subprocess
 import sys
+import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +27,7 @@ class WorkerConfig:
     workspace: str
     proxy_socket: str
     podman_binary: str = "/usr/bin/podman"
-    timeout_seconds: int = 120
+    timeout_seconds: int | None = None
     cgroup_parent: str | None = None
 
     def __post_init__(self):
@@ -37,8 +38,8 @@ class WorkerConfig:
             raise ValueError("worker workspace must be the isolated projects directory")
         if not Path(self.proxy_socket).is_absolute():
             raise ValueError("proxy socket path must be absolute")
-        if self.timeout_seconds != 120:
-            raise ValueError("worker timeout must remain at 120 seconds")
+        if self.timeout_seconds is not None and (type(self.timeout_seconds) is not int or self.timeout_seconds <= 0):
+            raise ValueError("worker timeout must be positive or None")
         if self.cgroup_parent is not None and (not isinstance(self.cgroup_parent,str)
                 or not self.cgroup_parent.startswith('/') or not self.cgroup_parent.endswith('.service')
                 or any(p in {'.','..',''} for p in self.cgroup_parent[1:].split('/'))):
@@ -50,15 +51,10 @@ class RunnerService:
         self.config = config
         self.healthy = True
 
-    def _podman_args(self, container_name):
+    def _podman_args(self, container_name, timeout=None):
         args = [
             self.config.podman_binary, "--runtime=/usr/bin/crun", "run", "--rm", "--name", container_name, "-i",
-            # The outer watchdog owns the 120-second request deadline. Podman
-            # starts its timer independently and can otherwise exit 255 just
-            # before that watchdog, hiding the timeout as worker_unavailable.
-            # Keep a later container fallback for a failed launcher; the hard
-            # run_bounded deadline and forced cleanup remain at 120 seconds.
-            "--timeout=125", "--log-driver=none", "--pull=never", "--label=org.andrew.runtime=managed",
+            "--log-driver=none", "--pull=never", "--label=org.andrew.runtime=managed",
             "--group-add=keep-groups", "--network=none", "--userns=keep-id:uid=1000,gid=1000", "--read-only", "--user=1000:1000", "--cap-drop=ALL",
             "--security-opt=no-new-privileges", "--pids-limit=256", "--memory=2g", "--cpus=2",
             "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=256m",
@@ -66,6 +62,8 @@ class RunnerService:
             "--mount", f"type=bind,src={self.config.proxy_socket},dst=/run/andrew-egress.sock,rw=true",
             self.config.image,
         ]
+        if timeout is not None:
+            args.insert(args.index("--log-driver=none"), "--timeout=" + str(timeout + 5))
         if self.config.cgroup_parent is not None:
             # Rootless systemd scopes cannot move a PID out of a system service
             # into user@.service. Keep every worker inside our delegated subtree.
@@ -106,7 +104,7 @@ class RunnerService:
         value["stdout"] = value["stdout"].encode("utf-8")[:MAX_STREAM_BYTES].decode("utf-8", errors="ignore")
         value["stderr"] = value["stderr"].encode("utf-8")[:MAX_STREAM_BYTES].decode("utf-8", errors="ignore")
         value["artifacts"] = [p for p in value["artifacts"] if isinstance(p, str) and not p.startswith("/") and ".." not in p.split("/")][:32] if isinstance(value["artifacts"], list) else []
-        if value["safe_error"] not in {None, "invalid_request", "unsupported_tool", "execution_failed", "timeout", "proxy_unavailable", "policy_rejected", "worker_unavailable"}:
+        if value["safe_error"] not in {None, "invalid_request", "unsupported_tool", "execution_failed", "timeout", "cancelled", "proxy_unavailable", "policy_rejected", "worker_unavailable"}:
             value["safe_error"] = "worker_unavailable"
         visit = value.get("visit")
         if visit is not None and (not isinstance(visit, dict) or set(visit) != {"url", "title"}
@@ -116,19 +114,22 @@ class RunnerService:
         value["visit"] = visit
         return value
 
-    def run(self, request: dict) -> dict:
+    def run(self, request: dict, cancel_event=None) -> dict:
         payload = self._validate_request(request)
         if not self.healthy:
             return {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "worker_unavailable"}
         container_name = "andrew-tool-" + uuid.uuid4().hex
         try:
-            process = run_bounded(self._podman_args(container_name), payload=payload,
-                                  timeout=self.config.timeout_seconds, output_limit=MAX_RESPONSE_BYTES)
+            timeout = 120 if request["type"] == "browser_open" else self.config.timeout_seconds
+            process = run_bounded(self._podman_args(container_name, timeout=timeout), payload=payload,
+                                  timeout=timeout, output_limit=MAX_RESPONSE_BYTES, cancel_event=cancel_event)
         except OSError:
             return {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "worker_unavailable"}
         finally:
             if not self._remove_container(container_name):
                 self.healthy = False
+        if process.cancelled:
+            return {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "cancelled"}
         if process.timed_out:
             return {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "timeout"}
         if process.output_exceeded or process.returncode != 0:
@@ -172,12 +173,25 @@ class RunnerSocketServer:
                 self._busy = True
                 # Keep ownership until the executor actually finishes, even if
                 # the peer disconnects or its coroutine is cancelled.
-                future = asyncio.get_running_loop().run_in_executor(None, self.runner.run, request)
+                cancel_event = threading.Event()
+                future = asyncio.get_running_loop().run_in_executor(None, self.runner.run, request, cancel_event)
                 future.add_done_callback(lambda _: setattr(self, "_busy", False))
+                peer = asyncio.create_task(reader.read(1))
                 try:
+                    done, _ = await asyncio.wait((future, peer), return_when=asyncio.FIRST_COMPLETED)
+                    if peer in done:
+                        # Each connection carries one request. EOF or extra input
+                        # ends ownership, but cleanup must finish before reuse.
+                        cancel_event.set()
+                        await asyncio.shield(future)
+                        return
                     result = await asyncio.shield(future)
                 except (ValueError, UnicodeError):
                     result = {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "invalid_request"}
+                finally:
+                    cancel_event.set()
+                    peer.cancel()
+                    await asyncio.gather(peer, return_exceptions=True)
             response = json.dumps(result, separators=(",", ":")).encode("utf-8")
             if len(response) > MAX_RESPONSE_BYTES:
                 response = json.dumps({"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "worker_unavailable"}).encode("utf-8")
