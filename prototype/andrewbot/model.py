@@ -1,8 +1,19 @@
 import json
+import http.client
 import math
 import urllib.error
 import urllib.request
 from .configuration import ModelConfig, load_model_config
+
+
+class ProviderRequestError(RuntimeError):
+    CATEGORIES = frozenset({'http_error', 'timeout', 'network_error', 'invalid_json', 'invalid_response'})
+
+    def __init__(self, category, http_status=None):
+        self.safe_category = category if category in self.CATEGORIES else 'invalid_response'
+        self.http_status = http_status if type(http_status) is int and 100 <= http_status <= 599 else None
+        detail = f'HTTP status {self.http_status}' if self.http_status is not None else self.safe_category
+        super().__init__('model request failed: ' + detail)
 
 
 class OpenRouterModel:
@@ -99,9 +110,15 @@ class OpenRouterModel:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 data = json.loads(response.read())
         except urllib.error.HTTPError as error:
-            raise RuntimeError(f"model request returned HTTP status {error.code}") from None
-        except (urllib.error.URLError, TimeoutError, ValueError):
-            raise RuntimeError("model request failed") from None
+            raise ProviderRequestError('http_error', error.code) from None
+        except TimeoutError:
+            raise ProviderRequestError('timeout') from None
+        except urllib.error.URLError as error:
+            raise ProviderRequestError('timeout' if isinstance(error.reason, TimeoutError) else 'network_error') from None
+        except ValueError:
+            raise ProviderRequestError('invalid_json') from None
+        except (OSError, http.client.HTTPException, EOFError):
+            raise ProviderRequestError('network_error') from None
         if not isinstance(data, dict) or not isinstance(data.get("choices"), list):
-            raise RuntimeError("model returned an invalid response")
+            raise ProviderRequestError('invalid_response')
         return data

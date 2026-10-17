@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .budget import TORONTO, budget_snapshot
 from .configuration import MAX_LETTA_OUTPUT_TOKENS, ModelConfig, load_model_config
+from .model import ProviderRequestError
 
 
 class ModelGateway:
@@ -121,6 +122,7 @@ class ModelGateway:
                               sort_keys=True, ensure_ascii=False, separators=(',', ':'))
         reservation_id = 'provider-' + hashlib.sha256(identity.encode()).hexdigest()
         if not self.store.reserve_usage(reservation_id, month, day, reserved):
+            self.store.add_activity('Letta model gateway blocked a repeated uncertain provider request')
             return self.uncertain_response()
 
         outbound["model"] = self.model_id
@@ -129,13 +131,24 @@ class ModelGateway:
         outbound["stream"] = False
         try:
             result = self.provider.complete(outbound)
-        except Exception:
-            self.store.add_activity("Letta model gateway provider request failed")
+        except Exception as error:
+            category = ('timeout' if isinstance(error, TimeoutError) else
+                        'network_error' if isinstance(error, OSError) else 'unexpected_error')
+            status = None
+            if isinstance(error, ProviderRequestError):
+                category, status = error.safe_category, error.http_status
+            event = ('Letta model gateway provider request failed '
+                     f'(category={category}, http_status={status if status is not None else "unavailable"})')
+            # Never log exception text, response bodies, headers, or request content.
+            logging.warning('%s', event)
+            self.store.add_activity(event)
             # Keep the reservation: the request may have reached the provider
             # even though its response was lost.
             return self.uncertain_response()
         if not isinstance(result, dict) or not isinstance(result.get('choices'), list) or not result['choices']:
-            self.store.add_activity('Letta model gateway received an invalid provider response; reservation retained')
+            event = 'Letta model gateway received an invalid provider response; reservation retained'
+            logging.warning('%s', event)
+            self.store.add_activity(event)
             return self.uncertain_response()
         usage = result.get("usage") or {}
         invalid_usage = False

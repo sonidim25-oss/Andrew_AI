@@ -1,13 +1,28 @@
 import json
 import unittest
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from unittest.mock import patch
 
-from andrewbot.model import OpenRouterModel
+from andrewbot.model import OpenRouterModel, ProviderRequestError
 from andrewbot.configuration import load_model_config
 
 
 class OpenRouterModelTests(unittest.TestCase):
+    def test_provider_failures_keep_only_safe_category_and_http_status(self):
+        import http.client
+        cases = [(HTTPError('fixed', 503, 'private provider body', {}, None), 'http_error', 503),
+                 (TimeoutError('private timeout'), 'timeout', None),
+                 (URLError(TimeoutError('private nested timeout')), 'timeout', None),
+                 (URLError('private connection details'), 'network_error', None),
+                 (http.client.IncompleteRead(b'private partial response'), 'network_error', None)]
+        for failure, category, status in cases:
+            with self.subTest(category=category), patch('urllib.request.urlopen', side_effect=failure):
+                with self.assertRaises(ProviderRequestError) as caught:
+                    OpenRouterModel('private-key').complete({'messages': []})
+                self.assertEqual(caught.exception.safe_category, category)
+                self.assertEqual(caught.exception.http_status, status)
+                self.assertNotIn('private', str(caught.exception))
+
     def test_http_error_reports_status_without_api_key(self):
         key = "sk-or-v1-synthetic-secret"
 

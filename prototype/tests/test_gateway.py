@@ -9,6 +9,7 @@ from unittest.mock import patch
 from andrewbot.gateway import GatewayThread, ModelGateway, make_server
 from andrewbot.configuration import MAX_LETTA_OUTPUT_TOKENS, load_model_config
 from andrewbot.store import Store
+from andrewbot.model import ProviderRequestError
 
 
 class FakeProvider:
@@ -38,6 +39,31 @@ class ModelGatewayTests(unittest.TestCase):
     def tearDown(self):
         self.store.close()
         self.temp.cleanup()
+
+    def test_http_failure_is_diagnosed_without_replay_or_releasing_reservation(self):
+        from unittest.mock import Mock
+        self.provider.complete = Mock(side_effect=ProviderRequestError('http_error', 503))
+        payload = {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'fixture'}]}
+        with self.assertLogs(level='WARNING') as logs:
+            status, _ = self.gateway.complete('Bearer gateway-test-token', payload)
+        self.assertEqual(status, 422)
+        self.assertIn('category=http_error, http_status=503', ' '.join(logs.output))
+        self.gateway.complete('Bearer gateway-test-token', payload)
+        self.provider.complete.assert_called_once()
+        events = ' '.join(row['event'] for row in self.store.recent_activity())
+        self.assertIn('category=http_error, http_status=503', events)
+        self.assertIn('blocked a repeated uncertain provider request', events)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 1)
+
+    def test_unknown_provider_error_text_is_never_logged(self):
+        from unittest.mock import Mock
+        self.provider.complete = Mock(side_effect=RuntimeError('private credentials or response body'))
+        with self.assertLogs(level='WARNING') as logs:
+            self.gateway.complete('Bearer gateway-test-token',
+                                  {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'fixture'}]})
+        output = ' '.join(logs.output) + ' '.join(row['event'] for row in self.store.recent_activity())
+        self.assertIn('category=unexpected_error', output)
+        self.assertNotIn('private', output)
 
     def test_forwards_only_authorized_model_and_records_provider_usage(self):
         status, result = self.gateway.complete("Bearer gateway-test-token", {"model": "openai/qwen/qwen3.8-flash", "messages": [{"role": "user", "content": "hello"}], "max_tokens": 100})

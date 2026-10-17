@@ -79,15 +79,21 @@ def letta_metadata(db, start, end):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("session", help="Session ID or its hexadecimal prefix")
+    parser.add_argument("session", nargs="?", default="latest", help="Session ID, hexadecimal prefix, or latest (default)")
     parser.add_argument("--database", default="/var/lib/andrew/control/controller.sqlite3")
     parser.add_argument("--letta-metadata", action="store_true", help="Read saved Letta message structure; no content is printed")
     args = parser.parse_args()
-    if not re.fullmatch(r"[0-9a-f]{12,32}", args.session):
+    if args.session != 'latest' and not re.fullmatch(r"[0-9a-f]{12,32}", args.session):
         parser.error("session must be 12 to 32 lowercase hexadecimal characters")
     with sqlite3.connect(Path(args.database).resolve().as_uri() + "?mode=ro", uri=True) as db:
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA query_only=ON")
+        if args.session == 'latest':
+            latest = db.execute("SELECT session_id FROM cycles WHERE status='failed' "
+                                "ORDER BY started_at DESC LIMIT 1").fetchone()
+            if latest is None:
+                parser.error('no failed autonomous cycle was found')
+            args.session = latest['session_id']
         def rows(sql, parameters=()):
             return [dict(row) for row in db.execute(sql, parameters)]
         cycles = rows("SELECT session_id, cycle_id, status, started_at, ended_at FROM cycles "
@@ -97,7 +103,7 @@ def main():
         report = {"integrity": db.execute("PRAGMA quick_check").fetchone()[0], "cycles": cycles}
         report["lifecycle"] = rows("SELECT key,value FROM state WHERE key IN "
             "('sleeping','sleep_until','paused','active_session_status','active_session_id',"
-            "'session_start_requested','fallback_wake_day') ORDER BY key")
+            "'session_start_requested','fallback_wake_day','autonomy_error') ORDER BY key")
         report["diary_metadata"] = rows("SELECT local_date,record_type,created_at,delivery_state "
             "FROM diary_entries WHERE session_id LIKE ?", (args.session + "%",))
         if cycles:
@@ -106,7 +112,7 @@ def main():
             report["events"] = rows("SELECT id,created_at,event FROM activity "
                 "WHERE datetime(created_at) BETWEEN datetime(?, '-5 minutes') AND datetime(?, '+5 minutes') "
                 "AND (event LIKE 'Autonomous %' OR event LIKE 'Letta model gateway %' "
-                "OR event LIKE 'Daily fallback %' OR event LIKE 'Scheduled wake %') ORDER BY id", (start, end))
+                "OR event LIKE 'Session failed %' OR event LIKE 'Daily fallback %' OR event LIKE 'Scheduled wake %') ORDER BY id", (start, end))
             report["usage"] = rows("SELECT created_at,cost_usd,input_tokens,output_tokens FROM usage "
                 "WHERE datetime(created_at) BETWEEN datetime(?, '-5 minutes') AND datetime(?, '+5 minutes')", (start, end))
             report["reservations"] = rows("SELECT created_at,cost_usd FROM budget_reservations "
