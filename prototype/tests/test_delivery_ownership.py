@@ -1,3 +1,4 @@
+from telegram_fixture import sent_text
 import sqlite3
 import tempfile
 import threading
@@ -123,7 +124,7 @@ class DeliveryOwnershipTests(unittest.TestCase):
         self.store.recover_reply_claims()
         row = self.store.claim_reply('normal')
         sent = []
-        api = SimpleNamespace(send_message=lambda owner, part: sent.append(part))
+        api = SimpleNamespace(send_message=lambda owner, part: (sent.append(part), sent_text(owner, part))[1])
         self.assertTrue(deliver_saved_message(api, self.store, 'reply', row['id'], 17, text))
         self.assertEqual(sent, ['x' * 1200])
         self.assertTrue(self.store.finish_reply(row['id'], row['claim_token']))

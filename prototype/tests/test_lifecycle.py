@@ -1,3 +1,4 @@
+from telegram_fixture import sent_text
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -122,6 +123,7 @@ class LifecycleTests(unittest.TestCase):
         class Telegram:
             def send_message(self, owner, text):
                 sends.append((owner, text))
+                return sent_text(owner, text)
         self.assertEqual(deliver_pending_diary(Telegram(), self.store, 17), 1)
         self.reopen()
         self.assertEqual(deliver_pending_diary(Telegram(), self.store, 17), 0)

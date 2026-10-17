@@ -27,7 +27,7 @@ class MultipartDeliveryTests(unittest.TestCase):
             if len(self.calls) == self.fail_at:
                 raise TimeoutError('fixture acknowledgement lost')
             self.acknowledged.append(payload['text'])
-            return {'message_id': len(self.calls)}
+            return {'message_id': len(self.calls), 'chat': {'id': payload['chat_id']}, 'text': payload['text']}
         self.api.call = call
 
     def reopen(self):

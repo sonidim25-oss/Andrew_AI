@@ -99,6 +99,7 @@ class OwnerControlProtocolTests(unittest.TestCase):
                             def send_message(self, owner, text):
                                 if 'Paused' in text:
                                     notification.set()
+                                return {'message_id': 1, 'chat': {'id': owner}, 'text': text}
                         runner = SessionRunner(store, controller, agent, enabled=True)
                         # Explicit owner wake starts a fresh session immediately,
                         # including after the letter reply's quiet window.

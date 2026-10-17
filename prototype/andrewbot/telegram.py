@@ -35,8 +35,22 @@ def split_message(text, limit=3800):
     return chunks
 
 
+RETRY_NOTICE = 'Delivery retry; you may have already received this part.\n\n'
+
+
+def validate_sent_text(result, chat_id, text):
+    if (not isinstance(result, dict) or type(result.get('message_id')) is not int
+            or result['message_id'] <= 0 or not isinstance(result.get('chat'), dict)
+            or type(result['chat'].get('id')) is not int or result['chat']['id'] != chat_id
+            or result.get('text') != text):
+        raise RuntimeError('Telegram send confirmation is invalid; outcome remains uncertain')
+    return result['message_id']
+
+
 def deliver_saved_message(telegram, store, kind, record_id, chat_id, text,
                           previously_attempted=False, should_stop=lambda: False):
+    progress = store.prepare_telegram_delivery(kind, record_id, text, previously_attempted)
+    store.apply_telegram_receipts(kind, record_id, chat_id)
     progress = store.prepare_telegram_delivery(kind, record_id, text, previously_attempted)
     chunks = split_message(progress['content'])
     for index in range(progress['next_chunk'], len(chunks)):
@@ -45,8 +59,11 @@ def deliver_saved_message(telegram, store, kind, record_id, chat_id, text,
         attempts = store.attempt_telegram_chunk(kind, record_id, index)
         if attempts is None:
             return False
-        prefix = 'Delivery retry; you may have already received this part.\n\n' if attempts else ''
-        telegram.send_message(chat_id, prefix + chunks[index])
+        prefix = RETRY_NOTICE if attempts else ''
+        context = store.telegram_chunk_context(kind, record_id, index)
+        result = telegram.send_message(chat_id, prefix + chunks[index])
+        validate_sent_text(result, chat_id, prefix + chunks[index])
+        store.save_telegram_receipt(context, chat_id, prefix + chunks[index], result)
         # Persist each acknowledgement. An unacknowledged attempt is held;
         # only an explicit owner diary retry can authorize another attempt.
         store.acknowledge_telegram_chunk(kind, record_id, index)
@@ -63,7 +80,9 @@ class TelegramAPI:
     def call(self, method, payload):
         if method == 'sendMessage':
             with self.metrics.measure('send'):
-                return self._call(method, payload)
+                result = self._call(method, payload)
+                validate_sent_text(result, payload['chat_id'], payload['text'])
+                return result
         return self._call(method, payload)
 
     def _call(self, method, payload):
@@ -80,7 +99,7 @@ class TelegramAPI:
         except (URLError, TimeoutError, ValueError, OSError):
             # Telegram embeds the bot token in the API path; never propagate the exception text.
             raise RuntimeError("Telegram API request failed") from None
-        if not isinstance(data, dict) or not data.get("ok"):
+        if not isinstance(data, dict) or data.get("ok") is not True:
             raise RuntimeError("Telegram API returned an unsuccessful response")
         return data.get("result")
 
@@ -89,6 +108,7 @@ class TelegramAPI:
         for chunk in split_message(text, limit=4000):
             result = self.call("sendMessage", {"chat_id": chat_id, "text": chunk,
                                               "reply_markup": command_keyboard()})
+            validate_sent_text(result, chat_id, chunk)
         return result
 
     def send_media(self, chat_id, data, mime, caption=None):

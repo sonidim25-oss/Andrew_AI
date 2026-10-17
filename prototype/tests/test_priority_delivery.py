@@ -1,3 +1,4 @@
+from telegram_fixture import sent_text
 import io
 import json
 from pathlib import Path
@@ -43,7 +44,7 @@ class PriorityDeliveryTests(unittest.TestCase):
                 if not self.release.wait(5):
                     raise TimeoutError('blocked fixture')
             self.sent.append(payload['text'])
-            return io.BytesIO(b'{"ok":true,"result":{"message_id":1}}')
+            return io.BytesIO(json.dumps({'ok':True,'result':sent_text(payload['chat_id'],payload['text'])}).encode())
         system_sent = self.system_sent
         class FixtureTelegram(TelegramAPI):
             def send_message(self, chat_id, text):

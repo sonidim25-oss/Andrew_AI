@@ -164,3 +164,47 @@ process exit, reopened SQLite, false terminal evidence, owner overrides, missing
 receipts, uncertain provider/tools, priority owner input, and the Gmail hold.
 `diagnose-session.py --current --brief` now includes model receipt identities and
 states. None of these tests contact real providers or send external messages.
+
+## Telegram text delivery receipts
+
+The fourth P0 increment covers text replies and diary entries. Telegram's
+[`sendMessage`](https://core.telegram.org/bots/api#sendmessage) returns a Message
+on success. The adapter now requires a positive integer message ID and exact
+chat/text confirmation; an `ok` flag or arbitrary JSON alone cannot confirm a
+send. Invalid confirmations remain uncertain, with fixed diagnostics that omit
+bot credentials and message bodies.
+
+Each saved delivery receives a fresh identity, and each part receives an attempt
+token committed before sending. After a valid response, a separate durable
+receipt stores the delivery/attempt identity, part number, chat/message IDs,
+content and transmitted-part hashes, and timestamp. It contains no text or bot
+token. Only then is ordinary multipart progress advanced. The delivery identity
+prevents an old receipt from settling another outbox row if SQLite reuses its
+numeric ID; attempt tokens prevent late responses from settling a new attempt.
+
+Startup reconciles these positive receipts before deciding whether a session
+has an unsettled Telegram delivery. The existing recovery worker also reconciles
+held text deliveries locally, without Telegram or model calls, while awake and
+unpaused. Runtime reconciliation leaves active sender claims alone. Fully
+confirmed deliveries leave the outbox, confirmed diaries become delivered, and
+a confirmed prefix can release only its definitively unsent suffix. Explicit
+diary retry consumes existing positive evidence before considering a resend.
+Receipt history remains available to `diagnose-session.py --current --brief`.
+
+This closes the local failure gap after a confirmation was durably recorded but
+before progress or final outbox cleanup was saved. If Telegram accepted a send
+but its response was lost, or receipt storage itself failed, the outcome stays
+held. The Bot API provides no general bot-sent-history lookup or sendMessage
+idempotency key that this adapter can use to resolve that gap. It makes no probe
+sends, edits, forwards, deletions, or blind retries. A confirmed send is not a
+read receipt. Media delivery and legacy attempts without positive receipts still
+need separate recovery work. Existing session errors, held owner inputs, pause,
+sleep, and provider reservations are preserved.
+
+Offline tests cover abrupt process exit after receipt commit, SQLite reopen,
+progress/finalization failures, Unicode multipart delivery, confirmed prefixes
+followed by unknown parts, reused row IDs, changed chats/content, stale attempts,
+malformed confirmations, explicit diary retries, active sender ownership, and
+receipt-storage failures. Simulated network timeouts stay held with no second
+send. Test senders return realistic Message confirmations; tests do not contact
+Telegram or a paid model.

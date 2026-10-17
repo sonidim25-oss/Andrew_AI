@@ -101,6 +101,19 @@ class Store:
                 chunk_attempts INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY(kind,record_id)
             );
+            CREATE TABLE IF NOT EXISTS telegram_chunk_receipts (
+                attempt_id TEXT PRIMARY KEY,
+                delivery_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                record_id TEXT NOT NULL,
+                chunk INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                wire_sha256 TEXT NOT NULL,
+                content_sha256 TEXT NOT NULL,
+                confirmed_at TEXT NOT NULL,
+                UNIQUE(delivery_id,chunk)
+            );
             CREATE TABLE IF NOT EXISTS usage (
                 id INTEGER PRIMARY KEY,
                 month TEXT NOT NULL,
@@ -319,6 +332,11 @@ class Store:
         progress_columns = {row['name'] for row in self.connection.execute('PRAGMA table_info(telegram_delivery_progress)')}
         if 'retry_notice' not in progress_columns:
             self.connection.execute('ALTER TABLE telegram_delivery_progress ADD COLUMN retry_notice INTEGER NOT NULL DEFAULT 0')
+        for name in ('delivery_id', 'chunk_token'):
+            if name not in progress_columns:
+                self.connection.execute('ALTER TABLE telegram_delivery_progress ADD COLUMN ' + name + " TEXT NOT NULL DEFAULT ''")
+        for row in self.connection.execute("SELECT kind,record_id FROM telegram_delivery_progress WHERE delivery_id=''").fetchall():
+            self.connection.execute('UPDATE telegram_delivery_progress SET delivery_id=? WHERE kind=? AND record_id=? AND delivery_id=\'\'', (uuid.uuid4().hex, row['kind'], row['record_id']))
         self.connection.commit()
         with self.connection:
             for table, identifier in (('memory_records', 'record_id'), ('personality_revisions', 'revision_id')):
@@ -1463,6 +1481,7 @@ class Store:
         # Caller holds the Store lock. Per-part acknowledgements override the
         # legacy attempt count; no progress after an attempt is uncertain.
         from .telegram import split_message
+        self.apply_telegram_receipts('reply', row['id'], row['chat_id'])
         progress = self.connection.execute(
             "SELECT * FROM telegram_delivery_progress WHERE kind='reply' AND record_id=?",
             (str(row['id']),)).fetchone()
@@ -1569,8 +1588,8 @@ class Store:
     def prepare_telegram_delivery(self, kind, record_id, content, previously_attempted=False):
         with self.connection:
             self.connection.execute(
-                "INSERT OR IGNORE INTO telegram_delivery_progress(kind,record_id,content,chunk_attempts) VALUES(?,?,?,?)",
-                (kind, str(record_id), content, int(previously_attempted)))
+                "INSERT OR IGNORE INTO telegram_delivery_progress(kind,record_id,content,chunk_attempts,delivery_id) VALUES(?,?,?,?,?)",
+                (kind, str(record_id), content, int(previously_attempted), uuid.uuid4().hex))
             return dict(self.connection.execute(
                 "SELECT * FROM telegram_delivery_progress WHERE kind=? AND record_id=?",
                 (kind, str(record_id))).fetchone())
@@ -1579,9 +1598,9 @@ class Store:
     def attempt_telegram_chunk(self, kind, record_id, chunk):
         with self.connection:
             rows = self.connection.execute(
-                "UPDATE telegram_delivery_progress SET chunk_attempts=1 "
-                "WHERE kind=? AND record_id=? AND next_chunk=? AND chunk_attempts=0 RETURNING retry_notice",
-                (kind, str(record_id), chunk)).fetchall()
+                "UPDATE telegram_delivery_progress SET chunk_attempts=1,chunk_token=? "
+                "WHERE kind=? AND record_id=? AND next_chunk=? AND chunk_attempts=0 AND NOT EXISTS (SELECT 1 FROM telegram_chunk_receipts r WHERE r.delivery_id=telegram_delivery_progress.delivery_id AND r.chunk=telegram_delivery_progress.next_chunk) RETURNING retry_notice",
+                (uuid.uuid4().hex, kind, str(record_id), chunk)).fetchall()
             if not rows:
                 return None
             if kind == 'reply':
@@ -1592,11 +1611,105 @@ class Store:
     def acknowledge_telegram_chunk(self, kind, record_id, chunk):
         with self.connection:
             cursor = self.connection.execute(
-                "UPDATE telegram_delivery_progress SET next_chunk=next_chunk+1,chunk_attempts=0,retry_notice=0 "
+                "UPDATE telegram_delivery_progress SET next_chunk=next_chunk+1,chunk_attempts=0,retry_notice=0,chunk_token='' "
                 "WHERE kind=? AND record_id=? AND next_chunk=?",
                 (kind, str(record_id), chunk))
             if cursor.rowcount != 1:
                 raise ValueError('Telegram delivery progress changed')
+
+    @database_locked
+    def telegram_chunk_context(self, kind, record_id, chunk):
+        row = self.connection.execute('SELECT * FROM telegram_delivery_progress WHERE kind=? AND record_id=? AND next_chunk=? AND chunk_attempts=1',
+                                      (kind, str(record_id), chunk)).fetchone()
+        if row is None or not row['delivery_id'] or not row['chunk_token']:
+            raise ValueError('Telegram part has no current send admission')
+        return dict(row)
+
+    @database_locked
+    def save_telegram_receipt(self, context, chat_id, wire, result):
+        from .telegram import validate_sent_text, split_message, RETRY_NOTICE
+        message_id = validate_sent_text(result, chat_id, wire)
+        expected = (RETRY_NOTICE if context['retry_notice'] else '') + split_message(context['content'])[context['next_chunk']]
+        if wire != expected:
+            raise ValueError('Telegram confirmation does not match the admitted part')
+        with self.connection:
+            row = self.connection.execute('SELECT 1 FROM telegram_delivery_progress WHERE kind=? AND record_id=? AND delivery_id=? AND chunk_token=? AND next_chunk=? AND chunk_attempts=1',
+                (context['kind'], context['record_id'], context['delivery_id'], context['chunk_token'], context['next_chunk'])).fetchone()
+            if row is None:
+                raise ValueError('Telegram send admission changed before confirmation')
+            self.connection.execute('INSERT INTO telegram_chunk_receipts VALUES(?,?,?,?,?,?,?,?,?,?)',
+                (context['chunk_token'], context['delivery_id'], context['kind'], context['record_id'], context['next_chunk'],
+                 chat_id, message_id, hashlib.sha256(wire.encode()).hexdigest(), hashlib.sha256(context['content'].encode()).hexdigest(), self.now()))
+
+    @database_locked
+    def apply_telegram_receipts(self, kind, record_id, chat_id):
+        """Advance confirmed parts only; never make a Telegram request."""
+        from .telegram import split_message, RETRY_NOTICE
+        applied = 0
+        with self.connection:
+            while True:
+                row = self.connection.execute('SELECT * FROM telegram_delivery_progress WHERE kind=? AND record_id=?', (kind, str(record_id))).fetchone()
+                if row is None or not row['chunk_attempts'] or not row['chunk_token']:
+                    return applied
+                receipt = self.connection.execute('SELECT * FROM telegram_chunk_receipts WHERE attempt_id=? AND delivery_id=? AND kind=? AND record_id=? AND chunk=? AND chat_id=?',
+                    (row['chunk_token'], row['delivery_id'], kind, str(record_id), row['next_chunk'], chat_id)).fetchone()
+                if receipt is None or receipt['content_sha256'] != hashlib.sha256(row['content'].encode()).hexdigest():
+                    return applied
+                chunks = split_message(row['content'])
+                if not 0 <= row['next_chunk'] < len(chunks):
+                    return applied
+                wire = (RETRY_NOTICE if row['retry_notice'] else '') + chunks[row['next_chunk']]
+                if hashlib.sha256(wire.encode()).hexdigest() != receipt['wire_sha256']:
+                    return applied
+                self.acknowledge_telegram_chunk(kind, record_id, row['next_chunk'])
+                applied += 1
+
+    def _has_telegram_receipt(self, kind, record_id, chat_id):
+        # Caller holds the Store lock; old record IDs and changed bodies cannot
+        # borrow another delivery's proof.
+        row = self.connection.execute('SELECT delivery_id,content FROM telegram_delivery_progress WHERE kind=? AND record_id=?', (kind, str(record_id))).fetchone()
+        return bool(row and self.connection.execute('SELECT 1 FROM telegram_chunk_receipts WHERE delivery_id=? AND chat_id=? AND content_sha256=? LIMIT 1',
+            (row['delivery_id'], chat_id, hashlib.sha256(row['content'].encode()).hexdigest())).fetchone())
+
+    @database_locked
+    def reconcile_telegram_receipts(self, owner_id, startup=False):
+        """Settle proved deliveries; active senders keep their claims at runtime."""
+        from .telegram import split_message
+        settled = 0
+        with self.connection:
+            query = 'SELECT * FROM telegram_outbox' + ('' if startup else " WHERE delivery_state='held'")
+            for row in self.connection.execute(query).fetchall():
+                applied = self.apply_telegram_receipts('reply', row['id'], row['chat_id'])
+                if not applied and not self._has_telegram_receipt('reply', row['id'], row['chat_id']):
+                    continue
+                status = self._reply_status(row)
+                if status == 'held':
+                    continue
+                if status == 'complete':
+                    self.connection.execute('DELETE FROM telegram_outbox WHERE id=?', (row['id'],))
+                    self._delete_reply_progress(row['id'])
+                elif status == 'pending':
+                    self.connection.execute("UPDATE telegram_outbox SET delivery_state='pending',claim_token=NULL WHERE id=?", (row['id'],))
+                settled += 1
+            for row in self.connection.execute("SELECT p.* FROM telegram_delivery_progress p JOIN diary_entries d ON d.entry_id=p.record_id WHERE p.kind='diary' AND d.delivery_state='uncertain'").fetchall():
+                if not startup and self.connection.execute('SELECT 1 FROM diary_delivery_claims WHERE entry_id=?', (row['record_id'],)).fetchone():
+                    continue
+                if (not self.apply_telegram_receipts('diary', row['record_id'], owner_id)
+                        and not self._has_telegram_receipt('diary', row['record_id'], owner_id)):
+                    continue
+                progress = self.connection.execute("SELECT * FROM telegram_delivery_progress WHERE kind='diary' AND record_id=?", (row['record_id'],)).fetchone()
+                if progress['chunk_attempts']:
+                    continue
+                self.connection.execute('DELETE FROM diary_delivery_claims WHERE entry_id=?', (row['record_id'],))
+                if progress['next_chunk'] >= len(split_message(progress['content'])):
+                    self.mark_diary_delivered(row['record_id'])
+                else:
+                    self.connection.execute("UPDATE diary_entries SET delivery_state='pending' WHERE entry_id=?", (row['record_id'],))
+                settled += 1
+            if settled:
+                self.connection.execute('INSERT INTO activity(event,created_at) VALUES(?,?)',
+                    ('Telegram delivery recovered from confirmed part receipts; no confirmed part resent', self.now()))
+        return settled
 
     @database_locked
     def last_update_id(self):
@@ -1855,11 +1968,15 @@ class Store:
             if row is None or self.connection.execute(
                     'SELECT 1 FROM diary_delivery_claims WHERE entry_id=?', (entry_id,)).fetchone():
                 return False
+            # A positive receipt must be consumed before considering any retry.
+            if self.connection.execute("SELECT 1 FROM telegram_delivery_progress p JOIN telegram_chunk_receipts r ON r.attempt_id=p.chunk_token AND r.delivery_id=p.delivery_id AND r.chunk=p.next_chunk WHERE p.kind='diary' AND p.record_id=?", (entry_id,)).fetchone():
+                self.connection.execute("UPDATE diary_entries SET delivery_state='pending' WHERE entry_id=?", (entry_id,))
+                return True
             content = format_diary_entry(self._diary_row(row))
             self.connection.execute(
-                "INSERT OR IGNORE INTO telegram_delivery_progress(kind,record_id,content) VALUES('diary',?,?)",
-                (entry_id, content))
-            self.connection.execute("UPDATE telegram_delivery_progress SET chunk_attempts=0,retry_notice=1 WHERE kind='diary' AND record_id=?", (entry_id,))
+                "INSERT OR IGNORE INTO telegram_delivery_progress(kind,record_id,content,delivery_id) VALUES('diary',?,?,?)",
+                (entry_id, content, uuid.uuid4().hex))
+            self.connection.execute("UPDATE telegram_delivery_progress SET chunk_attempts=0,chunk_token='',retry_notice=1 WHERE kind='diary' AND record_id=?", (entry_id,))
             self.connection.execute("UPDATE diary_entries SET delivery_state='pending' WHERE entry_id=?", (entry_id,))
             return True
 

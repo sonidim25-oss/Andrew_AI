@@ -10,7 +10,7 @@ class TelegramTimeoutTests(unittest.TestCase):
         response = Mock()
         response.__enter__ = Mock(return_value=response)
         response.__exit__ = Mock(return_value=False)
-        response.read.return_value = json.dumps({'ok': True, 'result': []}).encode()
+        response.read.return_value = json.dumps({'ok': True, 'result': {'message_id': 1, 'chat': {'id': 17}, 'text': 'hello'}}).encode()
         opener = Mock(return_value=response)
         return TelegramAPI('TEST', opener=opener, **kwargs), opener
 

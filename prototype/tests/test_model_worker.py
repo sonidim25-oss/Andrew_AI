@@ -1,3 +1,4 @@
+from telegram_fixture import sent_text
 import threading
 import unittest
 
@@ -188,7 +189,7 @@ class DiaryWorkerTests(unittest.TestCase):
             store = Store(Path(directory) / 'state.db')
             entry = store.create_diary_entry('2026-10-16', 'Today I tested delivery.', 'diary')
             telegram = Mock()
-            telegram.send_message.side_effect = lambda *args: (entered.set(), release.wait(3))
+            telegram.send_message.side_effect = lambda owner, text: (entered.set(), release.wait(3), sent_text(owner, text))[-1]
             sender = threading.Thread(target=lambda: deliver_pending_diary(telegram, store, 17))
             sender.start()
             try:
@@ -252,7 +253,7 @@ class DiaryWorkerTests(unittest.TestCase):
                                          ('2026-10-15T00:00:00+00:00', first))
             stopped = threading.Event()
             telegram = Mock()
-            telegram.send_message.side_effect = lambda *args: stopped.set()
+            telegram.send_message.side_effect = lambda owner, text: (stopped.set(), sent_text(owner, text))[-1]
             try:
                 self.assertEqual(deliver_pending_diary(telegram, store, 17, should_stop=stopped.is_set), 1)
                 self.assertEqual(store.diary_delivery_state(first), 'delivered')

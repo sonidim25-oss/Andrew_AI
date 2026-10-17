@@ -1,3 +1,4 @@
+from telegram_fixture import sent_text
 import tempfile
 import unittest
 import threading
@@ -30,6 +31,7 @@ class DispatchTests(unittest.TestCase):
         self.controller.handle_update.return_value = 'reply'
         self.controller.flush_queued.return_value = None
         self.telegram = Mock()
+        self.telegram.send_message.side_effect = sent_text
         self.telegram.get_updates.return_value = []
         self.sessions = Mock()
         self.dispatch = ControllerDispatch(self.store, self.controller, self.telegram,
@@ -136,7 +138,7 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(self.store.pending_updates(), [])
         self.assertIsNotNone(self.store.next_reply())
         self.reopen()
-        self.telegram.send_message.side_effect = None
+        self.telegram.send_message.side_effect = sent_text
         self.dispatch.step()
         self.assertEqual(self.controller.handle_update.call_count, 1)
         self.assertEqual(self.store.next_reply()['delivery_state'], 'held')
@@ -238,6 +240,7 @@ class ConcurrentOwnerControlsTests(unittest.TestCase):
                 def send_message(self, owner, text):
                     replies.append(text)
                     replied.set()
+                    return sent_text(owner, text)
             controller = Controller(store, Mock(), 17, visit_history=history)
             dispatch = ControllerDispatch(store, controller, Telegram(), Mock(), OwnerRateLimit(), 17, False, False)
             dispatch.start()
@@ -303,6 +306,7 @@ class ConcurrentOwnerControlsTests(unittest.TestCase):
                 def send_message(self, owner, text):
                     if 'awake' in text:
                         ready.set()
+                    return sent_text(owner, text)
             model = Mock()
             controller = Controller(store, model, 17, autonomous_enabled=True)
             dispatch = ControllerDispatch(store, controller, Telegram(), Mock(), OwnerRateLimit(), 17, True, False)
@@ -331,6 +335,7 @@ class ConcurrentOwnerControlsTests(unittest.TestCase):
                 def send_message(self, owner, text):
                     if 'Paused' in text:
                         notified.set()
+                    return sent_text(owner, text)
             class Agent:
                 calls = 0
                 def autonomous_turn(self, prompt, timeout):
@@ -395,6 +400,7 @@ class ConcurrentOwnerControlsTests(unittest.TestCase):
                     notified.set()
                     if len(replies) >= len(controls):
                         all_notified.set()
+                    return sent_text(owner, text)
             class Agent:
                 def autonomous_turn(self, prompt, timeout):
                     entered.set()

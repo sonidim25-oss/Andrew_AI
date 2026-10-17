@@ -312,10 +312,12 @@ class Controller:
 
     def reconcile_actions(self):
         # Read-only network work runs separately from owner controls and models.
-        if self.gmail_tools is None or any(self.store.get_state(key, '0') == '1'
+        if any(self.store.get_state(key, '0') == '1'
                 for key in ('paused', 'sleeping', 'restore_recovery_required')):
             return
-        self.gmail_tools.reconcile_pending()
+        self.store.reconcile_telegram_receipts(self.owner_id)
+        if self.gmail_tools is not None:
+            self.gmail_tools.reconcile_pending()
 
     def execute_tool(self, name, arguments):
         if name in (AppServerClient.EXTERNAL_TOOL_NAMES | {'gmail.read', 'research.list', 'research.get'}):

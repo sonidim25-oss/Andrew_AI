@@ -1,4 +1,5 @@
 """Local fixtures only: real dispatch, controller, store and Telegram API."""
+from telegram_fixture import sent_text
 import io
 import json
 from pathlib import Path
@@ -31,7 +32,9 @@ class LatencyIntegrationTests(unittest.TestCase):
                         clock[0] += 7
                         if fail_send:
                             raise TimeoutError('private response uncertainty')
-                    return io.BytesIO(json.dumps({'ok': True, 'result': []}).encode())
+                    payload = json.loads(request.data)
+                    result = sent_text(payload['chat_id'], payload['text']) if method == 'sendMessage' else []
+                    return io.BytesIO(json.dumps({'ok': True, 'result': result}).encode())
                 metrics = LatencyMetrics(clock=lambda: clock[0])
                 store = Store(Path(directory) / 'fixture.sqlite3')
                 try:

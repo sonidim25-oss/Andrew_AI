@@ -1,3 +1,4 @@
+from telegram_fixture import sent_text
 import unittest
 from urllib.error import HTTPError, URLError
 
@@ -8,7 +9,7 @@ class TelegramAPITests(unittest.TestCase):
     def test_emoji_cannot_exceed_telegram_utf16_limit(self):
         from unittest.mock import Mock
         api = TelegramAPI('fixture-token')
-        api.call = Mock()
+        api.call = Mock(side_effect=lambda method, payload: sent_text(payload["chat_id"], payload["text"]))
         api.send_message(17, '🙂' * 3000)
         chunks = [call.args[1]['text'] for call in api.call.call_args_list]
         self.assertEqual(''.join(chunks), '🙂' * 3000)
@@ -53,7 +54,9 @@ class TelegramLatencyTests(unittest.TestCase):
         def opener(request, timeout):
             calls.append((request.full_url.rsplit('/', 1)[-1], timeout))
             clock[0] += 4
-            return io.BytesIO(json.dumps({'ok': True, 'result': []}).encode())
+            payload = json.loads(request.data)
+            result = sent_text(payload['chat_id'], payload['text']) if calls[-1][0] == 'sendMessage' else []
+            return io.BytesIO(json.dumps({'ok': True, 'result': result}).encode())
         metrics = LatencyMetrics(clock=lambda: clock[0])
         api = TelegramAPI('fixture-token', opener=opener, metrics=metrics)
         api.send_message(17, 'a' * 4500)
