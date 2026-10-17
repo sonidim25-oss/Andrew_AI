@@ -73,3 +73,7 @@ All three selected findings (2, 3, 4) are fixed in source, in the requested orde
 - All 20 deployment source hashes match, and `git diff --check` passes.
 
 No commit, push, deployment, paid provider call, Telegram resend, or production database change was performed during this repair task.
+
+## Deployment
+
+Source `81ee6be`, including repairs 2–4, was deployed and verified on 2026-10-17. All 20 installed hashes match, all four services are active, and all 33 database tables and both sample artifacts were preserved. Media remains disabled pending finding 1. Evidence: `/var/backups/andrew-incident-mlgyoqvh/media-deployment-verification.json`.

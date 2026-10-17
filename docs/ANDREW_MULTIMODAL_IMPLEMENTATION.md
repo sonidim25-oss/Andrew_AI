@@ -1,6 +1,6 @@
 # Andrew media implementation
 
-Status: implemented in source; disabled by default. Deployment and paid provider/Telegram smoke tests are pending. The existing Qwen model, token allowance, lifecycle policy, memory records, message replay policy, and reasoning spending ledger are unchanged.
+Status: source commit `81ee6be` deployed and verified; media remains disabled. Approved voice and image samples were delivered; finding 1 remains open. The existing Qwen model, token allowance, lifecycle policy, memory records, message replay policy, and reasoning spending ledger are unchanged.
 
 ## Owner commands
 
@@ -98,3 +98,11 @@ At 02:16:29 UTC the owner explicitly authorized one resend of the saved image. T
 ## Selected review repairs
 
 Findings 2–4 are now fixed in source; see [ANDREW_MEDIA_REVIEW_FIXES.md](ANDREW_MEDIA_REVIEW_FIXES.md). Shutdown admission, retention reference races, and silent held deliveries have regression coverage and a clean independent scoped review. Current verification: 360 core tests passed with two optional skips, and 73 script tests passed. The reduced-budget revalidation finding (1) remains unresolved and still blocks enablement. No repairs have been deployed.
+
+## Deployment verified — 2026-10-17
+
+Deployed source commit `81ee6be` from `feature/andrew-multimodal`, with media disabled. Controller startup: Sat 2026-10-17 02:38:59 UTC. All 20 installed controller module hashes match the tested manifest, and the renewed runtime acceptance proof is valid. Kernel/network/browser, fake-account, isolated Letta protocol, and the 130-second sandbox execution checks passed.
+
+Controller, Letta, runner, and browser services are active with zero automatic restarts; controller boot startup is enabled. Comparison against the stopped-controller SQLite snapshot confirms all 33 existing tables have identical rows, including messages, memory, research, uncertainty records, reasoning/media spending, lifecycle, and sample delivery acknowledgements. Both generated sample files retain their original hashes. The 6000-token allowance, provider wait of 120 seconds, and removed autonomous/code execution deadlines remain verified.
+
+Evidence and backups: `/var/backups/andrew-incident-mlgyoqvh`, including `controller-before.sqlite3`, `deployment-verification.json`, `media-deployment-verification.json`, startup logs, and artifact hashes. No wake, uncertain-message replay, paid request, new media delivery, or avatar update was performed during deployment. Finding 1 remains unresolved; deployment does not enable media.
