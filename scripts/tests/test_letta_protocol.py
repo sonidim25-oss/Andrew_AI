@@ -104,7 +104,7 @@ class LettaProtocolTests(unittest.TestCase):
                             "model_settings": {"provider_type": "openai-compatible", "max_tokens": 512, "parallel_tool_calls": False},
                             "include_base_tools": False, "memory_blocks": []})
                         # Upgrade an existing agent's old output cap through the real protocol.
-                        from andrewbot.configuration import load_model_config, MAX_LETTA_OUTPUT_TOKENS
+                        from andrewbot.configuration import load_model_config
                         client.update_agent_model(agent_id, load_model_config({}))
                         runtime = client.start_runtime(agent_id)
                     finally:
@@ -138,7 +138,7 @@ class LettaProtocolTests(unittest.TestCase):
                     self.assertEqual(store.get_state("active_session_status"), "agent_sleep")
                     self.assertIn('expect to wake', store.next_reply()['text'])
                     self.assertEqual(len(calls), 5)
-                    self.assertTrue(all(call['max_tokens'] == MAX_LETTA_OUTPUT_TOKENS for call in calls))
+                    self.assertTrue(all('max_tokens' not in call and 'max_completion_tokens' not in call for call in calls))
                     self.assertEqual(store.connection.execute("SELECT count(*) FROM budget_reservations").fetchone()[0], 0)
                     diary_id = store.diary_entry()["entry_id"]
                     due = store.get_state("sleep_until")

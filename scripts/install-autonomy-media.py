@@ -15,10 +15,10 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = 'd325230'
-UPGRADE_BASES = ('1f60d34', '9e5d3df', 'b0a3439', '40418d9')
+UPGRADE_BASES = ('45ab856', 'eb80f5f', '1f60d34', '9e5d3df', 'b0a3439', '40418d9')
 TARGET = Path('/opt/andrew/prototype/andrewbot')
 DROPIN = Path('/etc/systemd/system/andrew-control.service.d/zz-autonomy-media.conf')
-MODULES = ('appserver.py', 'budget.py', 'controller.py', 'gateway.py', 'lifecycle_policy.py',
+MODULES = ('configuration.py', 'appserver.py', 'budget.py', 'controller.py', 'gateway.py', 'lifecycle_policy.py',
            'main.py', 'media.py', 'memory.py', 'model.py', 'sessions.py', 'skills.py', 'telegram_menu.py', 'vault_cli.py')
 SKILLS = ('voice-communication', 'image-creation')
 GUIDANCE = ('The owner has limited API credits in general and authorizes me to decide how to use them. '

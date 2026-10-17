@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import logging
 from .latency import record_failure
 from .budget import budget_snapshot
-from .configuration import MAX_LETTA_OUTPUT_TOKENS, ModelConfig, load_model_config
+from .configuration import OUTPUT_TOKEN_COST_ESTIMATE, ModelConfig, load_model_config
 from .diary import format_diary_entry, parse_diary_command, validate_diary_content
 from .telegram_menu import BUTTON_COMMANDS, HELP_TEXT
 from .appserver import AppServerClient, LettaTurnError, LettaTurnCancelled
@@ -137,6 +137,9 @@ class Controller:
             self.store.add_activity("Message queued while Andrew is sleeping or paused")
             return "I’m asleep or paused. Your message is saved for when I wake."
         message_id = self.store.add_message(self.owner_id, "user", text, queued=True)
+        if self.store.get_state('autonomy_error', ''):
+            self.store.add_activity('Owner message queued while automatic model calls are stopped')
+            return 'Your message is saved and has not been sent to the model. Automatic model calls are stopped after an error. Use /wake to resume.'
         owner_revision = self.store.get_state('owner_control_revision', '0')
         self.note_conversation(owner_revision)
         messages = self._bounded_messages([
@@ -192,11 +195,11 @@ class Controller:
         return self.store.failure_notice(category)
 
     def _estimate_cost(self, messages):
-        # Conservative byte-based bound and bounded output keep each request reservable.
+        # Provisional accounting estimate; neither term enforces an output cap.
         input_bytes = sum(len(item["content"].encode("utf-8")) for item in messages)
         input_tokens = min(48000, max(1, input_bytes))
         return (input_tokens * self.model_config.input_usd_per_million
-                + MAX_LETTA_OUTPUT_TOKENS * self.model_config.output_usd_per_million) / 1_000_000
+                + OUTPUT_TOKEN_COST_ESTIMATE * self.model_config.output_usd_per_million) / 1_000_000
 
     @staticmethod
     def _bounded_messages(messages):

@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 from andrewbot.controller import Controller
-from andrewbot.configuration import MAX_LETTA_OUTPUT_TOKENS
+from andrewbot.configuration import OUTPUT_TOKEN_COST_ESTIMATE
 from andrewbot.store import Store
 
 
@@ -145,9 +145,14 @@ class ControllerTests(unittest.TestCase):
         self.controller.model.reply.assert_called_once()
         self.controller.model.reply.side_effect = None
         self.controller.model.reply.return_value = ("received", {"accounted_by_gateway": True})
-        self.controller.handle_update(self.owner_message("independent follow-up"))
+        followup = self.controller.handle_update(self.owner_message("independent follow-up"))
+        self.assertIn('has not been sent', followup)
+        self.controller.model.reply.assert_called_once()
+        self.controller._command('/wake')
+        self.assertEqual(self.controller.flush_queued(), 'received')
         submitted = self.controller.model.reply.call_args.args[0]
-        self.assertEqual(submitted, [{"role": "user", "content": "independent follow-up"}])
+        self.assertIn('independent follow-up', submitted[0]['content'])
+        self.assertNotIn('original request', submitted[0]['content'])
         self.assertEqual(self.store.uncertain_message_count(123456789), 1)
         self.assertIn("Requeued 1", self.controller._command('/replay'))
         self.assertEqual(self.controller.flush_queued(), "received")

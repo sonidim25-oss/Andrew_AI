@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from .appserver import LettaTurnError, LettaTurnCancelled
+from .appserver import LettaTurnError, LettaTurnCancelled, LettaTurnYielded
 from .diary import incident_summary
 
 
@@ -38,6 +38,7 @@ class SessionRunner:
         self.started_at = None
 
     def recover(self):
+        self.store.set_state('autonomous_owner_id', '')
         interrupted = self.store.interrupt_unfinished_cycles()
         previous = self.store.get_state("active_session_id", "")
         if previous:
@@ -168,12 +169,23 @@ class SessionRunner:
             diary_status = "already saved" if self.store.diary_entry(diary_day) else "not yet saved"
             stage = "agent_turn"
             research_context = self.controller.research.wake_context()
-            self.agent.autonomous_turn(self.SESSION_PROMPT + f" Today's diary is {diary_status}.\n" + research_context,
-                                       timeout=None)
+            # The gateway checks this only between provider requests. Finish the
+            # current request/tools, then yield without dispatching another one.
+            self.store.set_state('autonomous_owner_id', str(self.controller.owner_id))
+            try:
+                self.agent.autonomous_turn(self.SESSION_PROMPT + f" Today's diary is {diary_status}.\n" + research_context,
+                                           timeout=None)
+            finally:
+                self.store.set_state('autonomous_owner_id', '')
             if self.store.get_state('active_session_id', '') != session_id:
                 raise LettaTurnCancelled('Owner changed the active session')
             stage = "finish_cycle"
             self.store.finish_cycle(cycle_id, "complete")
+        except LettaTurnYielded:
+            if cycle_started:
+                self.store.finish_cycle(cycle_id, 'stopped')
+            self.store.add_activity('Autonomous turn yielded to waiting owner input')
+            return False
         except LettaTurnCancelled as error:
             record_failure(error, 'cancelled')
             if cycle_started:

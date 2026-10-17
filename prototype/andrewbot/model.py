@@ -37,7 +37,6 @@ class OpenRouterModel:
                 "Use the conversation history for continuity. Do not claim to have done actions or "
                 "experienced events that are not in the history. Keep this first prototype text-only."
             )}, *messages],
-            "max_tokens": 512,
             "temperature": 0.7,
         }
         data = self.complete(payload)

@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .budget import TORONTO, budget_snapshot
-from .configuration import MAX_LETTA_OUTPUT_TOKENS, ModelConfig, load_model_config
+from .configuration import OUTPUT_TOKEN_COST_ESTIMATE, ModelConfig, load_model_config
 from .model import ProviderRequestError
 
 
@@ -54,6 +54,14 @@ class ModelGateway:
             return 401, {"error": {"message": "unauthorized", "type": "authentication_error"}}
         if self.store.get_state('restore_recovery_required', '0') == '1':
             return 423, {'error': {'message': 'Restore requires billing and action reconciliation', 'type': 'recovery_blocked'}}
+        if self.store.get_state('autonomy_error', ''):
+            return self.uncertain_response()
+        owner_id = self.store.get_state('autonomous_owner_id', '')
+        if owner_id and self.store.pending_owner_input(int(owner_id)):
+            # Non-retryable, before reservation and dispatch. Unlike uncertain
+            # attempts this is a clean scheduling boundary, not a provider failure.
+            return 422, {'error': {'message': 'owner_input_pending: yield to waiting owner input',
+                                  'type': 'invalid_request_error', 'code': 'owner_input_pending'}}
         if self.store.get_state("paused", "0") == "1" or self.store.get_state("sleeping", "0") == "1":
             return 423, {"error": {"message": "Andrew is sleeping or paused", "type": "lifecycle_blocked"}}
         if not isinstance(payload, dict) or payload.get("model") not in {
@@ -106,11 +114,8 @@ class ModelGateway:
             # The pinned Letta runtime recognizes this category and compacts
             # saved history before retrying. A generic 413 ends the session.
             return 413, {"error": {"message": "request too large: controller context window limit exceeded", "type": "invalid_request_error", "code": "context_length_exceeded"}}
-        requested_output = payload.get("max_tokens", payload.get("max_completion_tokens", MAX_LETTA_OUTPUT_TOKENS))
-        try:
-            max_tokens = min(MAX_LETTA_OUTPUT_TOKENS, max(1, int(requested_output)))
-        except (TypeError, ValueError, OverflowError):
-            return 400, {"error": {"message": "invalid output token limit", "type": "invalid_request_error"}}
+        # This is an accounting estimate, never a provider output allowance.
+        max_tokens = OUTPUT_TOKEN_COST_ESTIMATE
         input_tokens_bound = max(1, input_bytes)
         reserved = input_tokens_bound * self.input_rate + max_tokens * self.output_rate
 
@@ -126,7 +131,7 @@ class ModelGateway:
             return self.uncertain_response()
 
         outbound["model"] = self.model_id
-        outbound["max_tokens"] = max_tokens
+        outbound.pop("max_tokens", None)
         outbound.pop("max_completion_tokens", None)
         outbound["stream"] = False
         try:

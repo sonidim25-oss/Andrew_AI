@@ -9,7 +9,7 @@ import time
 import uuid
 import threading
 from urllib.parse import urlsplit
-from .configuration import MAX_LETTA_OUTPUT_TOKENS, ModelConfig, load_model_config
+from .configuration import ModelConfig, load_model_config
 from .gmail_tools import GMAIL_TOOLS, GMAIL_TOOL_NAMES
 from .media import MEDIA_TOOLS, MEDIA_TOOL_NAMES
 from .skills import SKILL_TOOLS, SKILL_TOOL_NAMES, SKILL_INDEX_PROMPT
@@ -47,6 +47,10 @@ class LettaTurnError(RuntimeError):
 
 class LettaTurnCancelled(RuntimeError):
     """An owner control cancelled this turn; it must not become a provider incident."""
+
+
+class LettaTurnYielded(RuntimeError):
+    """Autonomous work yielded before provider dispatch to waiting owner input."""
 
 
 def _safe_error_category(response):
@@ -327,7 +331,7 @@ class AppServerClient:
             "model": f"openai-compatible/{model_config.model_id}",
             "model_settings": {
                 "provider_type": "openai-compatible", "temperature": 0.7,
-                "max_tokens": MAX_LETTA_OUTPUT_TOKENS, "parallel_tool_calls": False,
+                "max_tokens": None, "parallel_tool_calls": False,
             },
         }
         self.request(
@@ -387,6 +391,7 @@ class AppServerClient:
         failure = False
         active_run_conflict = False
         provider_uncertain = False
+        owner_pending = False
         output_limit = False
         assistant_message_ids = set()
         early_reply = None
@@ -417,6 +422,8 @@ class AppServerClient:
                     failure = True
                     if 'provider_attempt_uncertain' in json.dumps(delta):
                         provider_uncertain = True
+                    if 'owner_input_pending' in json.dumps(delta):
+                        owner_pending = True
                 if delta.get("message_type") == "assistant_message" and delta.get("id"):
                     assistant_message_ids.add(delta["id"])
                 # A model-step stop (including requires_approval) precedes
@@ -465,6 +472,8 @@ class AppServerClient:
                 break
         else:
             raise TimeoutError("Letta agent turn timed out")
+        if owner_pending and not provider_uncertain:
+            raise LettaTurnYielded('Owner input is waiting')
         if output_limit:
             raise LettaTurnError("output_token_limit")
         if provider_uncertain:
@@ -601,7 +610,7 @@ class LettaAgent:
                     "description": "Andrew's persistent agent. Model calls are brokered through the trusted controller.",
                     "system": self.system_prompt,
                     "model": self.model_handle,
-                    "model_settings": {"provider_type": "openai-compatible", "temperature": 0.7, "max_tokens": MAX_LETTA_OUTPUT_TOKENS, "parallel_tool_calls": False},
+                    "model_settings": {"provider_type": "openai-compatible", "temperature": 0.7, "max_tokens": None, "parallel_tool_calls": False},
                     "llm_config": {"model": self.model_config.model_id, "model_endpoint_type": "openai", "model_endpoint": "http://127.0.0.1:8284/v1", "context_window": 32768, "handle": self.model_handle},
                     "context_window_limit": 32768,
                     "include_base_tools": False,
@@ -623,7 +632,7 @@ class LettaAgent:
             self._startup_check("Letta capability instructions", client.request,
                 {"type":"agent_update", "agent_id":self.agent_id,"body":{"system":self.system_prompt,
                  "model_settings": {"provider_type": "openai-compatible", "temperature": 0.7,
-                                    "max_tokens": MAX_LETTA_OUTPUT_TOKENS, "parallel_tool_calls": False}}},
+                                    "max_tokens": None, "parallel_tool_calls": False}}},
                 "agent_update_response")
             runtime = self._startup_check("Letta runtime startup", client.start_runtime, self.agent_id, self.conversation_id or None)
             self.conversation_id = runtime["conversation_id"]

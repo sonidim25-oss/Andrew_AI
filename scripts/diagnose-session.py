@@ -101,6 +101,32 @@ def main():
         if len({row["session_id"] for row in cycles}) > 1:
             parser.error("ambiguous prefix; supply the full session ID")
         report = {"integrity": db.execute("PRAGMA quick_check").fetchone()[0], "cycles": cycles}
+        report["recent_failed_cycles"] = rows(
+            "SELECT session_id,cycle_id,started_at,ended_at FROM cycles WHERE status='failed' "
+            "ORDER BY started_at DESC LIMIT 3")
+        # Queue states distinguish waiting input from a dispatched, uncertain turn.
+        report["recent_owner_messages"] = rows(
+            "SELECT id,created_at,queued,length(content) AS characters FROM messages "
+            "WHERE role='user' ORDER BY id DESC LIMIT 15")
+        report["queue_state_legend"] = {"0": "processed", "1": "pending", "2": "claimed", "3": "uncertain"}
+        for table in ("telegram_inbox", "telegram_uncertain", "telegram_outbox"):
+            report[table + "_metadata"] = rows(
+                f"SELECT created_at,attempts FROM {table} ORDER BY id DESC LIMIT 15"
+                if table == "telegram_outbox" else
+                f"SELECT update_id,received_at FROM {table} ORDER BY update_id DESC LIMIT 15")
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "research_entries" in tables:
+            report["saved_research_entries"] = rows(
+                "SELECT record_id,revision,status,created_at,updated_at FROM research_entries "
+                "ORDER BY updated_at DESC LIMIT 15")
+        if "research_checkpoints" in tables:
+            report["saved_research_checkpoints"] = rows(
+                "SELECT entry_id,revision,session_id,cycle_id,stop_type,created_at "
+                "FROM research_checkpoints ORDER BY id DESC LIMIT 15")
+        if "research_events" in tables:
+            report["saved_research_activity"] = rows(
+                "SELECT session_id,cycle_id,count(*) AS recorded_events,max(created_at) AS last_saved_at "
+                "FROM research_events GROUP BY session_id,cycle_id ORDER BY last_saved_at DESC LIMIT 15")
         report["lifecycle"] = rows("SELECT key,value FROM state WHERE key IN "
             "('sleeping','sleep_until','paused','active_session_status','active_session_id',"
             "'session_start_requested','fallback_wake_day','autonomy_error') ORDER BY key")
@@ -112,6 +138,8 @@ def main():
             report["events"] = rows("SELECT id,created_at,event FROM activity "
                 "WHERE datetime(created_at) BETWEEN datetime(?, '-5 minutes') AND datetime(?, '+5 minutes') "
                 "AND (event LIKE 'Autonomous %' OR event LIKE 'Letta model gateway %' "
+                "OR event='Owner message outcome uncertain; held to avoid duplicate delivery' "
+                "OR event='Andrew replied to the owner' "
                 "OR event LIKE 'Session failed %' OR event LIKE 'Daily fallback %' OR event LIKE 'Scheduled wake %') ORDER BY id", (start, end))
             report["usage"] = rows("SELECT created_at,cost_usd,input_tokens,output_tokens FROM usage "
                 "WHERE datetime(created_at) BETWEEN datetime(?, '-5 minutes') AND datetime(?, '+5 minutes')", (start, end))

@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from andrewbot.appserver import AppServerConnection
 from andrewbot.appserver import AppServerClient, LettaAgent, LettaCommandError, LettaTurnError, StartupValidationError, _safe_error_category
-from andrewbot.configuration import MAX_LETTA_OUTPUT_TOKENS, load_model_config
+from andrewbot.configuration import load_model_config
 from andrewbot.store import Store
 
 
@@ -168,7 +168,7 @@ class AppServerWebSocketTests(unittest.TestCase):
         self.assertEqual(command["agent_id"], "agent-test")
         self.assertEqual(command["body"]["model"], "openai-compatible/google/gemini-2.5-flash")
         self.assertEqual(command["body"]["model_settings"]["provider_type"], "openai-compatible")
-        self.assertEqual(command["body"]["model_settings"]["max_tokens"], MAX_LETTA_OUTPUT_TOKENS)
+        self.assertEqual(command["body"]["model_settings"]["max_tokens"], None)
 
     def test_owner_model_change_updates_existing_agent_without_changing_memory(self):
         with tempfile.TemporaryDirectory() as directory:

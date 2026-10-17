@@ -9,9 +9,33 @@ from andrewbot.diary import deliver_pending_diary
 from andrewbot.gateway import ModelGateway
 from andrewbot.sessions import SessionRunner
 from andrewbot.store import Store
+from andrewbot.appserver import LettaTurnYielded
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_owner_yield_preserves_session_and_does_not_record_failure(self):
+        def yield_to_owner():
+            self.assertEqual(self.store.get_state('autonomous_owner_id'), '17')
+            self.store.add_message(17, 'user', 'Question', queued=True)
+            raise LettaTurnYielded()
+        self.action = yield_to_owner
+        self.controller._command('/wake')
+        self.assertFalse(self.runner.tick(self.now))
+        self.assertTrue(self.runner.active_session_id)
+        self.assertEqual(self.store.get_state('autonomy_error', ''), '')
+        self.assertEqual(self.store.get_state('autonomous_owner_id'), '')
+        self.assertEqual(self.store.connection.execute('SELECT status FROM cycles').fetchone()[0], 'stopped')
+        self.assertEqual(self.store.uncertain_message_count(17), 0)
+
+    def test_chat_after_session_failure_stays_pending_without_model_call(self):
+        self.store.set_state('autonomy_error', 'provider_attempt_uncertain')
+        reply = self.controller.handle_update({'message': {'from': {'id': 17},
+            'chat': {'id': 17, 'type': 'private'}, 'text': 'Question'}})
+        self.assertIn('has not been sent', reply)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.store.uncertain_message_count(17), 0)
+        self.assertEqual(len(self.store.queued_messages(17)), 1)
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)

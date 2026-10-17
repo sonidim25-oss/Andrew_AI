@@ -7,7 +7,7 @@ from urllib.request import Request, urlopen
 from unittest.mock import patch
 
 from andrewbot.gateway import GatewayThread, ModelGateway, make_server
-from andrewbot.configuration import MAX_LETTA_OUTPUT_TOKENS, load_model_config
+from andrewbot.configuration import OUTPUT_TOKEN_COST_ESTIMATE, load_model_config
 from andrewbot.store import Store
 from andrewbot.model import ProviderRequestError
 
@@ -109,12 +109,13 @@ class ModelGatewayTests(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertEqual(self.provider.calls, [])
 
-    def test_larger_output_allowance_is_capped_and_reserved_before_provider_call(self):
+    def test_runtime_output_limit_is_removed_and_accounting_estimate_reserved(self):
         original = self.provider.complete
         def check_reservation(payload):
-            self.assertEqual(payload['max_tokens'], MAX_LETTA_OUTPUT_TOKENS)
+            self.assertNotIn('max_tokens', payload)
+            self.assertNotIn('max_completion_tokens', payload)
             row = self.store.connection.execute('SELECT cost_usd FROM budget_reservations').fetchone()
-            self.assertGreaterEqual(row[0], MAX_LETTA_OUTPUT_TOKENS * self.gateway.output_rate)
+            self.assertGreaterEqual(row[0], OUTPUT_TOKEN_COST_ESTIMATE * self.gateway.output_rate)
             return original(payload)
         with patch.object(self.provider, 'complete', side_effect=check_reservation):
             status, _ = self.gateway.complete('Bearer gateway-test-token',
@@ -291,16 +292,17 @@ class ModelGatewayTests(unittest.TestCase):
         finally:
             thread.close()
 
-    def test_response_needing_more_than_4096_tokens_can_finish_once_with_reserved_budget(self):
+    def test_response_exceeding_old_6000_cap_settles_reported_usage(self):
         def completion(payload):
             self.provider.calls.append(payload)
             reservation = self.store.connection.execute(
                 'SELECT cost_usd FROM budget_reservations').fetchone()
             self.assertGreaterEqual(reservation[0], 6000 * self.gateway.output_rate)
-            allowance = payload['max_tokens']
+            self.assertNotIn('max_tokens', payload)
+            allowance = 12000
             return {'choices': [{'message': {'role': 'assistant', 'content': 'Fixture completed.'},
-                                  'finish_reason': 'stop' if allowance >= 5000 else 'length'}],
-                    'usage': {'prompt_tokens': 20, 'completion_tokens': min(5000, allowance), 'cost': 0.0015}}
+                                  'finish_reason': 'stop'}],
+                    'usage': {'prompt_tokens': 20, 'completion_tokens': allowance, 'cost': 0.0015}}
         self.provider.complete = completion
         status, result = self.gateway.complete('Bearer gateway-test-token',
             {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'fixture'}],
@@ -308,7 +310,28 @@ class ModelGatewayTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(result['choices'][0]['finish_reason'], 'stop')
         self.assertEqual(len(self.provider.calls), 1)
-        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 1)
+        self.assertEqual(self.store.connection.execute('SELECT output_tokens FROM usage').fetchone()[0], 12000)
+
+    def test_waiting_owner_yields_autonomous_work_without_reservation_or_dispatch(self):
+        self.store.set_state('autonomous_owner_id', '17')
+        self.store.enqueue_update({'update_id': 123, 'message': {
+            'from': {'id': 17}, 'chat': {'id': 17, 'type': 'private'}, 'text': 'Question'}})
+        payload = {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'Continue'}]}
+        status, result = self.gateway.complete('Bearer gateway-test-token', payload)
+        self.assertEqual(status, 422)
+        self.assertEqual(result['error']['code'], 'owner_input_pending')
+        self.assertEqual(self.provider.calls, [])
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
+        self.store.set_state('autonomous_owner_id', '')
+        self.assertEqual(self.gateway.complete('Bearer gateway-test-token', payload)[0], 200)
+
+    def test_failed_session_blocks_dispatch_even_with_new_request(self):
+        self.store.set_state('autonomy_error', 'provider_attempt_uncertain')
+        status, result = self.gateway.complete('Bearer gateway-test-token', {
+            'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'New question'}]})
+        self.assertEqual(status, 422)
+        self.assertEqual(self.provider.calls, [])
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 0)
         self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
 
 

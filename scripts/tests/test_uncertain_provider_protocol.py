@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'prototype'))
-from andrewbot.appserver import AppServerClient, LettaAgent
+from andrewbot.appserver import AppServerClient, LettaAgent, LettaTurnYielded
 from andrewbot.controller import Controller
 from andrewbot.gateway import GatewayThread, ModelGateway, make_server
 from andrewbot.store import Store
@@ -25,6 +25,9 @@ class UncertainProviderProtocolTests(unittest.TestCase):
 
     def test_invalid_response_is_not_retried(self):
         self.exercise('invalid')
+
+    def test_owner_yield_is_not_retried_and_saved_owner_message_can_be_answered(self):
+        self.exercise('yield')
 
     @patch('andrewbot.appserver.gmail_permissions', return_value={'enabled': False})
     def exercise(self, mode, _permissions):
@@ -42,7 +45,10 @@ class UncertainProviderProtocolTests(unittest.TestCase):
             class Provider:
                 def complete(self, payload):
                     calls.append(payload)
-                    if len(calls) == 1:
+                    if mode == 'yield':
+                        if 'max_tokens' in payload or 'max_completion_tokens' in payload:
+                            raise AssertionError('output cap reached provider')
+                    elif len(calls) == 1:
                         if mode == 'timeout':
                             raise TimeoutError('private fixture provider response lost')
                         return {'error': 'private fixture invalid response'}
@@ -89,6 +95,22 @@ class UncertainProviderProtocolTests(unittest.TestCase):
                         return controller.execute_tool(name, arguments)
                     agent.tool_handler = tool_handler
                     store.add_message(17, 'user', 'Complete the saved fixture work.', queued=True)
+                    if mode == 'yield':
+                        # Pending owner input must stop only the autonomous run,
+                        # before any billable dispatch. The next owner turn works.
+                        store.set_state('autonomous_owner_id', '17')
+                        with self.assertRaises(LettaTurnYielded):
+                            agent.autonomous_turn('Continue independent research.', timeout=20)
+                        self.assertEqual(calls, [])
+                        self.assertEqual(store.get_state('autonomy_error', ''), '')
+                        self.assertEqual(store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
+                        store.set_state('autonomous_owner_id', '')
+                        reply = controller.flush_queued()
+                        self.assertEqual(reply, 'Unexpected retry.')
+                        self.assertEqual(len(calls), 1)
+                        self.assertEqual(store.uncertain_message_count(17), 0)
+                        self.assertEqual(len(store.queued_messages(17)), 0)
+                        return
                     due = datetime.now(timezone.utc) - timedelta(seconds=1)
                     store.transition_state({'sleeping': '1', 'sleep_until': due.isoformat()}, 'fixture sleep')
                     self.assertTrue(controller.check_scheduled_wake())
