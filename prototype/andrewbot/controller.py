@@ -10,6 +10,7 @@ from .appserver import AppServerClient, LettaTurnError, LettaTurnCancelled
 from .memory import ResearchJournal, validate_memory_text
 from .gmail_tools import GMAIL_TOOL_NAMES
 from .media import MEDIA_TOOL_NAMES, MEDIA_AUTHORIZATION
+from .skills import SkillCatalog, SKILL_TOOL_NAMES
 import json
 
 
@@ -18,9 +19,10 @@ class Controller:
                  monthly_reserve_usd=1.0, daily_target_usd=0.30,
                  timezone_name="America/Toronto", fallback_wake_time="09:00",
                  autonomous_enabled=False, fallback_enabled=False, memory_service=None, model_config=None,
-                 tool_runtime=None, visit_history=None, gmail_tools=None, conversation_idle_seconds=300, health_snapshot=None, media=None):
+                 tool_runtime=None, visit_history=None, gmail_tools=None, conversation_idle_seconds=300, health_snapshot=None, media=None, skill_catalog=None):
         self.store = store
         self.media = media
+        self.skill_catalog = skill_catalog if skill_catalog is not None else SkillCatalog()
         self.health_snapshot = health_snapshot
         self.model = model
         self.owner_id = int(owner_id)
@@ -326,7 +328,7 @@ class Controller:
                 kind = "personality" if name == "memory_propose_personality_edit" else "experience"
                 self.memory_service.reject_edit_attempt(kind)
             raise ValueError("tool arguments must be an object")
-        read_tools = {"check_budget", "recent_activity", "memory_search", "gmail.status", "media.status", "media.get", 'research.list', 'research.get', 'research.observations'}
+        read_tools = {"check_budget", "recent_activity", "memory_search", "gmail.status", "media.status", "media.get", "skills.list", "skills.load", 'research.list', 'research.get', 'research.observations'}
         if self.store.get_state("paused", "0") == "1" and name not in read_tools:
             raise ValueError("owner pause can only be cleared by the owner with /wake")
         if self.store.get_state("sleeping", "0") == "1" and name not in read_tools:
@@ -334,6 +336,8 @@ class Controller:
         if (name in {"sleep", "wake_at"} and self.store.get_state("active_session_id", "")
                 and not self.store.diary_entry(datetime.now(ZoneInfo("America/Toronto")).date().isoformat())):
             raise ValueError("save today's diary before requesting autonomous sleep")
+        if name in SKILL_TOOL_NAMES:
+            return json.dumps(self.skill_catalog.execute(name, arguments), ensure_ascii=False)
         if name in {'media.status', 'media.get', 'voice.generate', 'image.generate', 'image.edit', 'profile.propose_avatar'}:
             if self.media is None:
                 raise ValueError('Media unavailable')

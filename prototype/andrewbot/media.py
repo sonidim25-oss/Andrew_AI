@@ -58,6 +58,7 @@ def validate_png(data):
 @dataclass(frozen=True)
 class MediaPolicy:
     enabled: bool = False
+    voice_enabled: bool = True
     voice: str = 'george'
     tts_model: str = 'elevenlabs/eleven-v3'
     image_model: str = 'openai/gpt-image-1-mini'
@@ -85,7 +86,7 @@ def load_media_policy(environment):
     if enabled and environment.get('ANDREW_MEDIA_CAPABILITIES_VERIFIED', '0') != '1':
         raise ValueError('Media requires verified provider capabilities before enabling')
     try:
-        return MediaPolicy(enabled=enabled, voice=environment.get('ANDREW_TTS_VOICE', 'george'),
+        return MediaPolicy(enabled=enabled, voice_enabled=environment.get('ANDREW_MEDIA_VOICE_ENABLED', '1') == '1', voice=environment.get('ANDREW_TTS_VOICE', 'george'),
                            monthly_usd=float(environment.get('ANDREW_MEDIA_MONTHLY_PER_KIND_USD', '3')),
                            daily_usd=float(environment.get('ANDREW_MEDIA_DAILY_PER_KIND_USD', '.20')),
                            voice_job_usd=float(environment.get('ANDREW_MEDIA_VOICE_JOB_USD', '.08')),
@@ -131,7 +132,7 @@ class MediaService:
         return float(row[0])
 
     def submit(self, kind, text, request_key, *, owner_requested=False, voice_id=None, reference_id=None):
-        if not self.policy.enabled:
+        if not self.policy.enabled or (kind == 'voice' and not self.policy.voice_enabled):
             raise ValueError('Media generation is disabled')
         if kind not in {'voice', 'image'} or not owner_requested:
             raise ValueError('An explicit owner media request is required')
@@ -226,7 +227,24 @@ class MediaService:
                                               (self.owner_id, 'Unstarted media requests from an earlier UTC day expired without provider calls. Submit a fresh request if still wanted.', self.now()))
             row = self.store.connection.execute("SELECT * FROM media_jobs WHERE state='queued' ORDER BY created_at,id LIMIT 1").fetchone()
             if row:
-                self.store.connection.execute("UPDATE media_jobs SET state='running',updated_at=? WHERE id=?", (self.now(), row['id']))
+                # Reservations and policy checks share the write transaction with
+                # admission. Restarted queues cannot spend under an older policy.
+                now = self.now()
+                kind = row['kind']
+                payload = json.loads(row['payload'])
+                estimate = (len(payload['text']) * self.policy.voice_character_usd
+                            if kind == 'voice' else self.policy.image_job_usd)
+                cap = self.policy.voice_job_usd if kind == 'voice' else self.policy.image_job_usd
+                if ((kind == 'voice' and not self.policy.voice_enabled)
+                        or row['reserved_usd'] > cap + 1e-9
+                        or estimate > row['reserved_usd'] + 1e-9
+                        or self._usage(kind, now[:7]) > self.policy.monthly_usd + 1e-9
+                        or self._usage(kind, now[:10]) > self.policy.daily_usd + 1e-9):
+                    self.store.connection.execute("UPDATE media_jobs SET state='cancelled',error='policy_changed',updated_at=? WHERE id=?", (now, row['id']))
+                    self.store.connection.execute("INSERT INTO telegram_outbox(chat_id,text,created_at,lane) VALUES(?,?,?,'system')",
+                                                  (self.owner_id, 'Queued media request cancelled because current permissions or budget no longer allow it. No provider call was made. Job: ' + row['id'], now))
+                    return None
+                self.store.connection.execute("UPDATE media_jobs SET state='running',updated_at=? WHERE id=?", (now, row['id']))
             return dict(row) if row else None
 
     def recover(self):
@@ -387,7 +405,7 @@ class MediaService:
             result = {'enabled': self.policy.enabled, 'spontaneous_voice': False}
             for kind in ('voice', 'image'):
                 reserved = self.store.connection.execute("SELECT coalesce(sum(reserved_usd),0) FROM media_jobs WHERE kind=? AND state IN ('queued','running','uncertain') AND created_at LIKE ?", (kind, now[:7] + '%')).fetchone()[0]
-                result[kind] = {'monthly_usd': self._usage(kind, now[:7]), 'daily_usd': self._usage(kind, now[:10]),
+                result[kind] = {'enabled': self.policy.enabled and (kind != 'voice' or self.policy.voice_enabled), 'monthly_usd': self._usage(kind, now[:7]), 'daily_usd': self._usage(kind, now[:10]),
                                 'reserved_usd': reserved, 'monthly_cap_usd': self.policy.monthly_usd,
                                 'daily_cap_usd': self.policy.daily_usd}
             result['counts'] = [dict(row) for row in self.store.connection.execute('SELECT kind,state,delivery,count(*) AS count FROM media_jobs GROUP BY kind,state,delivery')]

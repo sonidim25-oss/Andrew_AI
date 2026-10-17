@@ -77,3 +77,7 @@ No commit, push, deployment, paid provider call, Telegram resend, or production 
 ## Deployment
 
 Source `81ee6be`, including repairs 2–4, was deployed and verified on 2026-10-17. All 20 installed hashes match, all four services are active, and all 33 database tables and both sample artifacts were preserved. Media remains disabled pending finding 1. Evidence: `/var/backups/andrew-incident-mlgyoqvh/media-deployment-verification.json`.
+
+## Finding 1 — owner-authorized image enablement follow-up
+
+The owner subsequently requested image generation be enabled. Queued jobs now recheck current permission, daily/monthly aggregate spend including outstanding reservations, per-job caps, and estimated cost against the saved reservation in the claim transaction. A disallowed unstarted job is cancelled with a local owner notice and no provider call; uncertain attempts remain held/accounted. Four regression tests cover reductions, combined reservations, a voice-rate increase, and image-only enablement. The earlier enablement blocker is resolved in source, pending this rollout's production verification.

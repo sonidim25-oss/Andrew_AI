@@ -23,6 +23,11 @@ _asset_spec.loader.exec_module(_assets)
 plan_assets = _assets.plan_assets
 prepare_images = _assets.prepare_images
 
+_skill_spec = importlib.util.spec_from_file_location('skill_assets', Path(__file__).with_name('skill_assets.py'))
+_skill_assets = importlib.util.module_from_spec(_skill_spec)
+_skill_spec.loader.exec_module(_skill_assets)
+plan_skill_assets = _skill_assets.plan_skill_assets
+
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = Path('/opt/andrew/prototype/andrewbot')
@@ -213,7 +218,7 @@ def main():
     if os.geteuid() != 0:
         raise SystemExit('Run this installer with sudo in your server terminal.')
     manifest = json.loads((ROOT / 'scripts/p1-fix-manifest.json').read_text())
-    if set(manifest) != {'appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'workers.py', 'model.py', 'runner_client.py', 'process_limits.py', 'media.py', 'media_provider.py'}:
+    if set(manifest) != {'appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'workers.py', 'model.py', 'runner_client.py', 'process_limits.py', 'media.py', 'media_provider.py', 'skills.py'}:
         raise SystemExit('Unexpected module manifest; installation refused.')
     replacements = {}
     originals = {}
@@ -227,7 +232,7 @@ def main():
             raise SystemExit('Symlink in installed module; installation refused: ' + name)
         original = path.read_bytes() if path.exists() else None
         installed_hash = hashlib.sha256(original).hexdigest() if original is not None else None
-        if installed_hash is None and (name not in {'latency.py', 'workers.py', 'media.py', 'media_provider.py'} or hashes['original'] is not None):
+        if installed_hash is None and (name not in {'latency.py', 'workers.py', 'media.py', 'media_provider.py', 'skills.py'} or hashes['original'] is not None):
             raise SystemExit('Required installed module missing; installation refused: ' + name)
         reviewed_hashes = {hashes['original'], hashes['tested'], *hashes.get('reviewed', {}).keys()}
         if installed_hash not in reviewed_hashes:
@@ -235,6 +240,7 @@ def main():
                              + name + ' (SHA-256 ' + installed_hash + ')')
         replacements[name] = data
         originals[name] = original
+    skill_files = plan_skill_assets(ROOT, TARGET.parents[1] / 'skills')
     check_idle()
     command('systemctl', 'is-active', SERVICE)
     readiness = load_readiness()
@@ -253,6 +259,10 @@ def main():
     for name, original in originals.items():
         if original is not None:
             shutil.copy2(TARGET / name, backup / name)
+    for item in skill_files:
+        if item['original'] is not None:
+            (backup / item['backup']).write_bytes(item['original'])
+    (backup / 'skill-document-presence.json').write_text(json.dumps({item['name']: item['original'] is not None for item in skill_files}) + '\n')
     (backup / 'module-presence.json').write_text(json.dumps({name: data is not None for name, data in originals.items()}) + '\n')
     (backup / 'runtime-proof.json').write_bytes(original_proof_bytes)
     for item in runtime_files(runtime):
@@ -266,6 +276,7 @@ def main():
     runtime_changed = False
     assets_changed = False
     new_controller_attempted = False
+    skills_changed = False
     stage = 'acceptance'
     try:
         if assets:
@@ -317,6 +328,9 @@ def main():
         stage = 'module_installation'
         for name, data in replacements.items():
             replace(TARGET / name, data, gid)
+        stage = 'skill_document_installation'
+        skills_changed = True
+        _skill_assets.install_skill_assets(skill_files, gid, replace)
         stage = 'proof_renewal'
         if assets:
             renew_proof(readiness, original_proof, before, backup,
@@ -346,6 +360,8 @@ def main():
                 (TARGET / name).unlink(missing_ok=True)
             else:
                 replace(TARGET / name, (backup / name).read_bytes(), gid)
+        if skills_changed:
+            _skill_assets.restore_skill_assets(skill_files, gid, replace)
         if runtime_changed or assets_changed:
             command('systemctl', 'stop', 'andrew-runner.service')
             if assets_changed:

@@ -37,6 +37,11 @@ class MediaProtocolTests(unittest.TestCase):
                     message = {'role': 'assistant', 'content': 'Fixture response.'}
                     finish = 'stop'
                     if len(calls) == 2:
+                        message = {'role': 'assistant', 'content': None, 'tool_calls': [
+                            {'id': 'skill-fixture', 'type': 'function', 'function': {
+                                'name': 'skills.load', 'arguments': json.dumps({'name': 'voice-communication'})}}]}
+                        finish = 'tool_calls'
+                    elif len(calls) == 3:
                         request_id = re.findall(r'owner-reply:\d+', json.dumps(payload['messages']))[-1]
                         message = {'role': 'assistant', 'content': None, 'tool_calls': [
                             {'id': 'voice-fixture', 'type': 'function', 'function': {
@@ -80,7 +85,8 @@ class MediaProtocolTests(unittest.TestCase):
                         controller.flush_queued()
                         controller.handle_update({'update_id': 101, 'message': {'from': {'id': 17},
                                                  'chat': {'id': 17, 'type': 'private'}, 'text': '/voice_reply Hello'}})
-                        self.assertEqual(3, len(calls))
+                        self.assertEqual(4, len(calls))
+                        self.assertTrue(any('# Voice communication' in json.dumps(call['messages']) for call in calls))
                         self.assertEqual(1, len(media.status()['jobs']))
                         self.assertEqual('queued', media.status()['jobs'][0]['state'])
                 finally:

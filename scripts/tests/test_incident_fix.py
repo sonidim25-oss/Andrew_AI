@@ -40,7 +40,7 @@ class IncidentFixTests(unittest.TestCase):
         self.assertNotIn('private text', json.dumps(result))
 
     def exercise_installer(self, fail_start=False, changed_source=False, fail_acceptance=False, fail_proof=False,
-                           p1=False, intermediate=False, unknown_installed=False, runtime_patch=False, new_module=False, fail_verify=False, assets=False):
+                           p1=False, intermediate=False, unknown_installed=False, runtime_patch=False, new_module=False, fail_verify=False, assets=False, skill_assets=False):
         installer = load('install-p1-fixes' if p1 else 'install-incident-fix')
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -90,7 +90,7 @@ class IncidentFixTests(unittest.TestCase):
             manifest = {}
             installed_data = (b'# unreviewed change\n' if unknown_installed else
                               b'# reviewed intermediate\n' if intermediate else b'# original\n')
-            names = (['appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'workers.py', 'model.py', 'runner_client.py', 'process_limits.py', 'media.py', 'media_provider.py']
+            names = (['appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'workers.py', 'model.py', 'runner_client.py', 'process_limits.py', 'media.py', 'media_provider.py', 'skills.py']
                      if p1 else ['appserver.py', 'configuration.py', 'gateway.py', 'sessions.py'])
             for name in names:
                 (source / name).write_bytes(b'# tested\n')
@@ -99,6 +99,15 @@ class IncidentFixTests(unittest.TestCase):
                                   [('tested', b'# tested\n'), ('original', b'# original\n')]}
                 if p1:
                     manifest[name]['reviewed'] = {hashlib.sha256(b'# reviewed intermediate\n').hexdigest(): ['fixture-revision']}
+            skill_root = root / 'skill-documents'
+            skill_path = skill_root / 'voice-communication/SKILL.md'
+            skill_original = b'# previous skill\n' if skill_assets == 'existing' else None
+            if skill_original is not None:
+                skill_path.parent.mkdir(parents=True)
+                skill_path.write_bytes(skill_original)
+            skill_plan = [{'name': 'voice-communication', 'root': skill_root, 'path': skill_path,
+                           'tested': b'# tested skill\n', 'original': skill_original,
+                           'backup': 'skill-voice-communication.md'}] if skill_assets else []
             absent_module = new_module if isinstance(new_module, str) else 'latency.py'
             if new_module:
                 (target / absent_module).unlink()
@@ -135,6 +144,10 @@ class IncidentFixTests(unittest.TestCase):
                     self.assertIn(('systemctl', 'disable', installer.SERVICE), [call.args for call in commands.call_args_list],
                                   'Disable boot startup before restoring code that ignores held state')
                 path.write_bytes(data)
+            if p1:
+                skill_patcher = patch.object(installer, 'plan_skill_assets', return_value=skill_plan)
+                skill_patcher.start()
+                self.addCleanup(skill_patcher.stop)
             with patch.object(installer, 'ROOT', root), patch.object(installer, 'TARGET', target), \
                  patch.object(installer.os, 'geteuid', return_value=0), \
                  patch.object(installer.grp, 'getgrnam', return_value=types.SimpleNamespace(gr_gid=1000)), \
@@ -200,6 +213,15 @@ class IncidentFixTests(unittest.TestCase):
             self.assertEqual(proof_path.read_bytes(), b'{}')
             self.assertEqual(runtime_path.read_bytes(), b'# runtime original\n' if fail_start or fail_verify or fail_acceptance or fail_proof else
                              b'# runtime tested\n' if runtime_patch else b'# runtime original\n')
+            if skill_assets:
+                failed = fail_start or fail_proof or fail_verify or fail_acceptance or changed_source or unknown_installed
+                if failed:
+                    if skill_original is None:
+                        self.assertFalse(skill_path.exists())
+                    else:
+                        self.assertEqual(skill_original, skill_path.read_bytes())
+                else:
+                    self.assertEqual(b'# tested skill\n', skill_path.read_bytes())
 
     def test_p1_post_launch_failure_never_restarts_older_retry_behavior(self):
         self.exercise_installer(p1=True, fail_verify=True)
@@ -212,6 +234,18 @@ class IncidentFixTests(unittest.TestCase):
 
     def test_new_dependency_is_removed_on_proof_rollback(self):
         self.exercise_installer(p1=True, new_module=True, fail_proof=True)
+
+    def test_skill_loader_and_documents_are_prepared_for_deployment(self):
+        root = Path(__file__).resolve().parents[2]
+        manifest = json.loads((root / 'scripts/p1-fix-manifest.json').read_text())
+        self.assertIn('skills.py', manifest)
+        self.exercise_installer(p1=True, new_module='skills.py', skill_assets='new')
+
+    def test_new_skill_documents_are_removed_on_startup_rollback(self):
+        self.exercise_installer(p1=True, new_module='skills.py', skill_assets='new', fail_start=True)
+
+    def test_existing_skill_documents_are_restored_on_proof_rollback(self):
+        self.exercise_installer(p1=True, skill_assets='existing', fail_proof=True)
 
     def test_idle_accepts_halted_error_without_changing_lifecycle(self):
         installer = load('install-p1-fixes')

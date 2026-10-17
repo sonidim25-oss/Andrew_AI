@@ -41,6 +41,7 @@ The trusted controller reuses the existing encrypted vault `openrouter_api` reco
 | Setting | Default |
 | --- | --- |
 | `ANDREW_MEDIA_ENABLED` | `0`; only `1` enables media |
+| `ANDREW_MEDIA_VOICE_ENABLED` | `1` by default; deployed override `0` keeps voice disabled while images are enabled |
 | `ANDREW_MEDIA_CAPABILITIES_VERIFIED` | `0`; must be `1` before enabling after approved live probes |
 | `ANDREW_TTS_VOICE` | `george` |
 | `ANDREW_MEDIA_MONTHLY_PER_KIND_USD` | `3` each for voice and images |
