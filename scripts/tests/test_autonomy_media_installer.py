@@ -16,6 +16,41 @@ spec.loader.exec_module(installer)
 
 
 class AutonomyInstallerTests(unittest.TestCase):
+    def test_exact_reviewed_deployment_uses_matching_release_and_preserves_live_changes(self):
+        base = (b'def reply():\n    return "legacy"\n\n'
+                b'def unchanged():\n    value = 1\n    value += 2\n    value += 3\n    value += 4\n    return value\n')
+        previous = base.replace(b'legacy', b'owner')
+        live = previous + b'\ndef research_checkpoint():\n    return "preserved"\n'
+        proposed = previous.replace(b'owner', b'answer')
+        revision = installer.UPGRADE_BASES[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / 'installed'
+            target.mkdir()
+            (target / 'model.py').write_bytes(live)
+            package = root / 'prototype/andrewbot'
+            package.mkdir(parents=True)
+            (package / 'model.py').write_bytes(proposed)
+            (root / 'scripts').mkdir()
+            (root / 'scripts/autonomy-media-manifest.json').write_text(json.dumps({
+                'modules': {'model.py': hashlib.sha256(proposed).hexdigest()},
+                'deployed_upgrade_bases': {'model.py': {hashlib.sha256(live).hexdigest(): revision}}}))
+            def show(args):
+                return previous if args[-1].startswith(revision + ':') else base
+            with patch.object(installer, 'ROOT', root), patch.object(installer, 'TARGET', target), \
+                 patch.object(installer, 'MODULES', ('model.py',)), \
+                 patch.object(installer.subprocess, 'check_output', side_effect=show):
+                backup = root / 'backup'
+                backup.mkdir()
+                _, merged = installer.prepare(backup)
+                self.assertIn(b'return "answer"', merged['model.py'])
+                self.assertIn(b'return "preserved"', merged['model.py'])
+                (target / 'model.py').write_bytes(live + b'\n# unreviewed change\n')
+                other_backup = root / 'other-backup'
+                other_backup.mkdir()
+                with self.assertRaisesRegex(ValueError, 'overlap'):
+                    installer.prepare(other_backup)
+
     def test_reply_origin_upgrade_preserves_live_comment_deletion_and_research_guidance(self):
         comment = (b'        # Owner replies can span multiple model/tool rounds just like autonomous\n'
                    b'        # work. Bound network operations separately and retain explicit cancellation.\n')

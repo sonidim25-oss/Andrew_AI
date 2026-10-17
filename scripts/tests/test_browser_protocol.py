@@ -22,11 +22,11 @@ from andrewbot.gmail_tools import GMAIL_TOOL_NAMES
 @unittest.skipUnless(os.environ.get('ANDREW_LETTA_TEST_BINARY'),'requires isolated pinned Letta harness')
 class BrowserProtocolTests(unittest.TestCase):
     @patch('andrewbot.appserver.gmail_permissions', return_value={'enabled': False})
-    def test_real_harness_browser_account_callbacks(self, _permissions):
+    def test_real_harness_autonomous_browser_account_callbacks(self, _permissions):
         self.exercise_callbacks(False)
 
     @patch('andrewbot.appserver.gmail_permissions', return_value={'enabled': True})
-    def test_real_harness_browser_budget_and_gmail_callbacks(self, _permissions):
+    def test_real_harness_autonomous_browser_budget_and_gmail_callbacks(self, _permissions):
         self.exercise_callbacks(True)
 
     def exercise_callbacks(self, gmail_enabled):
@@ -87,7 +87,10 @@ class BrowserProtocolTests(unittest.TestCase):
                         callback_results[name] = result
                         return result
                     agent.tool_handler=handle
-                    reply,_=agent.reply([{'role':'user','content':'Use browser.control then browser.account list, then report completion.'}])
+                    # Exercise the complete independent workflow, including more
+                    # than three tool rounds. Owner text-only handoff is tested
+                    # separately by the scheduled-queue protocol fixtures.
+                    reply,_=agent.autonomous_turn('Use browser.control then browser.account list, then report completion.')
                     self.assertEqual(reply,'Browser and account callbacks completed.')
                     expected_calls = 5 if gmail_enabled else 4
                     self.assertEqual(len(browser_calls),1); self.assertEqual(len(calls),expected_calls)

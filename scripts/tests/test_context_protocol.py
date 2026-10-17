@@ -43,7 +43,7 @@ class ContextProtocolTests(unittest.TestCase):
                             self.assertIsNone(process.poll())
                             self.assertLess(time.monotonic(), deadline)
                             time.sleep(.1)
-                    calls, overflow = [], []
+                    calls, overflow, summaries = [], [], []
 
                     class Provider:
                         def complete(self, payload):
@@ -51,6 +51,8 @@ class ContextProtocolTests(unittest.TestCase):
                             text = json.dumps(payload['messages']).lower()
                             summarizing = ('messages are being evicted' in text
                                            or 'task is to create a detailed summary' in text)
+                            if summarizing:
+                                summaries.append(payload)
                             content = 'The fixture observations are retained.' if summarizing else 'A retained fixture observation. ' * 250
                             return {'id': f'fixture-{len(calls)}', 'model': 'qwen/qwen3.8-flash',
                                 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': content}, 'finish_reason': 'stop'}],
@@ -58,11 +60,16 @@ class ContextProtocolTests(unittest.TestCase):
 
                     class Gateway(ModelGateway):
                         def complete(self, auth, payload):
+                            summarizing = self.is_compaction_request(payload)
+                            before = self.store.get_state('owner_reply_rounds', '0')
                             result = super().complete(auth, payload)
+                            if summarizing:
+                                self_test.assertEqual(self.store.get_state('owner_reply_rounds', '0'), before)
                             if result[0] == 413:
                                 overflow.append(True)
                             return result
 
+                    self_test = self
                     gateway_thread = GatewayThread(make_server(Gateway(Provider(), store, 'fixture-token'), port=0))
                     gateway_thread.start()
                     client.request({'type': 'connect_provider', 'target': 'local', 'provider_id': 'openai-compatible',
@@ -79,6 +86,10 @@ class ContextProtocolTests(unittest.TestCase):
                         reply, _ = agent.reply([{'role': 'user', 'content': f'Continue fixture observation {number}.'}])
                         self.assertTrue(reply)
                     self.assertTrue(overflow, 'fixture must actually hit the gateway context limit')
+                    self.assertTrue(summaries, 'fixture must actually compact the saved conversation')
+                    for payload in summaries:
+                        self.assertNotIn('tool_choice', payload)
+                        self.assertFalse(any('This is an owner reply' in str(row.get('content', '')) for row in payload['messages']))
                     for payload in calls:
                         self.assertLessEqual(len(json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode()), 64000)
                 finally:

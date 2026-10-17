@@ -379,6 +379,51 @@ class ModelGatewayTests(unittest.TestCase):
         self.assertEqual(self.gateway.complete('Bearer gateway-test-token', payload)[0], 200)
         self.assertEqual(self.provider.calls[-1]['tool_choice'], 'auto')
 
+    def test_compaction_does_not_consume_reply_rounds_or_receive_answer_instruction(self):
+        self.store.set_state('model_turn_origin', 'owner')
+        self.store.set_state('owner_reply_rounds', '3')
+        for prefix in ('Your task is to create a detailed summary of the conversation so far,',
+                       'The following messages are being evicted from the BEGINNING of your context window.'):
+            payload = {'model': self.gateway.model_id, 'stream': True,
+                'messages': [{'role': 'system', 'content': prefix + ' Fixture instructions.'},
+                             {'role': 'user', 'content': 'Fixture transcript.'}]}
+            self.assertEqual(self.gateway.complete('Bearer gateway-test-token', payload)[0], 200)
+            sent = self.provider.calls[-1]
+            self.assertNotIn('tool_choice', sent)
+            self.assertFalse(any('This is an owner reply' in str(row.get('content', '')) for row in sent['messages']))
+            self.assertEqual(self.store.get_state('owner_reply_rounds'), '3')
+
+    def test_text_only_reply_removes_tool_definitions_before_context_check(self):
+        self.store.set_state('model_turn_origin', 'owner')
+        self.store.set_state('owner_reply_rounds', '3')
+        payload = {'model': self.gateway.model_id, 'stream': True,
+            'messages': [{'role': 'user', 'content': 'Answer the question.'}],
+            'tools': [{'description': 'large fixture tool schema ' * 4000}],
+            'parallel_tool_calls': False, 'provider': {'only': ['fixture']}}
+        self.assertEqual(self.gateway.complete('Bearer gateway-test-token', payload)[0], 200)
+        sent = self.provider.calls[-1]
+        self.assertNotIn('tools', sent)
+        self.assertNotIn('parallel_tool_calls', sent)
+        self.assertEqual(sent['tool_choice'], 'none')
+        self.assertEqual(sent['provider'], {'only': ['fixture'], 'require_parameters': True})
+        self.assertNotIn('max_tokens', sent)
+
+    def test_ignored_text_only_policy_settles_billing_but_blocks_tool_execution(self):
+        self.store.set_state('model_turn_origin', 'owner')
+        self.store.set_state('owner_reply_rounds', '3')
+        self.provider.response = {'choices': [{'message': {'role': 'assistant', 'content': None,
+            'tool_calls': [{'id': 'forbidden', 'type': 'function',
+                'function': {'name': 'python.run', 'arguments': '{"code":"print(1)"}'}}]}, 'finish_reason': 'tool_calls'}],
+            'usage': {'prompt_tokens': 10, 'completion_tokens': 20, 'cost': .001}}
+        status, result = self.gateway.complete('Bearer gateway-test-token', {
+            'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'Answer.'}]})
+        self.assertEqual(status, 422)
+        self.assertEqual(result['error']['code'], 'owner_reply_tools_disallowed')
+        self.assertNotIn('choices', result)
+        self.assertEqual(len(self.provider.calls), 1)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

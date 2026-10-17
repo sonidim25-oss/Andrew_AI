@@ -17,6 +17,43 @@ from andrewbot.store import Store
 
 
 class AppServerWebSocketTests(unittest.TestCase):
+    def test_terminal_error_keeps_safe_category_source_and_stop_reason(self):
+        for error, category in (
+                ('context window exceeded: private fixture text', 'context_compaction_failed'),
+                ('owner_reply_tools_disallowed: private fixture text', 'owner_reply_tools_disallowed'),
+                ('unrecognized private fixture text', 'turn_failed')):
+            with self.subTest(category=category):
+                client = AppServerClient.__new__(AppServerClient)
+                class Connection:
+                    def send_json(self, _value):
+                        pass
+                    def recv_json(self):
+                        return {'type': 'turn_finished', 'stop_reason': 'error', 'error': error}
+                client.connection = Connection()
+                with self.assertRaises(LettaTurnError) as caught:
+                    client.send_user_turn({'agent_id': 'a', 'conversation_id': 'c'}, 'hello')
+                self.assertEqual(caught.exception.safe_category, category)
+                self.assertEqual(caught.exception.safe_source, 'turn_finished')
+                self.assertEqual(caught.exception.safe_stop_reason, 'error')
+                self.assertNotIn('private fixture text', str(caught.exception))
+
+    def test_recovered_context_notice_does_not_fail_a_completed_reply(self):
+        client = AppServerClient.__new__(AppServerClient)
+        class Connection:
+            def __init__(self):
+                self.events = [
+                    {'type': 'stream_delta', 'delta': {'message_type': 'loop_error',
+                        'message': 'context window exceeded; recovering', 'is_terminal': False}},
+                    {'type': 'stream_delta', 'delta': {'message_type': 'assistant_message', 'id': 'fresh'}},
+                    {'type': 'turn_finished', 'stop_reason': 'end_turn'}]
+            def send_json(self, _value):
+                pass
+            def recv_json(self):
+                return self.events.pop(0)
+        client.connection = Connection()
+        client.request = lambda *_args: {'messages': [{'message_type': 'assistant_message', 'id': 'fresh', 'content': 'Recovered.'}]}
+        self.assertEqual(client.send_user_turn({'agent_id': 'a', 'conversation_id': 'c'}, 'hello'), 'Recovered.')
+
     def test_owner_reply_has_no_total_deadline_and_explicit_deadline_is_preserved(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as directory:

@@ -13,9 +13,22 @@ def message_metadata(message):
     """Describe response structure without exposing text, reasoning, or tool arguments."""
     allowed_types = {"user_message", "assistant_message", "reasoning_message", "tool_call_message",
                      "tool_return_message", "system_message", "error_message", "loop_error",
-                     "approval_request_message", "approval_response_message"}
+                     "approval_request_message", "approval_response_message", "stop_reason", "usage_statistics",
+                     "summary_message", "reasoning_summary_message"}
     kind = message.get("message_type")
     result = {"message_type": kind if kind in allowed_types else "other"}
+    reason = message.get('stop_reason')
+    if reason is not None:
+        result['stop_reason'] = reason if reason in {
+            'end_turn', 'error', 'error_retry_exhausted', 'max_steps', 'max_tokens_exceeded',
+            'context_window_overflow_in_system_prompt', 'no_tool_call', 'tool_rule', 'requires_approval', 'cancelled'
+        } else 'other'
+    if kind in {'loop_error', 'error_message'} or reason in {'error', 'error_retry_exhausted'}:
+        # Reduce saved errors to an existing fixed vocabulary; never print raw
+        # errors, which can contain credentials, request bodies or chat content.
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'prototype'))
+        from andrewbot.appserver import _safe_error_category
+        result['error_category'] = _safe_error_category(message)
     try:
         result["created_at"] = datetime.fromisoformat(message.get("date") or message.get("created_at", "")).isoformat()
     except (ValueError, TypeError):
@@ -83,6 +96,7 @@ def main():
     parser.add_argument("--database", default="/var/lib/andrew/control/controller.sqlite3")
     parser.add_argument("--letta-metadata", action="store_true", help="Read saved Letta message structure; no content is printed")
     parser.add_argument("--current", action="store_true", help="Inspect the latest cycle and current queues, even without a failure")
+    parser.add_argument("--brief", action="store_true", help="Show current state, recent events and saved message metadata with usage totals")
     args = parser.parse_args()
     if args.session != 'latest' and not re.fullmatch(r"[0-9a-f]{12,32}", args.session):
         parser.error("session must be 12 to 32 lowercase hexadecimal characters")
@@ -143,6 +157,8 @@ def main():
             report["events"] = rows("SELECT id,created_at,event FROM activity "
                 "WHERE datetime(created_at) BETWEEN datetime(?, '-5 minutes') AND datetime(?, '+5 minutes') "
                 "AND (event LIKE 'Autonomous %' OR event LIKE 'Letta model gateway %' "
+                "OR event LIKE 'Letta turn failed %' "
+                "OR event='Owner reply provider returned tool calls despite text-only mode; execution blocked' "
                 "OR event='Owner message outcome uncertain; held to avoid duplicate delivery' "
                 "OR event='Andrew replied to the owner' "
                 "OR event='Owner reply: requesting a text answer after tool work' "
@@ -157,6 +173,14 @@ def main():
                     report["letta_metadata"] = letta_metadata(db, start, end)
                 except Exception:
                     report["letta_metadata"] = {"status": "metadata_read_failed"}
+        if args.brief:
+            usage = report.get('usage', [])
+            report = {key: report[key] for key in ('integrity', 'lifecycle', 'letta_metadata') if key in report} | {
+                'recent_owner_messages': report['recent_owner_messages'][:3],
+                'events': report.get('events', [])[-12:],
+                'usage_summary': {'settled_requests': len(usage), 'last_request': usage[-1] if usage else None},
+                'unsettled_reservations': len(report.get('reservations', [])),
+            }
         print(json.dumps(report, indent=2))
 
 

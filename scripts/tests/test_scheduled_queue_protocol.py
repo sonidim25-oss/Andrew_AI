@@ -26,8 +26,11 @@ class ScheduledQueueProtocolTests(unittest.TestCase):
     def test_owner_tool_loop_returns_text_and_sleep_queue_clears_after_reply(self):
         self.exercise(True)
 
+    def test_provider_ignoring_text_only_mode_cannot_execute_a_fourth_tool(self):
+        self.exercise(True, ignore_restriction=True)
+
     @patch('andrewbot.appserver.gmail_permissions', return_value={'enabled': False})
-    def exercise(self, force_answer, _permissions):
+    def exercise(self, force_answer, _permissions, ignore_restriction=False):
         # Set to 43 for three real requests spanning the former 120-second limit.
         delay = float(os.environ.get('ANDREW_QUEUE_STEP_DELAY', '0'))
         with tempfile.TemporaryDirectory(prefix='andrew-queue-protocol-') as directory:
@@ -45,7 +48,7 @@ class ScheduledQueueProtocolTests(unittest.TestCase):
                 def complete(self, payload):
                     calls.append(payload)
                     time.sleep(delay)
-                    if (force_answer and payload.get('tool_choice') != 'none') or (not force_answer and len(calls) <= 2):
+                    if (force_answer and (payload.get('tool_choice') != 'none' or ignore_restriction)) or (not force_answer and len(calls) <= 2):
                         name = ('check_budget', 'recent_activity')[(len(calls) - 1) % 2]
                         message = {'role': 'assistant', 'content': None, 'tool_calls': [
                             {'id': f'fixture-{len(calls)}', 'type': 'function',
@@ -105,6 +108,15 @@ class ScheduledQueueProtocolTests(unittest.TestCase):
                     worker.start()
                     worker.join(170)
                     self.assertFalse(worker.is_alive(), 'saved work did not finish within fixture watchdog')
+                    if ignore_restriction:
+                        self.assertEqual(len(calls), 4)
+                        self.assertEqual(tool_names, ['check_budget', 'recent_activity', 'check_budget'])
+                        self.assertEqual(store.get_state('autonomy_error'), 'owner_reply_tools_disallowed')
+                        self.assertIn('owner_reply_tools_disallowed', replies[0])
+                        self.assertEqual(store.uncertain_message_count(17), 1)
+                        self.assertEqual(store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 4)
+                        self.assertEqual(store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
+                        return
                     self.assertEqual(replies, ['Saved work completed.'])
                     expected = 4 if force_answer else 3
                     self.assertEqual(tool_names, ['check_budget', 'recent_activity', 'check_budget'] if force_answer else ['check_budget', 'recent_activity'])

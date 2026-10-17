@@ -49,6 +49,33 @@ and skill source before rerunning core and pinned-protocol checks on the complet
 merged package. `scripts/export-deployment-source.py` exports only those source
 files, excluding controller databases, credentials and messages.
 
+The 19:14:50 owner failure ended after a saved conversation summary, with 16
+accounted provider requests in the reply and no unsettled reservations. The
+terminal error detail was not retained, so its exact cause cannot be recovered
+from those records. The earlier reply policy also affected SDK summarization
+requests and trusted the remote `tool_choice` setting while still supplying tools.
+
+Compaction is now identified using the pinned local SDK's two exact system-prompt
+prefixes, tool-free two-message request shape, and user transcript. It does not
+receive owner-answer instructions or consume owner-reply rounds. A long-history
+protocol test exercises real compaction and checks both properties. Transport
+streaming is not used as the classifier: the SDK streams its summarization calls.
+
+The final owner-answer request removes tool/function schemas before the context
+size check, requests no tools, and requires provider support for requested
+parameters. If the provider nevertheless returns tool calls, billing is settled
+and a non-retryable policy error blocks those actions before they reach Letta.
+The regression deliberately ignores the text-only request and proves that only
+the preceding three tool rounds execute, with no automatic replay.
+
+Recoverable nonterminal context notices do not fail an otherwise completed reply.
+Terminal errors retain fixed categories, event source and stop reason in the
+activity ledger and journal, excluding raw errors and conversation content.
+`diagnose-session.py --current --letta-metadata --brief` reports these diagnostics
+without model calls. Published upgrade ancestors can also be selected for exact,
+reviewed deployed file hashes; independent research guidance remains on the live
+side of the merge. Unrecognized hashes do not receive this exception.
+
 Agent model settings clear the former output-token setting. The gateway removes
 both `max_tokens` and `max_completion_tokens`, including values supplied by the
 runtime. The direct provider reply path also omits its old 512-token cap. Provider

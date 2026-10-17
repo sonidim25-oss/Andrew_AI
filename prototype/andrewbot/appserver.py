@@ -36,10 +36,15 @@ class LettaCommandError(RuntimeError):
 
 
 class LettaTurnError(RuntimeError):
-    CATEGORIES = frozenset({"output_token_limit", "turn_failed", "missing_assistant_text", "active_run_conflict", "provider_attempt_uncertain"})
+    CATEGORIES = frozenset({"output_token_limit", "turn_failed", "missing_assistant_text", "active_run_conflict", "provider_attempt_uncertain", "owner_reply_tools_disallowed", "context_compaction_failed"})
 
-    def __init__(self, category):
+    def __init__(self, category, source='unknown', stop_reason=None):
         self.safe_category = category if category in self.CATEGORIES else "turn_failed"
+        self.safe_source = source if source in {'input_rejected', 'stream_error', 'turn_finished', 'protocol_error'} else 'unknown'
+        self.safe_stop_reason = stop_reason if stop_reason in {
+            'end_turn', 'error', 'error_retry_exhausted', 'max_steps', 'max_tokens_exceeded',
+            'context_window_overflow_in_system_prompt', 'no_tool_call', 'tool_rule', 'requires_approval', 'cancelled'
+        } else 'unavailable'
         message = ("Letta completed the turn without an assistant text response"
                    if self.safe_category == "missing_assistant_text" else "Letta agent turn failed")
         super().__init__(f"{message} ({self.safe_category})")
@@ -392,11 +397,23 @@ class AppServerClient:
         active_run_conflict = False
         provider_uncertain = False
         owner_pending = False
+        tools_disallowed = False
+        compaction_error = False
+        failure_source = 'unknown'
+        final_stop_reason = None
         output_limit = False
         assistant_message_ids = set()
         early_reply = None
         abort_request_id = None
         input_accepted = not getattr(self, 'require_input_ack', False)
+        def classify_error(value):
+            nonlocal provider_uncertain, owner_pending, tools_disallowed, compaction_error
+            text = json.dumps(value).lower()
+            provider_uncertain |= 'provider_attempt_uncertain' in text
+            owner_pending |= 'owner_input_pending' in text
+            tools_disallowed |= 'owner_reply_tools_disallowed' in text
+            compaction_error |= any(marker in text for marker in (
+                'context window', 'context_length_exceeded', 'compaction failed', 'failed to compact'))
         while deadline is None or time.monotonic() < deadline:
             self.connection.deadline = deadline
             event = self.connection.recv_json()
@@ -404,7 +421,7 @@ class AppServerClient:
                 continue
             if event.get('type') == 'input_accepted' and event.get('request_id') == input_request_id:
                 if not event.get('accepted'):
-                    raise LettaTurnError('turn_failed')
+                    raise LettaTurnError('turn_failed', source='input_rejected')
                 input_accepted = True
                 continue
             if not input_accepted:
@@ -419,20 +436,22 @@ class AppServerClient:
                 if delta.get("stop_reason") == "max_tokens_exceeded":
                     output_limit = True
                 if delta.get("message_type") in {"loop_error", "error_message"}:
-                    failure = True
-                    if 'provider_attempt_uncertain' in json.dumps(delta):
-                        provider_uncertain = True
-                    if 'owner_input_pending' in json.dumps(delta):
-                        owner_pending = True
+                    classify_error(delta)
+                    if delta.get('is_terminal') is not False:
+                        failure = True
+                        failure_source = 'stream_error'
                 if delta.get("message_type") == "assistant_message" and delta.get("id"):
                     assistant_message_ids.add(delta["id"])
                 # A model-step stop (including requires_approval) precedes
                 # controller callbacks. Only turn_finished ends the whole turn.
             if event.get("type") == "turn_finished":
+                final_stop_reason = event.get('stop_reason')
                 if event.get("stop_reason") == "max_tokens_exceeded":
                     output_limit = True
                 if event.get("stop_reason") in {"error", "error_retry_exhausted"} or event.get("error"):
                     failure = True
+                    failure_source = 'turn_finished'
+                    classify_error(event.get('error', ''))
                 if early_reply is not None:
                     return early_reply
                 if event.get('stop_reason') == 'cancelled':
@@ -469,11 +488,17 @@ class AppServerClient:
                 if early_reply is not None:
                     return early_reply
                 failure = True
+                failure_source = 'protocol_error'
+                classify_error(event)
                 break
         else:
             raise TimeoutError("Letta agent turn timed out")
         if owner_pending and not provider_uncertain:
             raise LettaTurnYielded('Owner input is waiting')
+        if tools_disallowed:
+            raise LettaTurnError('owner_reply_tools_disallowed', failure_source, final_stop_reason)
+        if compaction_error and failure and not provider_uncertain:
+            raise LettaTurnError('context_compaction_failed', failure_source, final_stop_reason)
         if output_limit:
             raise LettaTurnError("output_token_limit")
         if provider_uncertain:
@@ -481,7 +506,7 @@ class AppServerClient:
         if active_run_conflict:
             raise LettaTurnError('active_run_conflict')
         if failure:
-            raise LettaTurnError("turn_failed")
+            raise LettaTurnError("turn_failed", failure_source, final_stop_reason)
         response = self.request({
             "type": "conversation_messages_list", "conversation_id": runtime["conversation_id"],
             "query": {"limit": 12, "order": "desc"},
@@ -754,7 +779,15 @@ class LettaAgent:
                 raise LettaTurnCancelled('Owner cancelled this turn')
             self._verify_founding_letter(client)
             return reply, {"accounted_by_gateway": True}
-        except Exception:
+        except Exception as error:
+            if isinstance(error, LettaTurnError):
+                event = (f'Letta turn failed (category={error.safe_category}, source={error.safe_source}, '
+                         f'stop_reason={error.safe_stop_reason})')
+                logging.warning('%s', event)
+                try:
+                    self.store.add_activity(event)
+                except Exception:
+                    logging.error('Could not persist Letta turn failure diagnostic')
             # Disconnecting alone can leave the local backend run active even
             # after the listener reports idle. Cancel before losing its lease.
             if not cancelled.is_set() and client is not None and self._active_runtime is not None:

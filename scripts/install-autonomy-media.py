@@ -15,7 +15,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = 'd325230'
-UPGRADE_BASES = ('5127ce2', '45ab856', 'eb80f5f', '1f60d34', '9e5d3df', 'b0a3439', '40418d9')
+UPGRADE_BASES = ('8f3dc4d', '6d91b06', '0959c63', '5127ce2', '45ab856', 'eb80f5f', '1f60d34', '9e5d3df', 'b0a3439', '40418d9')
 TARGET = Path('/opt/andrew/prototype/andrewbot')
 DROPIN = Path('/etc/systemd/system/andrew-control.service.d/zz-autonomy-media.conf')
 MODULES = ('configuration.py', 'appserver.py', 'budget.py', 'controller.py', 'gateway.py', 'lifecycle_policy.py',
@@ -204,11 +204,19 @@ def prepare(backup):
             raise ValueError('Symlink in deployed module: ' + name)
         live = path.read_bytes()
         base = subprocess.check_output(['git', '-C', str(ROOT), 'show', BASE + ':prototype/andrewbot/' + name])
-        for revision in UPGRADE_BASES:
-            previous = subprocess.check_output(['git', '-C', str(ROOT), 'show', revision + ':prototype/andrewbot/' + name])
-            if live == previous:
-                base = previous
-                break
+        reviewed = tested.get('deployed_upgrade_bases', {}).get(name, {}).get(hashlib.sha256(live).hexdigest())
+        if reviewed:
+            if reviewed not in UPGRADE_BASES:
+                raise ValueError('Unrecognized reviewed deployment base for ' + name)
+            # The exact deployed hash was reviewed against this release. Its
+            # independent live-only changes stay on the live side of the merge.
+            base = subprocess.check_output(['git', '-C', str(ROOT), 'show', reviewed + ':prototype/andrewbot/' + name])
+        else:
+            for revision in UPGRADE_BASES:
+                previous = subprocess.check_output(['git', '-C', str(ROOT), 'show', revision + ':prototype/andrewbot/' + name])
+                if live == previous:
+                    base = previous
+                    break
         proposed = (ROOT / 'prototype/andrewbot' / name).read_bytes()
         if hashlib.sha256(proposed).hexdigest() != tested['modules'][name]:
             raise ValueError('Proposed source changed since testing: ' + name)

@@ -71,6 +71,19 @@ class ModelGateway:
         self._budget_lock = threading.Lock()
 
     @staticmethod
+    def is_compaction_request(payload):
+        # Exact prompt prefixes from the pinned SDK's local summarizer. It uses
+        # the streaming transport too; stream=False is not a reliable signal.
+        messages = payload.get('messages')
+        return (not payload.get('tools') and isinstance(messages, list) and len(messages) == 2
+                and isinstance(messages[0], dict) and messages[0].get('role') in {'system', 'developer'}
+                and isinstance(messages[0].get('content'), str)
+                and messages[0]['content'].startswith((
+                    'Your task is to create a detailed summary of the conversation so far,',
+                    'The following messages are being evicted from the BEGINNING of your context window.'))
+                and isinstance(messages[1], dict) and messages[1].get('role') == 'user')
+
+    @staticmethod
     def uncertain_response():
         # 422 is deliberately non-retryable in the pinned provider SDK. A 5xx
         # would resend an already-dispatched, potentially billable request.
@@ -111,7 +124,8 @@ class ModelGateway:
             return 400, {"error": {"message": "messages are required", "type": "invalid_request_error"}}
         outbound = dict(payload)
         outbound["messages"] = [dict(message) if isinstance(message, dict) else message for message in messages]
-        owner_reply = self.store.get_state('model_turn_origin', '') == 'owner'
+        maintenance = self.is_compaction_request(payload)
+        owner_reply = self.store.get_state('model_turn_origin', '') == 'owner' and not maintenance
         reply_rounds = int(self.store.get_state('owner_reply_rounds', '0') or '0') if owner_reply else 0
         if owner_reply:
             answer_now = reply_rounds >= 3
@@ -124,7 +138,12 @@ class ModelGateway:
             )
             outbound['messages'].insert(0, {'role': 'system', 'content': instruction})
             if answer_now:
+                outbound.pop('tools', None)
+                outbound.pop('functions', None)
+                outbound.pop('function_call', None)
+                outbound.pop('parallel_tool_calls', None)
                 outbound['tool_choice'] = 'none'
+                outbound['provider'] = {**(outbound.get('provider') or {}), 'require_parameters': True}
                 if reply_rounds == 3:
                     self.store.add_activity('Owner reply: requesting a text answer after tool work')
         now = datetime.now(timezone.utc)
@@ -257,6 +276,14 @@ class ModelGateway:
                 self.store.add_activity(event)
             except Exception:
                 logging.error("Could not persist model output token limit diagnostic")
+        if owner_reply and answer_now and any(choice['message'].get('tool_calls') for choice in result['choices']):
+            # Billing is settled, but these proposed actions must never reach
+            # the SDK/controller. Do not retry the paid response automatically.
+            event = 'Owner reply provider returned tool calls despite text-only mode; execution blocked'
+            self.store.add_activity(event)
+            logging.warning('%s', event)
+            return 422, {'error': {'message': 'owner_reply_tools_disallowed: provider violated text-only reply mode',
+                                  'type': 'invalid_request_error', 'code': 'owner_reply_tools_disallowed'}}
         return 200, result
 
 
