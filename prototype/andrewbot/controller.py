@@ -7,7 +7,7 @@ from .configuration import OUTPUT_TOKEN_COST_ESTIMATE, ModelConfig, load_model_c
 from .diary import format_diary_entry, parse_diary_command, validate_diary_content
 from .telegram_menu import BUTTON_COMMANDS, HELP_TEXT
 from .appserver import AppServerClient, LettaTurnError, LettaTurnCancelled
-from .memory import ResearchJournal, validate_memory_text
+from .memory import ResearchJournal, SessionHistory, validate_memory_text
 from .gmail_tools import GMAIL_TOOL_NAMES
 from .media import MEDIA_TOOL_NAMES, MEDIA_AUTHORIZATION
 from .skills import SkillCatalog, SKILL_TOOL_NAMES
@@ -348,7 +348,7 @@ class Controller:
                 kind = "personality" if name == "memory_propose_personality_edit" else "experience"
                 self.memory_service.reject_edit_attempt(kind)
             raise ValueError("tool arguments must be an object")
-        read_tools = {"check_budget", "recent_activity", "memory_search", "gmail.status", "media.status", "media.get", "skills.list", "skills.load", 'research.list', 'research.get', 'research.observations'}
+        read_tools = {"check_budget", "recent_activity", "memory_search", "session_search", "session_read", "gmail.status", "media.status", "media.get", "skills.list", "skills.load", 'research.list', 'research.get', 'research.observations'}
         if self.store.get_state("paused", "0") == "1" and name not in read_tools:
             raise ValueError("owner pause can only be cleared by the owner with /wake")
         if self.store.get_state("sleeping", "0") == "1" and name not in read_tools:
@@ -358,6 +358,8 @@ class Controller:
             raise ValueError("save today's diary before requesting autonomous sleep")
         if name in SKILL_TOOL_NAMES:
             return json.dumps(self.skill_catalog.execute(name, arguments), ensure_ascii=False)
+        if name in {'session_search', 'session_read'}:
+            return json.dumps(SessionHistory(self.store, self.owner_id).execute(name, arguments), ensure_ascii=False)
         if name in {'media.status', 'media.get', 'voice.generate', 'image.generate', 'image.edit', 'profile.propose_avatar'}:
             if self.media is None:
                 raise ValueError('Media unavailable')

@@ -433,6 +433,7 @@ class AppServerWebSocketTests(unittest.TestCase):
         self.assertEqual(set(client.connection.sent[0]["payload"]["client_tool_allowlist"]), {
             "sleep", "wake_at", "continue_activity", "check_budget", "recent_activity", "save_diary_entry",
             "memory_search", "memory_add_experience", "memory_propose_personality_edit",
+            "session_search", "session_read",
             "research.list", "research.get", "research.save", "research.focus", "research.delete", "research.observations",
             "skills.list", "skills.load",
         })
@@ -516,6 +517,7 @@ class AppServerWebSocketTests(unittest.TestCase):
         self.assertEqual(set(names), {
             "sleep", "wake_at", "continue_activity", "check_budget", "recent_activity", "save_diary_entry",
             "memory_search", "memory_add_experience", "memory_propose_personality_edit",
+            "session_search", "session_read",
             "research.list", "research.get", "research.save", "research.focus", "research.delete", "research.observations",
             "skills.list", "skills.load",
         })

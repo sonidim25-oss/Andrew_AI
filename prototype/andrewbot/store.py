@@ -40,6 +40,38 @@ class Store:
             );
             CREATE INDEX IF NOT EXISTS messages_owner_id ON messages(owner_id, id);
             CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS session_history (
+                id INTEGER PRIMARY KEY,
+                source_key TEXT NOT NULL UNIQUE,
+                owner_id INTEGER NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('user','assistant','tool')),
+                source TEXT NOT NULL CHECK(source IN ('controller','letta')),
+                session_id TEXT NOT NULL,
+                cycle_id TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                source_message_id TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                content_sha256 TEXT NOT NULL,
+                redacted INTEGER NOT NULL,
+                complete INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS session_history_owner ON session_history(owner_id,session_id,id);
+            CREATE VIRTUAL TABLE IF NOT EXISTS session_history_fts USING fts5(
+                content, content='session_history', content_rowid='id', tokenize='unicode61'
+            );
+            CREATE TRIGGER IF NOT EXISTS session_history_insert AFTER INSERT ON session_history BEGIN
+                INSERT INTO session_history_fts(rowid,content) VALUES(new.id,new.content);
+            END;
+            CREATE TRIGGER IF NOT EXISTS session_history_update AFTER UPDATE OF content ON session_history BEGIN
+                INSERT INTO session_history_fts(session_history_fts,rowid,content) VALUES('delete',old.id,old.content);
+                INSERT INTO session_history_fts(rowid,content) VALUES(new.id,new.content);
+            END;
+            CREATE TRIGGER IF NOT EXISTS session_history_delete AFTER DELETE ON session_history BEGIN
+                INSERT INTO session_history_fts(session_history_fts,rowid,content) VALUES('delete',old.id,old.content);
+            END;
             CREATE TABLE IF NOT EXISTS updates (update_id INTEGER PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS telegram_inbox (
                 update_id INTEGER PRIMARY KEY,
@@ -232,6 +264,7 @@ class Store:
         if 'retry_notice' not in progress_columns:
             self.connection.execute('ALTER TABLE telegram_delivery_progress ADD COLUMN retry_notice INTEGER NOT NULL DEFAULT 0')
         self.connection.commit()
+        self.backfill_session_history()
         try:
             self.path.chmod(0o600)
         except FileNotFoundError:
@@ -404,12 +437,84 @@ class Store:
 
     @database_locked
     def add_message(self, owner_id, role, content, queued=False):
-        cursor = self.connection.execute(
-            "INSERT INTO messages(owner_id, role, content, created_at, queued) VALUES(?,?,?,?,?)",
-            (owner_id, role, content, self.now(), int(queued)),
-        )
-        self.connection.commit()
-        return cursor.lastrowid
+        with self.connection:
+            created_at = self.now()
+            cursor = self.connection.execute(
+                "INSERT INTO messages(owner_id, role, content, created_at, queued) VALUES(?,?,?,?,?)",
+                (owner_id, role, content, created_at, int(queued)),
+            )
+            message_id = cursor.lastrowid
+            if role in {'user', 'assistant'}:
+                self._archive_history('controller:' + str(message_id), owner_id, role, content,
+                    source='controller', source_message_id=str(message_id), created_at=created_at)
+            return message_id
+
+    def _archive_history(self, source_key, owner_id, role, content, *, source='letta', session_id=None,
+                         cycle_id=None, conversation_id='', source_message_id='', tool_name='',
+                         complete=True, created_at=None):
+        from .memory import redact_history_text
+        content, redacted = redact_history_text(content)
+        now = self.now()
+        self.connection.execute('''INSERT INTO session_history
+            (source_key,owner_id,role,source,session_id,cycle_id,conversation_id,source_message_id,
+             tool_name,content,content_sha256,redacted,complete,created_at,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(source_key) DO UPDATE SET
+              content=excluded.content,content_sha256=excluded.content_sha256,redacted=excluded.redacted,
+              complete=excluded.complete,updated_at=excluded.updated_at
+            WHERE session_history.owner_id=excluded.owner_id AND session_history.complete=0''',
+            (source_key, owner_id, role, source,
+             self.get_state('active_session_id', '') if session_id is None else session_id,
+             self.get_state('active_cycle_id', '') if cycle_id is None else cycle_id,
+             conversation_id, source_message_id, tool_name, content,
+             hashlib.sha256(content.encode('utf-8')).hexdigest(), int(redacted), int(complete), created_at or now, now))
+
+    @database_locked
+    def archive_history(self, source_key, owner_id, role, content, **metadata):
+        if type(owner_id) is not int or role not in {'user', 'assistant', 'tool'} or not isinstance(content, str):
+            raise ValueError('invalid history record')
+        with self.connection:
+            self._archive_history(source_key, owner_id, role, content, **metadata)
+
+    @database_locked
+    def backfill_session_history(self):
+        """Index retained controller chat once; do not invent historical session IDs."""
+        after = int(self.get_state('session_history_backfill_message_id', '0'))
+        while True:
+            rows = self.connection.execute('SELECT * FROM messages WHERE id>? ORDER BY id LIMIT 500', (after,)).fetchall()
+            if not rows:
+                return
+            with self.connection:
+                for row in rows:
+                    if row['role'] in {'user', 'assistant'}:
+                        self._archive_history('controller:' + str(row['id']), row['owner_id'], row['role'], row['content'],
+                            source='controller', session_id='', cycle_id='', source_message_id=str(row['id']), created_at=row['created_at'])
+                after = rows[-1]['id']
+                self.connection.execute("INSERT INTO state(key,value) VALUES('session_history_backfill_message_id',?) "
+                                        'ON CONFLICT(key) DO UPDATE SET value=excluded.value', (str(after),))
+
+    @database_locked
+    def search_session_history(self, owner_id, match_query, limit, session_id=None):
+        return [dict(row) for row in self.connection.execute('''
+            SELECT h.id,h.role,h.source,h.session_id,h.cycle_id,h.conversation_id,h.source_message_id,
+                   h.tool_name,h.content_sha256,h.redacted,h.complete,h.created_at,length(replace(h.content,char(0),'?')) AS characters,
+                   snippet(session_history_fts,0,'[',']',' … ',36) AS excerpt
+            FROM session_history_fts JOIN session_history h ON h.id=session_history_fts.rowid
+            WHERE session_history_fts MATCH ? AND h.owner_id=? AND (? IS NULL OR h.session_id=?)
+            ORDER BY bm25(session_history_fts),h.id DESC LIMIT ?''',
+            (match_query, owner_id, session_id, session_id, limit)).fetchall()]
+
+    @database_locked
+    def read_session_history(self, owner_id, record_id, offset, limit):
+        row = self.connection.execute('''SELECT id,role,source,session_id,cycle_id,conversation_id,
+            source_message_id,tool_name,content_sha256,redacted,complete,created_at,content
+            FROM session_history WHERE id=? AND owner_id=?''', (record_id, owner_id)).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result['characters'] = len(result['content'])
+        result['content'] = result['content'][offset:offset + limit]
+        return result
 
     @database_locked
     def recent_messages(self, owner_id, limit=12):

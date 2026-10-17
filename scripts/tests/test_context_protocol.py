@@ -14,6 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'prototype'))
 from andrewbot.appserver import AppServerClient, LettaAgent
 from andrewbot.gateway import GatewayThread, ModelGateway, make_server
 from andrewbot.store import Store
+from andrewbot.memory import SessionHistory
+from andrewbot.controller import Controller
 
 
 @unittest.skipUnless(os.environ.get('ANDREW_LETTA_TEST_BINARY'), 'requires isolated pinned Letta harness')
@@ -44,6 +46,7 @@ class ContextProtocolTests(unittest.TestCase):
                             self.assertLess(time.monotonic(), deadline)
                             time.sleep(.1)
                     calls, overflow, summaries = [], [], []
+                    history_lookup = {'stage': 0}
 
                     class Provider:
                         def complete(self, payload):
@@ -53,7 +56,21 @@ class ContextProtocolTests(unittest.TestCase):
                                            or 'task is to create a detailed summary' in text)
                             if summarizing:
                                 summaries.append(payload)
+                            if history_lookup['stage'] == 1 and not summarizing:
+                                history_lookup['stage'] = 2
+                                return {'id': 'history-tool-fixture', 'choices': [{'index': 0,
+                                    'message': {'role': 'assistant', 'content': None, 'tool_calls': [
+                                        {'id': 'history-search-call', 'type': 'function', 'function': {
+                                            'name': 'session_search', 'arguments': '{"query":"firstfixturechecksum"}'}}]},
+                                    'finish_reason': 'tool_calls'}],
+                                    'usage': {'prompt_tokens': 30, 'completion_tokens': 20, 'cost': .000002}}
+                            if history_lookup['stage'] == 2 and not summarizing:
+                                self_test.assertIn('firstfixturechecksum', json.dumps([
+                                    row for row in payload['messages'] if row.get('role') == 'tool']))
+                                history_lookup['stage'] = 3
                             content = 'The fixture observations are retained.' if summarizing else 'A retained fixture observation. ' * 250
+                            if len(calls) == 1:
+                                content = 'Original capsule evidence has checksum firstfixturechecksum. ' + content
                             return {'id': f'fixture-{len(calls)}', 'model': 'qwen/qwen3.8-flash',
                                 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': content}, 'finish_reason': 'stop'}],
                                 'usage': {'prompt_tokens': max(20, len(json.dumps(payload['messages'])) // 4),
@@ -83,14 +100,39 @@ class ContextProtocolTests(unittest.TestCase):
                     client.close()
                     agent = LettaAgent(store, 'fixture-token', url=f'ws://127.0.0.1:{port}/ws')
                     agent.agent_id = agent_id
-                    for number in range(20):
-                        reply, _ = agent.reply([{'role': 'user', 'content': f'Continue fixture observation {number}.'}])
-                        self.assertTrue(reply)
+                    original_send = AppServerClient.send_user_turn
+                    def capture_send(client, runtime, *args, **kwargs):
+                        client.history_sink = SessionHistory(store, 17, conversation_id=runtime['conversation_id']).capture
+                        return original_send(client, runtime, *args, **kwargs)
+                    with patch.object(AppServerClient, 'send_user_turn', capture_send):
+                        for number in range(20):
+                            reply, _ = agent.reply([{'role': 'user', 'content': f'Continue fixture observation {number}.'}])
+                            self.assertTrue(reply)
                     self.assertFalse(overflow, 'controller must not impose a byte-based context window')
                     self.assertTrue(summaries, 'fixture must actually compact the saved conversation')
                     for payload in summaries:
                         self.assertNotIn('tool_choice', payload)
                         self.assertFalse(any('This is an owner reply' in str(row.get('content', '')) for row in payload['messages']))
+                    client = AppServerClient(f'ws://127.0.0.1:{port}/ws')
+                    try:
+                        current = client.request({'type': 'conversation_messages_list', 'conversation_id': agent.conversation_id,
+                            'query': {'limit': 100, 'order': 'desc'}}, 'conversation_messages_list_response')
+                    finally:
+                        client.close()
+                    self.assertNotIn('firstfixturechecksum', json.dumps(current), 'fixture must evict the original reply')
+                    history = SessionHistory(store, 17)
+                    records = history.execute('session_search', {'query': 'firstfixturechecksum'})['results']
+                    self.assertEqual(len(records), 1)
+                    original = history.execute('session_read', {'id': records[0]['id']})['record']
+                    self.assertIn('Original capsule evidence', original['content'])
+                    self.assertEqual(original['complete'], 1)
+                    self.assertEqual(original['conversation_id'], agent.conversation_id)
+                    controller = Controller(store, agent, 17)
+                    agent.tool_handler = controller.execute_tool
+                    history_lookup['stage'] = 1
+                    reply, _ = agent.reply([{'role': 'user', 'content': 'Search the original capsule evidence.'}])
+                    self.assertTrue(reply)
+                    self.assertEqual(history_lookup['stage'], 3, 'the real runtime must execute session_search')
                 finally:
                     if gateway_thread:
                         gateway_thread.close()
