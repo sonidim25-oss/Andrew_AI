@@ -1,6 +1,6 @@
 # Message latency: proposed implementation design
 
-Status: design approved. P0 timing and independent delivery are installed on production (23:08 and 23:31:49 UTC on 2026-10-16). P1 worker, interactive timeouts and local health are implemented on feature branch fix/message-worker-p1; independent source review is complete and both shutdown findings are fixed. Deployment preparation remains pending. P2 Gmail remains pending.
+Status: design approved. P0 timing and independent delivery were installed on 2026-10-16. P1 worker, interactive Telegram timeouts and local health were installed at 00:13:06 UTC on 2026-10-17 from b792b7b, including the subsequently requested removal of autonomous/code execution deadlines and provider wait120. Independent reviews and server acceptance passed. P2 Gmail remains pending.
 
 ## Intent and constraints
 

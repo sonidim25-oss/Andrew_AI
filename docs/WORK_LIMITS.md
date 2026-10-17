@@ -1,7 +1,7 @@
 # Owner-requested work limits
 
-Source policy requested on 2026-10-17; implemented in `22c80e0` on
-`fix/remove-work-deadlines`. This revision is not installed on production.
+Policy requested on 2026-10-17; implemented in `22c80e0` and installed from
+`b792b7b` at 00:13:06 UTC on 2026-10-17, together with P1 `18c05f7` and `d1660fa`.
 
 | Operation | Source policy |
 | --- | --- |
@@ -38,18 +38,22 @@ whole-turn/socket/runner/inner deadlines, continuing beyond the previous session
 and cycle caps, provider wait120, bounded output, explicit cancellation and
 ownership until cleanup. Independent read-only review found no important defects.
 
-The 59-method script suite has ten source-hash subtest failures in
-`test_checked_in_deployment_manifest_matches_prepared_sources`; the other 58
-methods pass. These are controller/appserver/runner and P1 delivery changes that
-are newer than the installed deployment manifest. The installer remains fail-closed.
+The initial source-only deployment-manifest mismatches were resolved during
+owner-authorized installation preparation. All 69 script tests passed, including
+37 installer tests and four image/config tests. Independent deployment review
+found no important defects.
 
-Installing this source requires a worker image rebuilt with the new
-`runtime/worker_entry.py`, deployment of `runner_service.py`, `process_limits.py`
-and `runner_client.py` in the runtime-service package, and all changed controller
-modules including the P1 `workers.py` dependency. Update image/config/manifest
-bindings and rollback coverage, then rerun sandbox and isolated protocol acceptance
-before renewing the runtime proof. The prior image release record is retained;
-its old worker code must not be represented as containing this change.
+The installed image is rebuilt with the new `runtime/worker_entry.py`, all three
+runtime-service dependencies match source, and all 18 controller modules including
+P1 `workers.py` match their tested manifest hashes. Server acceptance passed and
+the runtime proof validates the new image/config/package bindings. Installation
+backup and evidence: `/var/backups/andrew-incident-fiu2jy4q`.
+
+All 30 pre-existing database tables were compared with the stopped-controller
+snapshot; every existing row is unchanged. The only new table is empty
+`diary_delivery_claims`. Four messages remain held, and spending is unchanged at
+84 usage rows totaling USD 0.12036761. Lifecycle/conversation IDs are unchanged;
+installation did not wake Andrew or replay anything.
 
 The runtime acceptance probe now expects a controlled 130-second code job to
 finish successfully across the former 120-second boundary. The acceptance client

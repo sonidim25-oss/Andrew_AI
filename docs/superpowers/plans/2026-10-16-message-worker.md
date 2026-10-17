@@ -85,20 +85,20 @@
 - [x] Run script tests with the existing Letta test binary. New/changed source hashes may require separate reviewed deployment-manifest preparation; record expected manifest mismatches precisely, never describe that suite as passing if it fails.
 - [x] Obtain one fresh-context whole-change review under executing-plans; fix important findings with reproducing tests, rerun affected and full core suites.
 - [x] Update `plan.md` and the design status with source-only completion and actual test results. Record remaining production preparation, including manifest coverage for `workers.py`, restored-file behavior and fail-closed rollback after attempted startup.
-- [ ] Commit/push/deploy only under the applicable existing user authorization; do not resume Andrew or replay held messages as part of verification.
+- [x] Commit/push/deploy only under the applicable existing user authorization; do not resume Andrew or replay held messages as part of verification.
 
 ## Self-review
 
 The worker, timeout and health tasks cover every requirement of the approved third increment. Diary concurrency and shutdown are explicit work rather than incidental cleanup. Existing Store and session admission/revision checks remain authoritative; tests must pin their behavior before moving execution threads. Production diagnostics remain read-only, and the source plan introduces no new paid requests or replay authority.
 
-Status: owner approved; Tasks 1–4 implemented in `18c05f7`, independently reviewed, and both shutdown findings fixed in the subsequent commit. Source work complete; deployment preparation remains outstanding.
+Status: owner approved; Tasks 1–4 implemented in `18c05f7`, independently reviewed, and both shutdown findings fixed in the subsequent commit. Source work complete; subsequent owner-authorized deployment completed at 00:13:06 UTC on 2026-10-17 (evidence below).
 
-Verification: 305 core tests, 303 passed and 2 optional skipped. The 59-method
+Verification at the source-only stage: 305 core tests, 303 passed and 2 optional skipped. The 59-method
 script suite has seven source-hash subtest failures in
 `test_checked_in_deployment_manifest_matches_prepared_sources` (controller,
 diary, dispatch, main, store, telegram, telegram_menu); the other 58 methods pass.
-The installed P0 manifest is unchanged and does not yet admit `workers.py`.
-Production installation preparation is outstanding; no deployment was attempted.
+At that stage the installed P0 manifest did not admit `workers.py`; deployment
+was prepared and completed subsequently, as recorded below.
 
 Execution decisions: worked on feature branch `fix/message-worker-p1` in the
 existing checkout to preserve user-visible paths and uncommitted plan documents;
@@ -117,3 +117,13 @@ were rerun after fixes (303 passed, 2 optional skipped); the script suite still 
 only the seven documented manifest mismatches. No other review findings or deferred
 minors. An additional integration test verifies chat, queued work and autonomy all
 use one worker thread with maximum model concurrency one.
+
+
+Owner subsequently authorized combined push and deployment. P1 and the newer
+owner-requested work-limit policy were installed from `b792b7b` at 00:13:06 UTC
+on 2026-10-17. Preparation: all 69 script tests passed, 317 core tests with two
+optional skips; independent deployment review had no important findings. Server
+acceptance passed including real execution past 120 seconds. All 18 installed
+controller hashes and runtime dependency/image/proof bindings match; all 30
+existing database tables retain identical rows. No wake or replay was performed.
+Evidence: `/var/backups/andrew-incident-fiu2jy4q`.

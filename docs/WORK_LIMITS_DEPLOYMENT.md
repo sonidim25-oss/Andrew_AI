@@ -49,3 +49,23 @@ exercise unknown-source/image rejection, exact digest prediction, image identity
 checks, asset/dependency rollback, active diary-claim refusal and guarded proof
 renewal. All 69 script tests passed, including 37 installer tests and four image/config
 asset tests. Live deployment evidence will be recorded after installation.
+
+
+## Installation verified
+
+Installed source `b792b7b` after pushing it to origin/main. Controller startup
+completed at 00:13:06 UTC on 2026-10-17. All kernel/network/browser, fake-account,
+per-UID networking and isolated Letta protocol checks passed; the real 130-second
+execution completed successfully. Controller, Letta, runner and browser are
+running with zero automatic restarts, and controller boot startup is enabled.
+All 18 controller hashes, runtime dependencies, image/config/check bindings and
+renewed runtime proof match. Saved Letta output allowance is 6000; provider socket
+wait120 and absent autonomous/worker deadlines are verified in installed code.
+
+Backup `/var/backups/andrew-incident-fiu2jy4q` contains acceptance and startup logs,
+the stopped-controller SQLite snapshot and `deployment-verification.json`.
+All 30 pre-existing tables retain identical rows; only the empty
+`diary_delivery_claims` table was added. Spending remains 84 rows, USD 0.12036761;
+four inputs remain held. Lifecycle/error state and conversation IDs are unchanged.
+No production account operation, paid model call, wake or replay was initiated.
+A new live autonomous turn was not exercised by installation.
