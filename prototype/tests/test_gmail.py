@@ -21,6 +21,7 @@ class GmailReliabilityTests(unittest.TestCase):
         self.policy = {'schema': 1, 'enabled': True, 'read': True,
                        'draft': True, 'send': True, 'delete': True}
         self.api = Mock()
+        self.api.account_fingerprint.return_value = "a" * 64
         self.api.scopes = set(SCOPES.values())
         self.api.request.return_value = {'id': 'fixture-message'}
         self.vault_factory = self.enterContext(patch('andrewbot.gmail_tools.Vault'))

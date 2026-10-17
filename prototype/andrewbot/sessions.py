@@ -52,7 +52,9 @@ class SessionRunner:
                 except (TypeError, ValueError):
                     pass
                 else:
-                    recovered = self.store.recover_confirmed_session(previous)
+                    recovered = (self.store.action_hold_valid(previous)
+                                 or self.store.hold_pending_session_actions(previous)
+                                 or self.store.recover_confirmed_session(previous))
                     if recovered:
                         self.active_session_id = previous
                         self.started_at = started_at
@@ -124,6 +126,9 @@ class SessionRunner:
             # Owner commands can cancel a session and then clear pause in one poll batch.
             self.active_session_id = ""
             self.started_at = None
+        if self.active_session_id and self.store.action_hold_valid(self.active_session_id):
+            if not self.store.release_confirmed_action_hold(self.active_session_id):
+                return False
         blocked = self.store.blocked_session_request()
         if blocked:
             self.stop(blocked)
@@ -189,6 +194,10 @@ class SessionRunner:
                 self.store.set_state('autonomous_owner_id', '')
             if self.store.get_state('active_session_id', '') != session_id:
                 raise LettaTurnCancelled('Owner changed the active session')
+            if self.store.hold_confirmed_actions(session_id, cycle_id):
+                return False
+            if self.store.cycle_uncertain_effects(cycle_id):
+                raise LettaTurnError('action_outcome_uncertain')
             stage = "finish_cycle"
             self.store.finish_cycle(cycle_id, "complete")
             self.store.set_state('session_recovery_checkpoint', '')

@@ -130,6 +130,10 @@ def main():
                 if table == "telegram_outbox" else
                 f"SELECT update_id,received_at FROM {table} ORDER BY update_id DESC LIMIT 15")
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'external_action_receipts' in tables:
+            report['action_recovery'] = rows(
+                'SELECT action_id,adapter,operation,state,session_id,cycle_id,created_at,checked_at '
+                'FROM external_action_receipts ORDER BY created_at DESC LIMIT 20')
         if 'cycle_recovery_checkpoints' in tables:
             report['recovery_checkpoints'] = rows(
                 'SELECT k.*,c.session_id,c.status AS cycle_status FROM cycle_recovery_checkpoints k '
@@ -186,7 +190,7 @@ def main():
         if args.brief:
             usage = report.get('usage', [])
             report = {key: report[key] for key in ('integrity', 'lifecycle', 'letta_metadata', 'recovery_checkpoints',
-                                                  'recovery_tool_attempts') if key in report} | {
+                                                  'recovery_tool_attempts', 'action_recovery') if key in report} | {
                 'recent_owner_messages': report['recent_owner_messages'][:3],
                 'events': report.get('events', [])[-12:],
                 'usage_summary': {'settled_requests': len(usage), 'last_request': usage[-1] if usage else None},

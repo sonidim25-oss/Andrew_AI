@@ -1,6 +1,7 @@
 """Bounded Gmail transport. Tokens stay inside the trusted controller."""
 import json
 import time
+import hashlib
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
@@ -76,6 +77,12 @@ class GmailAPI:
         if remaining <= 0:
             raise GmailError('Gmail operation timed out')
         return min(20, remaining)
+
+    def account_fingerprint(self):
+        # Stable across access-token refresh; a different authorization grant
+        # must never reconcile an old mailbox's action.
+        return hashlib.sha256(json.dumps([self.credentials['client_id'], self.credentials['refresh_token']],
+                                         separators=(',', ':')).encode()).hexdigest()
 
     def access_token(self):
         record = self.credentials

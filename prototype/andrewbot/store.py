@@ -229,6 +229,24 @@ class Store:
                 finished_at TEXT
             );
             CREATE INDEX IF NOT EXISTS cycle_tool_attempts_cycle ON cycle_tool_attempts(cycle_id,outcome);
+            CREATE TABLE IF NOT EXISTS external_action_receipts (
+                action_id TEXT PRIMARY KEY,
+                adapter TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                request_id TEXT NOT NULL,
+                digest TEXT NOT NULL,
+                principal TEXT NOT NULL,
+                lookup TEXT NOT NULL,
+                state TEXT NOT NULL CHECK(state IN ('uncertain','confirmed')),
+                receipt TEXT,
+                attempt_id TEXT REFERENCES cycle_tool_attempts(attempt_id),
+                session_id TEXT NOT NULL,
+                cycle_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                checked_at REAL NOT NULL DEFAULT 0,
+                UNIQUE(adapter,request_id)
+            );
+            CREATE INDEX IF NOT EXISTS external_action_pending ON external_action_receipts(adapter,state,checked_at);
             CREATE TABLE IF NOT EXISTS budget_reservations (
                 reservation_id TEXT PRIMARY KEY,
                 month TEXT NOT NULL,
@@ -938,7 +956,193 @@ class Store:
                 ('returned' if confirmed else 'uncertain', self.now(), attempt_id),
             ).rowcount
             if changed != 1:
+                if self.connection.execute(
+                    "SELECT 1 FROM cycle_tool_attempts t JOIN external_action_receipts r ON r.attempt_id=t.attempt_id "
+                    "WHERE t.attempt_id=? AND t.outcome='returned' AND r.state='confirmed'", (attempt_id,)).fetchone():
+                    return
                 raise ValueError('tool attempt is missing or already settled')
+
+    @database_locked
+    def external_action(self, adapter, request_id):
+        row = self.connection.execute('SELECT * FROM external_action_receipts WHERE adapter=? AND request_id=?',
+                                      (adapter, request_id)).fetchone()
+        return dict(row) if row else None
+
+    @database_locked
+    def pending_external_actions(self, adapter, limit=1):
+        return [dict(row) for row in self.connection.execute(
+            "SELECT * FROM external_action_receipts WHERE adapter=? AND state='uncertain' ORDER BY checked_at,created_at LIMIT ?",
+            (adapter, limit))]
+
+    @database_locked
+    def claim_external_action(self, adapter, operation, request_id, digest, principal, lookup, context):
+        """Commit before dispatch; unknown earlier Gmail mutations block new IDs too."""
+        if adapter != 'gmail' or operation not in {'send', 'draft', 'delete'}:
+            raise ValueError('Unsupported action adapter')
+        with self.connection:
+            if self.external_action(adapter, request_id):
+                return None
+            if self.pending_external_actions(adapter):
+                raise ValueError('An earlier action is uncertain; reconcile it before another mutation')
+            if adapter == 'gmail':
+                for row in self.connection.execute("SELECT value FROM state WHERE key LIKE 'gmail_mutation:%'"):
+                    try:
+                        confirmed = json.loads(row[0]).get('state') == 'confirmed'
+                    except (ValueError, AttributeError):
+                        confirmed = False
+                    if not confirmed:
+                        raise ValueError('An earlier Gmail outcome is uncertain; legacy records require manual inspection')
+            attempt_id, session_id, cycle_id = context or (None, '', '')
+            if attempt_id and not self.connection.execute(
+                    'SELECT 1 FROM cycle_tool_attempts t JOIN cycles c ON c.cycle_id=t.cycle_id '
+                    "WHERE t.attempt_id=? AND t.tool_name=? AND t.outcome='started' AND c.session_id=? AND c.cycle_id=?",
+                    (attempt_id, 'gmail.' + operation, session_id, cycle_id)).fetchone():
+                raise ValueError('Action context does not match tool admission')
+            if cycle_id and not attempt_id:
+                raise ValueError('Action cycle requires a tool admission')
+            action_id = uuid.uuid4().hex
+            self.connection.execute('''INSERT INTO external_action_receipts
+                (action_id,adapter,operation,request_id,digest,principal,lookup,state,attempt_id,session_id,cycle_id,created_at)
+                VALUES(?,?,?,?,?,?,?,'uncertain',?,?,?,?)''',
+                (action_id, adapter, operation, request_id, digest, principal, json.dumps(lookup), attempt_id, session_id, cycle_id, self.now()))
+            self.connection.execute('INSERT INTO state(key,value) VALUES(?,?)',
+                ('gmail_mutation:' + request_id, json.dumps({'digest': digest, 'state': 'uncertain'})))
+            return self.external_action(adapter, request_id)
+
+    @database_locked
+    def confirm_external_action(self, action_id, principal, result, evidence):
+        with self.connection:
+            row = self.connection.execute('SELECT * FROM external_action_receipts WHERE action_id=? AND principal=?',
+                                          (action_id, principal)).fetchone()
+            if row is None:
+                raise ValueError('Action account binding does not match')
+            if (row['adapter'] != 'gmail' or evidence not in {'provider_response', 'gmail_sent_message', 'gmail_draft', 'gmail_trash'}
+                    or set(result) != {'id', 'operation', 'confirmed'} or result['operation'] != row['operation']
+                    or result['confirmed'] is not True or not isinstance(result['id'], str) or not result['id']):
+                raise ValueError('Invalid action receipt')
+            if row['state'] == 'confirmed':
+                return json.loads(row['receipt'])['result']
+            receipt = {'result': result, 'evidence': evidence, 'confirmed_at': self.now()}
+            self.connection.execute("UPDATE external_action_receipts SET state='confirmed',receipt=? WHERE action_id=?",
+                                    (json.dumps(receipt), action_id))
+            self.connection.execute('UPDATE state SET value=? WHERE key=?',
+                (json.dumps({'digest': row['digest'], 'state': 'confirmed', 'result': result}), 'gmail_mutation:' + row['request_id']))
+            if row['attempt_id']:
+                self.connection.execute("UPDATE cycle_tool_attempts SET outcome='returned',finished_at=? "
+                    'WHERE attempt_id=? AND tool_name=?', (self.now(), row['attempt_id'], 'gmail.' + row['operation']))
+            self.connection.execute('INSERT INTO activity(event,created_at) VALUES(?,?)',
+                (f"External action confirmed (adapter={row['adapter']}, operation={row['operation']}, id={action_id}, evidence={evidence})", self.now()))
+            return result
+
+    @database_locked
+    def check_external_action_due(self, action_id, now, interval=60):
+        with self.connection:
+            return self.connection.execute("UPDATE external_action_receipts SET checked_at=? WHERE action_id=? "
+                "AND state='uncertain' AND checked_at<=?", (now, action_id, now - interval)).rowcount == 1
+
+    @database_locked
+    def cycle_uncertain_effects(self, cycle_id):
+        names = ('gmail.send', 'gmail.draft', 'gmail.delete', 'python.run', 'node.run', 'shell.run',
+                 'browser.open', 'browser.control', 'browser.account', 'voice.generate', 'image.generate',
+                 'image.edit', 'profile.propose_avatar')
+        marks = ','.join('?' for _ in names)
+        return bool(self.connection.execute(
+            f"SELECT 1 FROM cycle_tool_attempts WHERE cycle_id=? AND outcome<>'returned' AND tool_name IN ({marks}) LIMIT 1",
+            (cycle_id, *names)).fetchone())
+
+    @database_locked
+    def hold_confirmed_actions(self, session_id, cycle_id):
+        """Hold a completed model turn while its known external actions are checked."""
+        with self.connection:
+            checkpoint = self.connection.execute('SELECT * FROM cycle_recovery_checkpoints WHERE cycle_id=?', (cycle_id,)).fetchone()
+            if (not checkpoint or checkpoint['phase'] != 'model_confirmed'
+                    or checkpoint['owner_revision'] != self.get_state('owner_control_revision', '0')
+                    or self.get_state('active_session_id', '') != session_id
+                    or self.get_state('autonomy_error', '')
+                    or any(self.get_state(key, '0') == '1' for key in ('paused', 'sleeping', 'restore_recovery_required'))):
+                return False
+            if (self.get_state('active_cycle_id', '') != cycle_id
+                    or not self.connection.execute("SELECT 1 FROM cycles WHERE cycle_id=? AND session_id=? AND status='running'", (cycle_id, session_id)).fetchone()):
+                return False
+            pending = self.connection.execute("SELECT action_id FROM external_action_receipts WHERE cycle_id=? AND session_id=? AND state='uncertain'",
+                                              (cycle_id, session_id)).fetchall()
+            if not pending:
+                return False
+            # Every unfinished tool needs a supported receipt. Opaque code,
+            # local storage failures and unrelated calls cannot be inferred safe.
+            if self.connection.execute("SELECT 1 FROM cycle_tool_attempts t WHERE t.cycle_id=? AND t.outcome<>'returned' "
+                "AND NOT EXISTS(SELECT 1 FROM external_action_receipts r WHERE r.attempt_id=t.attempt_id "
+                "AND r.adapter='gmail' AND t.tool_name='gmail.' || r.operation) LIMIT 1", (cycle_id,)).fetchone():
+                return False
+            hold = {'session_id': session_id, 'cycle_id': cycle_id, 'owner_revision': checkpoint['owner_revision'],
+                    'action_ids': [row['action_id'] for row in pending]}
+            self.connection.execute("UPDATE cycles SET status='stopped',ended_at=? WHERE cycle_id=? AND status='running'",
+                                    (self.now(), cycle_id))
+            for key, value in {'action_recovery_hold': json.dumps(hold), 'autonomy_error': 'action_outcome_uncertain',
+                               'active_session_status': 'reconciling', 'session_start_requested': ''}.items():
+                self.connection.execute('INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, value))
+            self.connection.execute("INSERT INTO activity(event,created_at) VALUES('Session held for read-only action reconciliation',?)", (self.now(),))
+            return True
+
+    @database_locked
+    def action_hold_valid(self, session_id):
+        try:
+            hold = json.loads(self.get_state('action_recovery_hold', 'null'))
+        except ValueError:
+            return False
+        return bool(isinstance(hold, dict) and hold.get('session_id') == session_id
+            and isinstance(hold.get('cycle_id'), str) and bool(hold['cycle_id'])
+            and isinstance(hold.get('action_ids'), list) and bool(hold['action_ids'])
+            and all(isinstance(value, str) for value in hold['action_ids'])
+            and self.get_state('active_session_id', '') == session_id
+            and self.get_state('active_session_status', '') == 'reconciling'
+            and self.get_state('autonomy_error', '') == 'action_outcome_uncertain'
+            and hold.get('owner_revision') == self.get_state('owner_control_revision', '0'))
+
+    @database_locked
+    def release_confirmed_action_hold(self, session_id):
+        with self.connection:
+            if not self.action_hold_valid(session_id):
+                return False
+            hold = json.loads(self.get_state('action_recovery_hold'))
+            checkpoint = self.connection.execute('SELECT k.phase FROM cycle_recovery_checkpoints k JOIN cycles c ON c.cycle_id=k.cycle_id WHERE c.cycle_id=? AND c.session_id=?', (hold['cycle_id'], session_id)).fetchone()
+            if not checkpoint or checkpoint['phase'] != 'model_confirmed':
+                return False
+            checks = ('SELECT 1 FROM budget_reservations LIMIT 1', 'SELECT 1 FROM messages WHERE queued=2 LIMIT 1',
+                'SELECT 1 FROM telegram_claims LIMIT 1', "SELECT 1 FROM telegram_outbox WHERE delivery_state='sending' LIMIT 1",
+                'SELECT 1 FROM diary_delivery_claims LIMIT 1', "SELECT 1 FROM external_action_receipts WHERE state='uncertain' LIMIT 1",
+                "SELECT 1 FROM cycles WHERE status='running' LIMIT 1",
+                "SELECT 1 FROM cycle_tool_attempts WHERE cycle_id=? AND outcome<>'returned' LIMIT 1")
+            for query in checks:
+                if self.connection.execute(query, (hold['cycle_id'],) if '?' in query else ()).fetchone():
+                    return False
+            if any(self.get_state(key, '0') == '1' for key in ('paused', 'sleeping', 'restore_recovery_required')):
+                return False
+            tables = {row[0] for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for table, condition in (('media_jobs', "state IN ('running','uncertain') OR delivery IN ('sending','uncertain')"),
+                                     ('media_avatar_proposals', "state IN ('applying','uncertain')")):
+                if table in tables and self.connection.execute(f'SELECT 1 FROM {table} WHERE {condition} LIMIT 1').fetchone():
+                    return False
+            receipts = []
+            for action_id in hold['action_ids']:
+                row = self.connection.execute("SELECT receipt FROM external_action_receipts WHERE action_id=? AND cycle_id=? AND session_id=? AND state='confirmed'", (action_id, hold['cycle_id'], session_id)).fetchone()
+                if row is None:
+                    return False
+                receipts.append({'action_id': action_id, **json.loads(row['receipt'])})
+            for key, value in {'autonomy_error': '', 'active_session_status': 'running', 'action_recovery_hold': '',
+                    'session_recovery_checkpoint': json.dumps({'cycle_id': hold['cycle_id'], 'phase': 'model_confirmed', 'verified_actions': receipts})}.items():
+                self.connection.execute('INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, value))
+            self.connection.execute("UPDATE cycles SET status='complete' WHERE cycle_id=?", (hold['cycle_id'],))
+            self.connection.execute("DELETE FROM state WHERE key='active_cycle_id'")
+            self.connection.execute("INSERT INTO activity(event,created_at) VALUES('Session resumed after verified action reconciliation; no action replayed',?)", (self.now(),))
+            return True
+
+    @database_locked
+    def hold_pending_session_actions(self, session_id):
+        row = self.connection.execute(
+            "SELECT cycle_id FROM cycles WHERE session_id=? AND status='running' ORDER BY rowid DESC LIMIT 1",
+            (session_id,)).fetchone()
+        return bool(row and self.hold_confirmed_actions(session_id, row['cycle_id']))
 
     @database_locked
     def recover_confirmed_session(self, session_id):
@@ -958,6 +1162,7 @@ class Store:
             # Check before startup quarantines in-flight claims: otherwise a
             # quarantined operation could look like an ordinary idle restart.
             checks = (
+                "SELECT 1 FROM external_action_receipts WHERE state='uncertain' LIMIT 1",
                 'SELECT 1 FROM budget_reservations LIMIT 1',
                 'SELECT 1 FROM messages WHERE queued=2 LIMIT 1',
                 'SELECT 1 FROM telegram_claims LIMIT 1',

@@ -193,7 +193,7 @@ class ResearchLifecycleTests(unittest.TestCase):
             def execute(self, name, arguments):
                 if name == 'shell.run':
                     artifact.write_text('A fixture artifact created through the controller boundary.')
-                return 'Fixture tool returned; no live website was opened.'
+                return 'Status: ok\nFixture tool returned; no live website was opened.'
         self.controller.tool_runtime = FixtureRuntime()
         def first_wake():
             entry = json.loads(self.tool('research.save', question='How does a fixture preserve state?',

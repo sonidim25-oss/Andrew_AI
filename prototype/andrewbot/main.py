@@ -278,7 +278,7 @@ def run(validate_only=False):
     signal.signal(signal.SIGINT, stop)
     dispatch = ControllerDispatch(store, controller, telegram, sessions, limiter,
                                   owner_id, autonomous_enabled, fallback_enabled, lambda: stopping, metrics=metrics,
-                                  diary_action=deliver_diary_outbox,
+                                  diary_action=deliver_diary_outbox, recovery_action=controller.reconcile_actions,
                                   media_worker=MediaWorker(media, OpenRouterMedia(openrouter_key), telegram) if media_policy.enabled else None)
     dispatch.start()
     logging.info("Andrew Telegram controller started; secrets are loaded from the encrypted vault")

@@ -37,7 +37,7 @@ class LettaCommandError(RuntimeError):
 
 
 class LettaTurnError(RuntimeError):
-    CATEGORIES = frozenset({"output_token_limit", "turn_failed", "missing_assistant_text", "active_run_conflict", "provider_attempt_uncertain", "owner_reply_tools_disallowed", "context_compaction_failed"})
+    CATEGORIES = frozenset({"output_token_limit", "turn_failed", "missing_assistant_text", "active_run_conflict", "provider_attempt_uncertain", "owner_reply_tools_disallowed", "context_compaction_failed", "action_outcome_uncertain"})
 
     def __init__(self, category, source='unknown', stop_reason=None, context_reason='unavailable'):
         self.safe_category = category if category in self.CATEGORIES else "turn_failed"

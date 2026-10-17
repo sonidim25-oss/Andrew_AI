@@ -8,7 +8,7 @@ from .diary import format_diary_entry, parse_diary_command, validate_diary_conte
 from .telegram_menu import BUTTON_COMMANDS, HELP_TEXT
 from .appserver import AppServerClient, LettaTurnError, LettaTurnCancelled
 from .memory import ResearchJournal, SessionHistory, validate_memory_text, note_untrusted_memory_source
-from .gmail_tools import GMAIL_TOOL_NAMES
+from .gmail_tools import GMAIL_TOOL_NAMES, GMAIL_ACTION_CONTEXT
 from .media import MEDIA_TOOL_NAMES, MEDIA_AUTHORIZATION
 from .skills import SkillCatalog, SKILL_TOOL_NAMES
 import json
@@ -310,6 +310,13 @@ class Controller:
         finally:
             MEDIA_AUTHORIZATION.reset(token)
 
+    def reconcile_actions(self):
+        # Read-only network work runs separately from owner controls and models.
+        if self.gmail_tools is None or any(self.store.get_state(key, '0') == '1'
+                for key in ('paused', 'sleeping', 'restore_recovery_required')):
+            return
+        self.gmail_tools.reconcile_pending()
+
     def execute_tool(self, name, arguments):
         if name in (AppServerClient.EXTERNAL_TOOL_NAMES | {'gmail.read', 'research.list', 'research.get'}):
             note_untrusted_memory_source()
@@ -317,6 +324,7 @@ class Controller:
                  | GMAIL_TOOL_NAMES | MEDIA_TOOL_NAMES)
         context = self.store.research_tool_context()
         attempt = self.store.begin_cycle_tool(context, name) if name in known else None
+        action_context = GMAIL_ACTION_CONTEXT.set((attempt, context[0], context[1]))
         outcome = 'error'
         confirmed = False
         try:
@@ -340,6 +348,7 @@ class Controller:
                             confirmed = isinstance(response, dict) and response.get('status') == 'ok'
             return result
         finally:
+            GMAIL_ACTION_CONTEXT.reset(action_context)
             self.store.finish_cycle_tool(attempt, confirmed)
             if name in known:
                 self.store.record_research_tool(name, outcome, context)
@@ -350,7 +359,7 @@ class Controller:
                 kind = "personality" if name == "memory_propose_personality_edit" else "experience"
                 self.memory_service.reject_edit_attempt(kind)
             raise ValueError("tool arguments must be an object")
-        read_tools = {"check_budget", "recent_activity", "memory_search", "session_search", "session_read", "gmail.status", "media.status", "media.get", "skills.list", "skills.load", 'research.list', 'research.get', 'research.observations'}
+        read_tools = {"check_budget", "recent_activity", "memory_search", "session_search", "session_read", "gmail.status", "gmail.reconcile", "media.status", "media.get", "skills.list", "skills.load", 'research.list', 'research.get', 'research.observations'}
         if self.store.get_state("paused", "0") == "1" and name not in read_tools:
             raise ValueError("owner pause can only be cleared by the owner with /wake")
         if self.store.get_state("sleeping", "0") == "1" and name not in read_tools:
@@ -452,10 +461,10 @@ class Controller:
             if arguments:
                 raise ValueError("check_budget takes no arguments")
             return self._command("/budget")
-        if name in {"gmail.status", "gmail.read", "gmail.draft", "gmail.send", "gmail.delete"}:
+        if name in GMAIL_TOOL_NAMES:
             if self.gmail_tools is None:
                 raise ValueError("Gmail is not configured")
-            if name != "gmail.status":
+            if name not in {"gmail.status", "gmail.reconcile"}:
                 allowed, reason = self.budget_allows(0)
                 if not allowed:
                     raise ValueError(f"Gmail action blocked by {reason} budget gate")

@@ -14,7 +14,7 @@ from .telegram import deliver_saved_message
 class ControllerDispatch:
     def __init__(self, store, controller, telegram, sessions, limiter,
                  owner_id, autonomous_enabled, fallback_enabled, should_stop=lambda: False,
-                 metrics=None, utc_now=None, diary_action=None, media_worker=None):
+                 metrics=None, utc_now=None, diary_action=None, media_worker=None, recovery_action=None):
         self.media_worker = media_worker
         self.store, self.controller, self.telegram = store, controller, telegram
         self.sessions, self.limiter = sessions, limiter
@@ -34,6 +34,8 @@ class ControllerDispatch:
         self._diary_worker = ModelWorker(
             lambda: diary_action(should_stop=lambda: self._poll_stop.is_set() or self.should_stop()),
             lambda: self._poll_stop.is_set() or self.should_stop()) if diary_action is not None else None
+        self._recovery_worker = ModelWorker(recovery_action,
+            lambda: self._poll_stop.is_set() or self.should_stop()) if recovery_action is not None else None
         self._model_worker = ModelWorker(self._model_pass, lambda: self._poll_stop.is_set() or self.should_stop())
         self.controller.health_snapshot = self.health_snapshot
 
@@ -43,9 +45,12 @@ class ControllerDispatch:
         for row in metrics.values():
             last = row.pop('last_success_monotonic')
             row['last_success_age_seconds'] = None if last is None else max(0, now - last)
-        return {'model': self._model_worker.snapshot(),
+        result = {'model': self._model_worker.snapshot(),
                 'diary': None if self._diary_worker is None else self._diary_worker.snapshot(),
                 'metrics': metrics}
+        if self._recovery_worker is not None:
+            result['recovery'] = self._recovery_worker.snapshot()
+        return result
 
     def start(self):
         """Poll and execute only local owner controls while model work is blocked."""
@@ -58,6 +63,8 @@ class ControllerDispatch:
         self._reply_thread.start()
         self._system_reply_thread.start()
         self._model_worker.start()
+        if self._recovery_worker is not None:
+            self._recovery_worker.start()
         if self.media_worker is not None:
             self.media_worker.start()
         if self._diary_worker is not None:
@@ -72,6 +79,8 @@ class ControllerDispatch:
         # Close every worker's admission before any join can consume the
         # shared deadline. In-flight calls retain storage until they settle.
         self._model_worker.request_stop()
+        if self._recovery_worker is not None:
+            self._recovery_worker.request_stop()
         if self._diary_worker is not None:
             self._diary_worker.request_stop()
         if self.media_worker is not None:
@@ -79,11 +88,12 @@ class ControllerDispatch:
         model_stopped = self._model_worker.stop(timeout=max(0, deadline - time.monotonic()))
         diary_stopped = self._diary_worker is None or self._diary_worker.stop(timeout=max(0, deadline - time.monotonic()))
         media_stopped = self.media_worker is None or self.media_worker.stop(timeout=max(0, deadline - time.monotonic()))
+        recovery_stopped = self._recovery_worker is None or self._recovery_worker.stop(timeout=max(0, deadline - time.monotonic()))
         workers = (self._poll_thread, self._reply_thread, self._system_reply_thread)
         for worker in workers:
             if worker is not None:
                 worker.join(timeout=max(0, deadline - time.monotonic()))
-        return model_stopped and diary_stopped and media_stopped and all(worker is None or not worker.is_alive() for worker in workers)
+        return model_stopped and diary_stopped and media_stopped and recovery_stopped and all(worker is None or not worker.is_alive() for worker in workers)
 
     def _reply_loop(self, lane):
         ready = self._system_reply_ready if lane == 'system' else self._reply_ready
@@ -280,6 +290,8 @@ class ControllerDispatch:
             return polled
         if self._poll_thread is not None:
             self._model_worker.wake()
+            if self._recovery_worker is not None:
+                self._recovery_worker.wake()
             if self._diary_worker is not None:
                 self._diary_worker.wake()
             return polled
