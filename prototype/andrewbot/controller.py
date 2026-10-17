@@ -7,7 +7,7 @@ from .configuration import OUTPUT_TOKEN_COST_ESTIMATE, ModelConfig, load_model_c
 from .diary import format_diary_entry, parse_diary_command, validate_diary_content
 from .telegram_menu import BUTTON_COMMANDS, HELP_TEXT
 from .appserver import AppServerClient, LettaTurnError, LettaTurnCancelled
-from .memory import ResearchJournal, SessionHistory, validate_memory_text
+from .memory import ResearchJournal, SessionHistory, validate_memory_text, note_untrusted_memory_source
 from .gmail_tools import GMAIL_TOOL_NAMES
 from .media import MEDIA_TOOL_NAMES, MEDIA_AUTHORIZATION
 from .skills import SkillCatalog, SKILL_TOOL_NAMES
@@ -311,6 +311,8 @@ class Controller:
             MEDIA_AUTHORIZATION.reset(token)
 
     def execute_tool(self, name, arguments):
+        if name in (AppServerClient.EXTERNAL_TOOL_NAMES | {'gmail.read', 'research.list', 'research.get'}):
+            note_untrusted_memory_source()
         known = (AppServerClient.SAFE_CONTROLLER_TOOL_NAMES | AppServerClient.EXTERNAL_TOOL_NAMES
                  | GMAIL_TOOL_NAMES | MEDIA_TOOL_NAMES)
         context = self.store.research_tool_context()
@@ -369,13 +371,20 @@ class Controller:
         if name in {"memory_search", "memory_add_experience", "memory_propose_personality_edit"}:
             if self.memory_service is None:
                 raise ValueError("memory service is unavailable")
+            allowed = ({'query', 'limit'} if name == 'memory_search' else
+                       {'content', 'record_type', 'event_ids', 'diary_ids', 'history_ids'} if name == 'memory_add_experience' else
+                       {'content', 'reason', 'event_ids', 'diary_ids', 'history_ids'})
+            if set(arguments) - allowed:
+                self.memory_service.reject_edit_attempt('personality' if name == 'memory_propose_personality_edit' else 'experience')
+                raise ValueError('unsupported memory arguments; provenance is assigned by the controller')
             if name == "memory_search":
                 rows = self.memory_service.search(arguments.get("query"), arguments.get("limit", 8))
                 if not rows:
                     return "No relevant memory records were found."
                 result = "Relevant memory records (read-only):\n" + "\n".join(
-                    f"{row['record_type']} {row['record_id']} ({row['created_at']}; source={row['source']}): "
-                    f"{row['content']} [events={row['event_ids']}; diary={row['diary_ids']}]"
+                    f"{row['record_type']} {row['record_id']} ({row['created_at']}; author={row['source']}; "
+                    f"provenance={row['provenance']}; basis={row['provenance_basis']}): "
+                    f"{row['content']} [events={row['event_ids']}; diary={row['diary_ids']}; history={row['history_ids']}]"
                     for row in rows
                 )
                 encoded = result.encode("utf-8")
@@ -389,12 +398,16 @@ class Controller:
                 record_id = self.memory_service.add_experience(
                     arguments.get("content"), arguments.get("record_type"),
                     arguments.get("event_ids", []), arguments.get("diary_ids", []),
+                    history_ids=arguments.get('history_ids', []), owner_id=self.owner_id,
                 )
                 return f"Memory record saved ({record_id})."
             revision_id = self.memory_service.propose_personality_edit(
                 arguments.get("content"), arguments.get("reason"),
                 arguments.get("event_ids", []), arguments.get("diary_ids", []),
+                history_ids=arguments.get('history_ids', []), owner_id=self.owner_id,
             )
+            if self.store.get_memory_record(revision_id)['provenance'] == 'untrusted':
+                return f'Personality proposal saved ({revision_id}; untrusted evidence); active personality unchanged.'
             return f"Personality revision saved ({revision_id}); previous revisions are preserved."
         if name == "sleep":
             stop_note = validate_memory_text(arguments['reason'], 500) if arguments.get('reason') else ''

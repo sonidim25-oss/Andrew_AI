@@ -153,6 +153,29 @@ class Store:
                 reason TEXT NOT NULL,
                 source TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS memory_provenance (
+                record_id TEXT PRIMARY KEY,
+                origin TEXT NOT NULL CHECK(origin IN ('owner','agent','untrusted','system')),
+                basis TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS memory_history_refs (
+                record_id TEXT NOT NULL REFERENCES memory_provenance(record_id),
+                history_id INTEGER NOT NULL REFERENCES session_history(id),
+                PRIMARY KEY(record_id,history_id)
+            );
+            CREATE TRIGGER IF NOT EXISTS memory_provenance_immutable_update BEFORE UPDATE ON memory_provenance BEGIN
+                SELECT RAISE(ABORT,'Memory provenance is immutable');
+            END;
+            CREATE TRIGGER IF NOT EXISTS memory_provenance_immutable_delete BEFORE DELETE ON memory_provenance BEGIN
+                SELECT RAISE(ABORT,'Memory provenance is immutable');
+            END;
+            CREATE TRIGGER IF NOT EXISTS memory_history_refs_immutable_update BEFORE UPDATE ON memory_history_refs BEGIN
+                SELECT RAISE(ABORT,'Memory source links are immutable');
+            END;
+            CREATE TRIGGER IF NOT EXISTS memory_history_refs_immutable_delete BEFORE DELETE ON memory_history_refs BEGIN
+                SELECT RAISE(ABORT,'Memory source links are immutable');
+            END;
             CREATE TABLE IF NOT EXISTS memory_event_refs (
                 record_id TEXT NOT NULL REFERENCES memory_records(record_id),
                 activity_id INTEGER NOT NULL REFERENCES activity(id),
@@ -264,6 +287,11 @@ class Store:
         if 'retry_notice' not in progress_columns:
             self.connection.execute('ALTER TABLE telegram_delivery_progress ADD COLUMN retry_notice INTEGER NOT NULL DEFAULT 0')
         self.connection.commit()
+        with self.connection:
+            for table, identifier in (('memory_records', 'record_id'), ('personality_revisions', 'revision_id')):
+                self.connection.execute(f'''INSERT OR IGNORE INTO memory_provenance
+                    SELECT {identifier},CASE source WHEN 'owner' THEN 'owner' WHEN 'system' THEN 'system'
+                    ELSE 'untrusted' END,'legacy_unverified',created_at FROM {table}''')
         self.backfill_session_history()
         try:
             self.path.chmod(0o600)
@@ -1590,12 +1618,13 @@ class Store:
         ).fetchall()
 
     @database_locked
-    def create_memory_record(self, record_type, content, source, event_ids=(), diary_ids=()):
+    def create_memory_record(self, record_type, content, source, event_ids=(), diary_ids=(), *,
+                             history_ids=(), owner_id=None, untrusted=False):
         if record_type not in {"experience", "interest"}:
             raise ValueError("invalid memory record type")
         if not isinstance(content, str) or not content.strip() or len(content) > 4000:
             raise ValueError("invalid memory content")
-        if source not in {"andrew", "owner"}:
+        if source not in {"andrew", "owner", "external", "system"}:
             raise ValueError("invalid memory source")
         event_ids = self._validate_reference_ids(event_ids, int)
         diary_ids = self._validate_reference_ids(diary_ids, str)
@@ -1607,6 +1636,7 @@ class Store:
                 "INSERT INTO memory_records(record_id,record_type,created_at,content,source) VALUES(?,?,?,?,?)",
                 (record_id, record_type, created_at, content.strip(), source),
             )
+            self._create_memory_provenance(record_id, source, history_ids, owner_id, untrusted)
             self._insert_memory_references(
                 "memory_event_refs", "memory_diary_refs", "record_id", record_id, event_ids, diary_ids
             )
@@ -1640,6 +1670,7 @@ class Store:
                 self.connection.execute(
                     'INSERT INTO memory_records(record_id,record_type,created_at,content,source) VALUES(?,?,?,?,?)',
                     (record_id, 'experience', now, content, 'owner'))
+                self._create_memory_provenance(record_id, 'owner', (), None, False)
                 self.connection.execute(
                     'INSERT INTO memory_fts(record_id,record_type,created_at,content,source) VALUES(?,?,?,?,?)',
                     (record_id, 'experience', now, content, 'owner'))
@@ -1683,12 +1714,13 @@ class Store:
                                         (int(row[0]), letter['content']))
 
     @database_locked
-    def create_personality_revision(self, content, reason, source, event_ids=(), diary_ids=()):
+    def create_personality_revision(self, content, reason, source, event_ids=(), diary_ids=(), *,
+                                    history_ids=(), owner_id=None, untrusted=False):
         if not isinstance(content, str) or not content.strip() or len(content) > 4000:
             raise ValueError("invalid personality content")
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:
             raise ValueError("invalid personality revision reason")
-        if source not in {"andrew", "owner"}:
+        if source not in {"andrew", "owner", "external", "system"}:
             raise ValueError("invalid personality revision source")
         event_ids = self._validate_reference_ids(event_ids, int)
         diary_ids = self._validate_reference_ids(diary_ids, str)
@@ -1702,6 +1734,7 @@ class Store:
                 "VALUES(?,?,?,?,?,?)",
                 (revision_id, created_at, effective_date, content.strip(), reason.strip(), source),
             )
+            self._create_memory_provenance(revision_id, source, history_ids, owner_id, untrusted)
             self._insert_memory_references(
                 "personality_event_refs", "personality_diary_refs", "revision_id", revision_id,
                 event_ids, diary_ids,
@@ -1715,6 +1748,37 @@ class Store:
                 (f"Personality revision created ({revision_id})", created_at),
             )
         return revision_id
+
+    def _create_memory_provenance(self, record_id, source, history_ids, owner_id, untrusted):
+        history_ids = self._validate_reference_ids(history_ids, int)
+        origin = {'owner': 'owner', 'andrew': 'agent', 'external': 'untrusted', 'system': 'system'}[source]
+        basis = 'controller' if source in {'owner', 'system'} else 'authored'
+        if history_ids:
+            if type(owner_id) is not int:
+                raise ValueError('history references require an authenticated owner')
+            marks = ','.join('?' for _ in history_ids)
+            rows = self.connection.execute(
+                f'SELECT id,role,complete FROM session_history WHERE owner_id=? AND id IN ({marks})',
+                (owner_id, *history_ids)).fetchall()
+            if {row['id'] for row in rows} != set(history_ids):
+                raise ValueError('unknown history reference')
+            if any(row['role'] != 'user' or not row['complete'] for row in rows):
+                untrusted = True
+            basis = 'history_linked'
+        if untrusted or source == 'external':
+            origin = 'untrusted'
+            basis = 'external_context' if untrusted and not history_ids else 'external_source'
+        self.connection.execute('INSERT INTO memory_provenance VALUES(?,?,?,?)',
+                                (record_id, origin, basis, self.now()))
+        self.connection.executemany('INSERT INTO memory_history_refs VALUES(?,?)',
+                                    [(record_id, history_id) for history_id in history_ids])
+
+    def _memory_provenance(self, record_id):
+        row = self.connection.execute('SELECT origin,basis FROM memory_provenance WHERE record_id=?', (record_id,)).fetchone()
+        return {'provenance': row['origin'] if row else 'untrusted',
+                'provenance_basis': row['basis'] if row else 'legacy_unverified',
+                'history_ids': [ref[0] for ref in self.connection.execute(
+                    'SELECT history_id FROM memory_history_refs WHERE record_id=? ORDER BY history_id', (record_id,))]}
 
     @staticmethod
     def _validate_reference_ids(values, expected_type):
@@ -1765,7 +1829,8 @@ class Store:
     @database_locked
     def current_personality_revision(self):
         row = self.connection.execute(
-            "SELECT * FROM personality_revisions ORDER BY created_at DESC, rowid DESC LIMIT 1"
+            "SELECT r.* FROM personality_revisions r JOIN memory_provenance p ON p.record_id=r.revision_id "
+            "WHERE p.origin IN ('owner','agent','system') ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1"
         ).fetchone()
         return self._personality_revision_row(row)
 
@@ -1781,6 +1846,7 @@ class Store:
         if row is None:
             return None
         result = dict(row)
+        result.update(self._memory_provenance(result['revision_id']))
         result["event_ids"], result["diary_ids"] = self._memory_references(
             "personality_event_refs", "personality_diary_refs", "revision_id", result["revision_id"]
         )
@@ -1793,6 +1859,7 @@ class Store:
         ).fetchone()
         if row is not None:
             result = dict(row)
+            result.update(self._memory_provenance(record_id))
             result["event_ids"], result["diary_ids"] = self._memory_references(
                 "memory_event_refs", "memory_diary_refs", "record_id", record_id
             )
@@ -1813,6 +1880,7 @@ class Store:
         results = []
         for row in rows:
             result = dict(row)
+            result.update(self._memory_provenance(result['record_id']))
             if result["record_type"] == "personality":
                 events, diaries = self._memory_references(
                     "personality_event_refs", "personality_diary_refs", "revision_id", result["record_id"]

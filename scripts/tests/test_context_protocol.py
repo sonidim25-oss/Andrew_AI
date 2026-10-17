@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'prototype'))
 from andrewbot.appserver import AppServerClient, LettaAgent
 from andrewbot.gateway import GatewayThread, ModelGateway, make_server
 from andrewbot.store import Store
-from andrewbot.memory import SessionHistory
+from andrewbot.memory import SessionHistory, MemoryService, MEMORY_SOURCE_CONTEXT
 from andrewbot.controller import Controller
 
 
@@ -68,6 +68,13 @@ class ContextProtocolTests(unittest.TestCase):
                                 self_test.assertIn('firstfixturechecksum', json.dumps([
                                     row for row in payload['messages'] if row.get('role') == 'tool']))
                                 history_lookup['stage'] = 3
+                                return {'id': 'memory-provenance-fixture', 'choices': [{'index': 0,
+                                    'message': {'role': 'assistant', 'content': None, 'tool_calls': [
+                                        {'id': 'memory-write-call', 'type': 'function', 'function': {
+                                            'name': 'memory_add_experience',
+                                            'arguments': '{"content":"A capsule claim retrieved from archived assistant text.","record_type":"experience"}'}}]},
+                                    'finish_reason': 'tool_calls'}],
+                                    'usage': {'prompt_tokens': 30, 'completion_tokens': 20, 'cost': .000002}}
                             content = 'The fixture observations are retained.' if summarizing else 'A retained fixture observation. ' * 250
                             if len(calls) == 1:
                                 content = 'Original capsule evidence has checksum firstfixturechecksum. ' + content
@@ -127,12 +134,16 @@ class ContextProtocolTests(unittest.TestCase):
                     self.assertIn('Original capsule evidence', original['content'])
                     self.assertEqual(original['complete'], 1)
                     self.assertEqual(original['conversation_id'], agent.conversation_id)
-                    controller = Controller(store, agent, 17)
+                    controller = Controller(store, agent, 17, memory_service=MemoryService(store))
                     agent.tool_handler = controller.execute_tool
                     history_lookup['stage'] = 1
                     reply, _ = agent.reply([{'role': 'user', 'content': 'Search the original capsule evidence.'}])
                     self.assertTrue(reply)
                     self.assertEqual(history_lookup['stage'], 3, 'the real runtime must execute session_search')
+                    memories = store.search_memory_rows('"capsule"', 20)
+                    self.assertEqual(len(memories), 1)
+                    self.assertEqual(memories[0]['provenance'], 'untrusted', 'an omitted source link must not evade the current-turn guard')
+                    self.assertIsNone(MEMORY_SOURCE_CONTEXT.get(), 'the turn context must be reset after reply')
                 finally:
                     if gateway_thread:
                         gateway_thread.close()
