@@ -336,6 +336,7 @@ class ConcurrentOwnerControlsTests(unittest.TestCase):
                     if 'Paused' in text:
                         notified.set()
                     return sent_text(owner, text)
+            cleanup_allowed, cycle_finished = threading.Event(), threading.Event()
             class Agent:
                 calls = 0
                 def autonomous_turn(self, prompt, timeout):
@@ -343,13 +344,21 @@ class ConcurrentOwnerControlsTests(unittest.TestCase):
                     entered.set()
                     release.wait(5)
                     if cancelled.is_set():
+                        if not cleanup_allowed.wait(5):
+                            raise AssertionError('Fixture cancellation cleanup was not released')
                         raise LettaTurnCancelled('Owner control')
                 def cancel_active_turn(self):
                     cancelled.set()
                     release.set()
             agent = Agent()
             controller = Controller(store, agent, 17, autonomous_enabled=True)
-            runner = SessionRunner(store, controller, agent, enabled=True)
+            class ObservedSessionRunner(SessionRunner):
+                def run_cycle(self, *args, **kwargs):
+                    try:
+                        return super().run_cycle(*args, **kwargs)
+                    finally:
+                        cycle_finished.set()
+            runner = ObservedSessionRunner(store, controller, agent, enabled=True)
             store.set_state('session_start_requested', 'owner_wake')
             dispatch = ControllerDispatch(store, controller, Telegram(), runner,
                                          OwnerRateLimit(), 17, True, False)
@@ -370,6 +379,11 @@ class ConcurrentOwnerControlsTests(unittest.TestCase):
                 self.assertTrue(notified.wait(1))
                 worker.join(1)
                 self.assertFalse(worker.is_alive())
+                # step() only schedules model work. A pause notification can
+                # arrive while the independent model worker is still unwinding.
+                self.assertFalse(cycle_finished.is_set())
+                cleanup_allowed.set()
+                self.assertTrue(cycle_finished.wait(3), 'Cancelled model worker did not finish cycle cleanup')
                 self.assertEqual(store.get_state('paused'), '1')
                 self.assertEqual(store.pending_owner_controls(17), [])
                 self.assertEqual(store.connection.execute('SELECT status FROM cycles').fetchone()[0], 'stopped')
@@ -378,6 +392,7 @@ class ConcurrentOwnerControlsTests(unittest.TestCase):
             finally:
                 fail_poll.set()
                 release.set()
+                cleanup_allowed.set()
                 if worker.ident is not None:
                     worker.join(5)
                 dispatch.stop()
