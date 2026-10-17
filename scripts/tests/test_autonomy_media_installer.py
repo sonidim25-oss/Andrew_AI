@@ -133,3 +133,9 @@ class AutonomyInstallerTests(unittest.TestCase):
                 self.assertEqual((snapshot / 'skills' / name / 'SKILL.md').read_bytes(),
                                  (ROOT / 'skills' / name / 'SKILL.md').read_bytes())
             self.assertTrue((snapshot / 'prototype/tests/test_autonomous_media.py').is_file())
+            self.assertTrue((snapshot / 'runtime/worker_entry.py').is_file())
+            subprocess.run([sys.executable, '-c',
+                            'from runtime import worker_entry; import andrewbot.extra; '
+                            'assert callable(worker_entry.execute_request)'],
+                           cwd='/', env=installer.core_test_environment(snapshot), check=True,
+                           capture_output=True, text=True, timeout=10)

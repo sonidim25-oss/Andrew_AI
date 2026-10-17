@@ -182,7 +182,14 @@ def snapshot(backup, replacements):
     for path in (ROOT / 'scripts/tests').glob('test_*protocol.py'):
         shutil.copy2(path, tests / path.name)
     shutil.copytree(ROOT / 'prototype/tests', root / 'prototype/tests', ignore=shutil.ignore_patterns('__pycache__'))
+    # Unit tests import the worker support package from the project root. The
+    # pinned production image is independently checked by runtime acceptance.
+    shutil.copytree(ROOT / 'runtime', root / 'runtime', ignore=shutil.ignore_patterns('__pycache__'))
     return root
+
+
+def core_test_environment(root):
+    return {**os.environ, 'PYTHONPATH': os.pathsep.join((str(root / 'prototype'), str(root)))}
 
 
 def record_owner_guidance(helper):
@@ -234,7 +241,7 @@ def main():
     print('Acceptance check: merged-code-core-tests', flush=True)
     result = subprocess.run(['/usr/bin/python3', '-m', 'unittest', 'discover',
                              '-s', str(candidate / 'prototype/tests'), '-q'],
-                            env={**os.environ, 'PYTHONPATH': str(candidate / 'prototype')},
+                            env=core_test_environment(candidate),
                             capture_output=True, text=True, timeout=180)
     (backup / 'merged-code-core-tests.txt').write_text(result.stdout + result.stderr)
     if result.returncode:
