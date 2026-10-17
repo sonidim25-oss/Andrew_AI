@@ -2,7 +2,7 @@
 
 Date: 2026-10-17 UTC  
 Reviewed revision: `6d31d27b3fe9f9985b6bbad80cb32d359e309688` (`feature/andrew-multimodal`)  
-Status: fixes in progress; per-task resolutions and verification are recorded below.
+Status: all eight tasks fixed, verified, committed and pushed; production deployment is separate.
 
 ## Scope and verification
 
@@ -25,7 +25,7 @@ Passing existing tests does not cover these missing scenarios. These are code-le
 | P2 — Medium | Broken supported operations, deployment gaps, or reproducible runtime races | 0 |
 | P3 — Low | Avoidable inference cost or misleading capability handling | 0 |
 
-No P0 finding was established; the empty category is not a guarantee that none exists. 0 tasks remain open.
+No P0 finding was established; the empty category is not a guarantee that none exists. All eight tasks are complete.
 
 ## P0 — Extra high
 
@@ -42,8 +42,8 @@ No confirmed tasks at this priority.
 - **Evidence:** An isolated run of the actual pinned Letta backend used a fake provider that raised `TimeoutError` on its first call and succeeded on its next call. One submitted user input produced **two provider calls**, equal user-message payloads, a successful reply from the second call, and **one unsettled reservation**. No owner retry was issued. Gateway-added budget context differed between attempts because the first reservation was retained.
 - **Acceptance check:** With a provider timeout or invalid response after dispatch, a real pinned-runtime integration test observes exactly one provider attempt, an explicit uncertain outcome, and a retained reservation. A new attempt requires explicit reconciliation/authorization.
 
-- **Resolution:** Provider uncertainty returns non-retryable HTTP 422 with a fixed safe category. Canonical request fingerprints persist in retained reservations and prevent duplicate dispatch across gateway recreation. Explicit owner replay rotates the authorization revision without releasing prior reservations.
-- **Verification:** 376 core tests passed (2 optional skips); 83 script tests passed, including pinned Letta timeout and invalid-response cases proving exactly one provider attempt. Source fixed and tested; production deployment is separate.
+- **Resolution:** Provider uncertainty returns non-retryable HTTP 422 with a fixed safe category. Canonical request fingerprints persist in retained reservations and prevent duplicate dispatch across gateway recreation. Explicit owner replay rotates the authorization revision without releasing prior reservations. Final review also reproduced malformed nonempty choices clearing the guard; assistant/message/tool-call structure is now validated before settlement, while valid tool-only and length-limited partial argument strings remain supported.
+- **Verification:** 376 core tests passed (2 optional skips); 83 script tests passed, including pinned Letta timeout and invalid-response cases proving exactly one provider attempt. Final review follow-up: 391 core tests passed (2 optional skips) and 89 installer/protocol tests passed, including malformed nonempty choices, durable duplicate suppression after gateway recreation, and valid tool-only partial arguments. Source fixed and tested; production deployment is separate.
 
 ### REVIEW-002 — Quarantine restored queues and reconcile spending before restart
 
@@ -54,10 +54,10 @@ No confirmed tasks at this priority.
 - **Evidence:** A temporary database was snapshotted with one pending reply; the reply was then removed as delivered and $1 of usage recorded. After restore, pending replies changed **0 → 1**, usage changed **$1 → absent**, and `claim_reply('normal')` immediately returned the restored reply. Existing integrity checks passed.
 - **Acceptance check:** Restore a snapshot preceding confirmed sends and charges, then start the controller. No restored work is automatically sent or executed, and no model/media spending is admitted until recovery reconciliation completes. Saved memory remains readable.
 
-## P2 — Medium
-
 - **Resolution:** Restore now stages a recovery-halted database, quarantines inbox/reply/diary/media/avatar work, retains encrypted pre-restore evidence, and preserves verified newer reasoning/media ledgers, reservations and Telegram checkpoints. Startup, model admission and media admission respect a separate recovery gate. Administrator reconciliation requires an explicit confirmation and leaves old work held and Andrew paused. Updated the backup CLI/helper and operations guide.
 - **Verification:** 380 core tests passed (2 optional skips); 83 pinned-fixture script tests passed; 42 installer tests and backup-helper shell syntax passed. Regressions cover already-delivered replies, retained charges/reservations/checkpoints, blocked clients and paid work, and held queues after reconciliation. Source fixed and tested; production deployment is separate.
+
+## P2 — Medium
 
 ### REVIEW-003 — Use one canonical definition of an owner control
 
@@ -116,10 +116,10 @@ No confirmed tasks at this priority.
 - **Evidence:** A controlled interleaving using the actual `BrowserProcess.close()` and `run()` methods paused old-container removal, started and completed a new `tabs` request, then finished cleanup. The new process remained installed in `self.process`, but `self.name` changed from its new container name to `None`. Only the old container had been removed. Subprocess/container operations were mocked.
 - **Acceptance check:** Block cleanup mid-flight and submit a new request concurrently. It waits or fails cleanly; after admission the active process and cleanup name still match. No active stream is closed by the idle reaper.
 
-## P3 — Low
-
 - **Resolution:** Browser run, close and idle cleanup now share a reentrant lifecycle lock. Cleanup uses captured process/container identities, reaping rechecks the active deadline under the lock, and server admission is reserved before cleanup is scheduled. The runtime installer now includes browser_service.py in its reviewed replacement, rollback and digest prediction.
 - **Verification:** 388 core tests passed (2 optional skips); 88 pinned-fixture script tests passed. A controlled real-pipe subprocess interleaving verifies blocked cleanup prevents new admission and preserves the new session identity. Async reaper tests verify busy rejection and resumed admission; installer tests cover all four runtime dependencies. Source fixed and tested; production deployment is separate.
+
+## P3 — Low
 
 ### REVIEW-008 — Reject disabled voice replies before invoking the model
 
@@ -140,4 +140,4 @@ No confirmed tasks at this priority.
 3. REVIEW-006 and REVIEW-007: runtime result integrity and browser lifecycle.
 4. REVIEW-005 and REVIEW-008: avatar reuse and capability admission.
 
-Implementation should add the acceptance regressions listed above, preserve existing messages/memory/spending, and avoid replaying uncertain work. This review made no runtime fixes, commits, pushes, or deployments.
+Implementation should add the acceptance regressions listed above, preserve existing messages/memory/spending, and avoid replaying uncertain work. The original review made no changes. The repairs and verification recorded above were subsequently completed and pushed to `feature/andrew-multimodal`; production deployment remains separate.

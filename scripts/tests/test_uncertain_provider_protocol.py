@@ -26,6 +26,9 @@ class UncertainProviderProtocolTests(unittest.TestCase):
     def test_invalid_response_is_not_retried(self):
         self.exercise('invalid')
 
+    def test_malformed_nonempty_choices_are_not_retried(self):
+        self.exercise('malformed_choice')
+
     @patch('andrewbot.appserver.gmail_permissions', return_value={'enabled': False})
     def exercise(self, mode, _permissions):
         with tempfile.TemporaryDirectory(prefix='andrew-queue-protocol-') as directory:
@@ -45,6 +48,8 @@ class UncertainProviderProtocolTests(unittest.TestCase):
                     if len(calls) == 1:
                         if mode == 'timeout':
                             raise TimeoutError('private fixture provider response lost')
+                        if mode == 'malformed_choice':
+                            return {'choices': [{}]}
                         return {'error': 'private fixture invalid response'}
                     return {'id': 'unexpected-retry', 'model': 'qwen/qwen3.8-flash',
                             'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': 'Unexpected retry.'},

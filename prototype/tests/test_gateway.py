@@ -134,6 +134,40 @@ class ModelGatewayTests(unittest.TestCase):
             self.assertNotIn('private', json.dumps(result))
         self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 2)
 
+    def test_malformed_choices_keep_durable_guard_before_settlement(self):
+        malformed = [None, {}, {'message': []}, {'message': {'content': None}},
+                     {'message': {'content': {'text': 'bad'}}},
+                     {'message': {'content': 'text', 'tool_calls': [None]}},
+                     {'message': {'tool_calls': [{'id': 'call', 'type': 'function',
+                         'function': {'name': 'sleep', 'arguments': {}}}]}}]
+        for index, choice in enumerate(malformed):
+            with self.subTest(choice=choice):
+                self.provider.response = {'choices': [choice]}
+                payload = {'model': self.gateway.model_id,
+                           'messages': [{'role': 'user', 'content': str(index)}]}
+                status, result = self.gateway.complete('Bearer gateway-test-token', payload)
+                self.assertEqual(status, 422)
+                self.assertEqual(result['error']['code'], 'provider_attempt_uncertain')
+                restarted = ModelGateway(self.provider, self.store, 'gateway-test-token')
+                self.assertEqual(restarted.complete('Bearer gateway-test-token', payload)[0], 422)
+        self.assertEqual(len(self.provider.calls), len(malformed))
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], len(malformed))
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 0)
+
+    def test_tool_only_length_response_preserves_partial_arguments_without_retry(self):
+        self.provider.response = {'choices': [{'finish_reason': 'length', 'message': {
+            'role': 'assistant', 'content': None, 'tool_calls': [{
+                'id': 'call-partial', 'type': 'function',
+                'function': {'name': 'sleep', 'arguments': '{"minutes":'}}]}}]}
+        with self.assertLogs(level='WARNING'):
+            status, result = self.gateway.complete('Bearer gateway-test-token', {
+                'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'hi'}]})
+        self.assertEqual(status, 200)
+        self.assertEqual(result['choices'], self.provider.response['choices'])
+        self.assertEqual(len(self.provider.calls), 1)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 1)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
+
     def test_gateway_injects_current_personality_as_ephemeral_system_context(self):
         gateway = ModelGateway(
             self.provider, self.store, "gateway-test-token", memory_service=FakeMemoryService(),
