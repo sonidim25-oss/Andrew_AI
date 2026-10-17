@@ -117,6 +117,12 @@ class OwnerControlProtocolTests(unittest.TestCase):
                         self.assertFalse(release.is_set(), 'provider completed before pause was proved')
                         self.assertEqual(store.get_state('paused'), '1')
                         self.assertEqual(store.get_state('active_session_status'), 'paused')
+                        # dispatch.step only signals the separate model worker.
+                        # Wait for that worker's durable cancellation cleanup.
+                        deadline = time.monotonic() + 2
+                        while (store.connection.execute('SELECT status FROM cycles').fetchone()[0] == 'running'
+                               and time.monotonic() < deadline):
+                            time.sleep(.01)
                         self.assertEqual(store.connection.execute('SELECT status FROM cycles').fetchone()[0], 'stopped')
                         self.assertEqual(store.pending_diary_deliveries(), [])
                         self.assertFalse(runner.tick())

@@ -41,15 +41,10 @@ class SessionRunner:
         self.store.set_state('autonomous_owner_id', '')
         self.store.set_state('model_turn_origin', '')
         self.store.set_state('model_turn_progress', '')
-        interrupted = self.store.interrupt_unfinished_cycles()
         previous = self.store.get_state("active_session_id", "")
         if previous:
             started = self.store.get_state("active_session_started_at", "")
-            if (not interrupted and self.enabled and not self.store.get_state('autonomy_error', '')
-                    and self.store.get_state('paused', '0') != '1'
-                    and self.store.get_state('sleeping', '0') != '1'):
-                # An idle conversation/session has no in-flight actions to recover.
-                # Keep its identity rather than reporting an ordinary restart as failure.
+            if self.enabled:
                 try:
                     started_at = datetime.fromisoformat(started)
                     if started_at.tzinfo is None:
@@ -57,9 +52,13 @@ class SessionRunner:
                 except (TypeError, ValueError):
                     pass
                 else:
-                    self.active_session_id = previous
-                    self.started_at = started_at
-                    return
+                    recovered = self.store.recover_confirmed_session(previous)
+                    if recovered:
+                        self.active_session_id = previous
+                        self.started_at = started_at
+                        return
+        interrupted = self.store.interrupt_unfinished_cycles()
+        if previous:
             self.store.record_session_failure('interrupted', self.controller.owner_id, session_id=previous)
             self._record_incident(previous, "restart", started)
         elif interrupted:
@@ -175,14 +174,24 @@ class SessionRunner:
             # current request/tools, then yield without dispatching another one.
             self.store.set_state('autonomous_owner_id', str(self.controller.owner_id))
             try:
-                self.agent.autonomous_turn(self.SESSION_PROMPT + f" Today's diary is {diary_status}.\n" + research_context,
-                                           timeout=None)
+                recovery = self.store.get_state('session_recovery_checkpoint', '')
+                recovery_context = ('\nController recovery receipt (data): ' + recovery
+                                    + '\nContinue from the saved conversation and research. Do not repeat '
+                                      'completed external actions from the prior cycle. This receipt does not '
+                                      'authorize replaying held messages or uncertain actions.' if recovery else '')
+                self.store.checkpoint_cycle_turn(cycle_id, 'model_started')
+                self.agent.autonomous_turn(
+                    self.SESSION_PROMPT + f" Today's diary is {diary_status}.\n" + research_context + recovery_context,
+                    timeout=None,
+                )
+                self.store.checkpoint_cycle_turn(cycle_id, 'model_confirmed')
             finally:
                 self.store.set_state('autonomous_owner_id', '')
             if self.store.get_state('active_session_id', '') != session_id:
                 raise LettaTurnCancelled('Owner changed the active session')
             stage = "finish_cycle"
             self.store.finish_cycle(cycle_id, "complete")
+            self.store.set_state('session_recovery_checkpoint', '')
         except LettaTurnYielded:
             if cycle_started:
                 self.store.finish_cycle(cycle_id, 'stopped')

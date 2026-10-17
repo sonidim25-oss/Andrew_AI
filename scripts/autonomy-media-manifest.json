@@ -3,18 +3,19 @@
   "modules": {
     "appserver.py": "2391531a16cb8b304af3416327939f1259c84972d29f66e1b174cb7427b4baa4",
     "budget.py": "07c164572f242358226d65eff0fb3088fd40f3b0124b73132f46420fd3e1cc56",
-    "controller.py": "be9930c7000508f4eb34bacf0eb05883602fd081293cdf286270415af0da1050",
+    "controller.py": "e75b2278c3402a9541cec5bf308f371f234dd66c7261367137849457c90103e1",
     "gateway.py": "9088181c7b47480e942299a11ef724ae35660df3b4fbb434842ef7e99d93bd37",
     "lifecycle_policy.py": "7eab2d34c1373e99460f0a2cd320ec9338cdad8be9665440d32054f98111df59",
     "main.py": "a3fecca948afc1f87019507cc885b3d5cf3ad9a857fefd631966f8776ac63603",
     "media.py": "055534ab06f6ae5a1a1090f86334bddb9d5c360d1402b7b433329009b8e13887",
     "memory.py": "f236cb9e1c09329ff627ee12d36ac6d82091f10d78a185dcef0b6b238a0270a7",
     "model.py": "372a77e2b83109f19d901681d839509257c78b02af6c656f6d18bf6b520af51d",
-    "sessions.py": "67ab49d9fef7cc7582e30b137ab0093b0ac6d5463a36dd5c6c14ffb2fb447910",
+    "sessions.py": "8ba08ad2358950e34315c42ac43ce8ecf7d7538717e28798733acadc13e305b4",
     "skills.py": "a8322265d44f747d929f27bb1634ca74987e344e09a1e3e92bd2b9893c5b0637",
     "telegram_menu.py": "98fb056518e788060842c4310250bb513fdd0fe043a11b2415e317d131112019",
     "vault_cli.py": "655b7375c49d157de2f4e294d6c5449841e3d0347cd3ba764e704c99d3d47dc7",
-    "configuration.py": "96da496d7f2d0a3ebe7cec5bdc821d1f03e0bcf3d6912d0bcd0ed4a198ddeea4"
+    "configuration.py": "96da496d7f2d0a3ebe7cec5bdc821d1f03e0bcf3d6912d0bcd0ed4a198ddeea4",
+    "store.py": "b26b96f9e92c541694c20381e1e93be294895e26b24890ae0429b6e003ccf134"
   },
   "skills": {
     "voice-communication": "7702c951f807d65a261f655484b650af48a74cc0f3481fbf884053f10e2f8793",
@@ -23,26 +24,31 @@
   "deployed_upgrade_bases": {
     "appserver.py": {
       "9a47e29cc0b01758a6b3e7bcc9e4051033e772062b81af00147dee7ee2359899": "8f3dc4d",
-      "c7370f1ac5fb66305fe94021eb331b96c1d879ba248483b04cb9edf286a36a87": "387162e"
+      "c7370f1ac5fb66305fe94021eb331b96c1d879ba248483b04cb9edf286a36a87": "387162e",
+      "8f549fcc327b6b656ed845b47b9691c2eb378a9b4c0d339b49f113a81ae4dadf": "e3af2cd"
     },
     "gateway.py": {
       "1a600e9f06394d8e2c51b1750bea36b1830e50e7efe3bfcf7609f00d068c9a2c": "8f3dc4d",
-      "6ab506e80cb88958c620720db7a1fc7965622fae6433c051897133cd5bd018f1": "387162e"
+      "6ab506e80cb88958c620720db7a1fc7965622fae6433c051897133cd5bd018f1": "387162e",
+      "b35a1434d7b1b1f82084360432e6cfd661f161e50267c40a525825bb0ed43154": "e3af2cd"
     },
     "controller.py": {
-      "78d1b50cbfc7b8b77f6644adff9e9ff980db4664cedc629babf0b6e57e126daa": "387162e"
+      "78d1b50cbfc7b8b77f6644adff9e9ff980db4664cedc629babf0b6e57e126daa": "e3af2cd"
     },
     "main.py": {
-      "ad2b5591d8c688f5da9b38787d5580db11912ef1e711f98648a3863309bfde55": "387162e"
+      "ad2b5591d8c688f5da9b38787d5580db11912ef1e711f98648a3863309bfde55": "e3af2cd"
     },
     "media.py": {
-      "2f3c39b07e43f5890dfab3fc820a950678b309072ef60d9c95285b651b1cdb2d": "387162e"
+      "2f3c39b07e43f5890dfab3fc820a950678b309072ef60d9c95285b651b1cdb2d": "e3af2cd"
     },
     "skills.py": {
-      "956d219644893e5aa19597bd8c61f10f5e152368254e45a7b3c068aa1cf2b2ea": "387162e"
+      "956d219644893e5aa19597bd8c61f10f5e152368254e45a7b3c068aa1cf2b2ea": "e3af2cd"
     },
     "telegram_menu.py": {
-      "cb0312af87a17f8f06ba0a94e679fbda28fc6e0e1f6fecdaf7b0ccfa1e7a0fa0": "387162e"
+      "cb0312af87a17f8f06ba0a94e679fbda28fc6e0e1f6fecdaf7b0ccfa1e7a0fa0": "e3af2cd"
+    },
+    "store.py": {
+      "17024ef456b309d5d1de4ccfa8bff32f39aed0abe87ad732c883031d3bc75d68": "e3af2cd"
     }
   }
 }

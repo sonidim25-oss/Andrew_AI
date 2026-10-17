@@ -130,6 +130,16 @@ def main():
                 if table == "telegram_outbox" else
                 f"SELECT update_id,received_at FROM {table} ORDER BY update_id DESC LIMIT 15")
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'cycle_recovery_checkpoints' in tables:
+            report['recovery_checkpoints'] = rows(
+                'SELECT k.*,c.session_id,c.status AS cycle_status FROM cycle_recovery_checkpoints k '
+                'JOIN cycles c ON c.cycle_id=k.cycle_id WHERE c.session_id LIKE ? '
+                'ORDER BY c.started_at DESC LIMIT 10', (args.session + '%',))
+        if 'cycle_tool_attempts' in tables:
+            report['recovery_tool_attempts'] = rows(
+                'SELECT t.cycle_id,t.outcome,count(*) AS attempts FROM cycle_tool_attempts t '
+                'JOIN cycles c ON c.cycle_id=t.cycle_id WHERE c.session_id LIKE ? '
+                'GROUP BY t.cycle_id,t.outcome ORDER BY c.started_at DESC LIMIT 30', (args.session + '%',))
         if "research_entries" in tables:
             report["saved_research_entries"] = rows(
                 "SELECT record_id,revision,status,created_at,updated_at FROM research_entries "
@@ -175,7 +185,8 @@ def main():
                     report["letta_metadata"] = {"status": "metadata_read_failed"}
         if args.brief:
             usage = report.get('usage', [])
-            report = {key: report[key] for key in ('integrity', 'lifecycle', 'letta_metadata') if key in report} | {
+            report = {key: report[key] for key in ('integrity', 'lifecycle', 'letta_metadata', 'recovery_checkpoints',
+                                                  'recovery_tool_attempts') if key in report} | {
                 'recent_owner_messages': report['recent_owner_messages'][:3],
                 'events': report.get('events', [])[-12:],
                 'usage_summary': {'settled_requests': len(usage), 'last_request': usage[-1] if usage else None},

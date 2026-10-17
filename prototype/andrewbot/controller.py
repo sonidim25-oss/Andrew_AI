@@ -314,12 +314,31 @@ class Controller:
         known = (AppServerClient.SAFE_CONTROLLER_TOOL_NAMES | AppServerClient.EXTERNAL_TOOL_NAMES
                  | GMAIL_TOOL_NAMES | MEDIA_TOOL_NAMES)
         context = self.store.research_tool_context()
+        attempt = self.store.begin_cycle_tool(context, name) if name in known else None
         outcome = 'error'
+        confirmed = False
         try:
             result = self._execute_tool(name, arguments)
             outcome = 'returned'
+            confirmed = True
+            if name in AppServerClient.EXTERNAL_TOOL_NAMES:
+                # Runner/browser failures can be returned as data after partial
+                # side effects. A successful model answer does not settle them.
+                confirmed = False
+                if isinstance(result, str):
+                    confirmed = result.startswith('Status: ok\n')
+                    if result.startswith('Status: error\n'):
+                        confirmed = False
+                    elif result.startswith('{'):
+                        try:
+                            response, _ = json.JSONDecoder().raw_decode(result)
+                        except ValueError:
+                            confirmed = False
+                        else:
+                            confirmed = isinstance(response, dict) and response.get('status') == 'ok'
             return result
         finally:
+            self.store.finish_cycle_tool(attempt, confirmed)
             if name in known:
                 self.store.record_research_tool(name, outcome, context)
 

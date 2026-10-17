@@ -156,6 +156,24 @@ class Store:
                 actual_cost_usd REAL
             );
             CREATE INDEX IF NOT EXISTS cycles_local_day ON cycles(local_day, status);
+            CREATE TABLE IF NOT EXISTS cycle_recovery_checkpoints (
+                cycle_id TEXT PRIMARY KEY REFERENCES cycles(cycle_id),
+                phase TEXT NOT NULL CHECK(phase IN ('prepared','model_started','model_confirmed')),
+                owner_revision TEXT NOT NULL,
+                research_id TEXT NOT NULL,
+                research_revision INTEGER NOT NULL,
+                activity_id INTEGER NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS cycle_tool_attempts (
+                attempt_id TEXT PRIMARY KEY,
+                cycle_id TEXT NOT NULL REFERENCES cycles(cycle_id),
+                tool_name TEXT NOT NULL,
+                outcome TEXT NOT NULL CHECK(outcome IN ('started','returned','uncertain')),
+                started_at TEXT NOT NULL,
+                finished_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS cycle_tool_attempts_cycle ON cycle_tool_attempts(cycle_id,outcome);
             CREATE TABLE IF NOT EXISTS budget_reservations (
                 reservation_id TEXT PRIMARY KEY,
                 month TEXT NOT NULL,
@@ -655,7 +673,8 @@ class Store:
                 or self.get_state('autonomy_error', '')):
             return False
         self.transition_state({'active_session_id': session_id, 'active_session_started_at': started_at,
-                               'active_session_status': 'running', 'session_start_requested': ''},
+                               'active_session_status': 'running', 'session_start_requested': '',
+                               'session_recovery_checkpoint': ''},
                               f'Autonomous session started ({trigger})')
         return True
 
@@ -730,6 +749,137 @@ class Store:
             self.connection.execute("INSERT INTO state(key,value) VALUES('active_cycle_id',?) "
                                     "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (cycle_id,))
             self._research_event('cycle_started', self._focused_research_id(), session_id=session_id, cycle_id=cycle_id)
+            entry_id = self._focused_research_id()
+            entry = self.research_entry(entry_id) if entry_id else None
+            self.connection.execute(
+                'INSERT INTO cycle_recovery_checkpoints VALUES(?,?,?,?,?,?,?)',
+                (cycle_id, 'prepared', self.get_state('owner_control_revision', '0'),
+                 entry_id, entry['revision'] if entry else 0,
+                 self.connection.execute('SELECT coalesce(max(id),0) FROM activity').fetchone()[0], self.now()),
+            )
+
+    @database_locked
+    def checkpoint_cycle_turn(self, cycle_id, phase):
+        """Commit a boundary before model admission and after the whole turn returns."""
+        previous = {'model_started': 'prepared', 'model_confirmed': 'model_started'}.get(phase)
+        if previous is None:
+            raise ValueError('invalid cycle checkpoint phase')
+        with self.connection:
+            entry_id = self._focused_research_id()
+            entry = self.research_entry(entry_id) if entry_id else None
+            cursor = self.connection.execute(
+                'UPDATE cycle_recovery_checkpoints SET phase=?,updated_at=?,research_id=?,research_revision=?,activity_id=? '
+                'WHERE cycle_id=? AND phase=? '
+                "AND EXISTS(SELECT 1 FROM cycles WHERE cycle_id=? AND status='running')",
+                (phase, self.now(), entry_id, entry['revision'] if entry else 0,
+                 self.connection.execute('SELECT coalesce(max(id),0) FROM activity').fetchone()[0],
+                 cycle_id, previous, cycle_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError('cycle checkpoint is missing or out of order')
+
+    @database_locked
+    def begin_cycle_tool(self, context, name):
+        """Persist admission before invoking a tool, without its arguments."""
+        session_id, cycle_id, _ = context
+        if not cycle_id:
+            return None
+        with self.connection:
+            if not self.connection.execute(
+                "SELECT 1 FROM cycles WHERE cycle_id=? AND session_id=? AND status='running'",
+                (cycle_id, session_id),
+            ).fetchone():
+                raise ValueError('tool cycle is no longer running')
+            attempt_id = uuid.uuid4().hex
+            self.connection.execute('INSERT INTO cycle_tool_attempts VALUES(?,?,?,?,?,NULL)',
+                                    (attempt_id, cycle_id, name, 'started', self.now()))
+            return attempt_id
+
+    @database_locked
+    def finish_cycle_tool(self, attempt_id, confirmed):
+        if attempt_id is None:
+            return
+        with self.connection:
+            changed = self.connection.execute(
+                "UPDATE cycle_tool_attempts SET outcome=?,finished_at=? WHERE attempt_id=? AND outcome='started'",
+                ('returned' if confirmed else 'uncertain', self.now(), attempt_id),
+            ).rowcount
+            if changed != 1:
+                raise ValueError('tool attempt is missing or already settled')
+
+    @database_locked
+    def recover_confirmed_session(self, session_id):
+        """Resume only a proven boundary; never infer success from absent errors.
+
+        Returns the recovered phase, 'idle', or None. No provider/tool/Telegram
+        operation is replayed, and no uncertain record or reservation is cleared.
+        Caller must invoke this before starting dispatch workers.
+        """
+        with self.connection:
+            if (not session_id or self.get_state('active_session_id', '') != session_id
+                    or self.get_state('active_session_status', '') != 'running'
+                    or self.get_state('autonomy_error', '')
+                    or any(self.get_state(key, '0') == '1' for key in
+                           ('paused', 'sleeping', 'restore_recovery_required'))):
+                return None
+            # Check before startup quarantines in-flight claims: otherwise a
+            # quarantined operation could look like an ordinary idle restart.
+            checks = (
+                'SELECT 1 FROM budget_reservations LIMIT 1',
+                'SELECT 1 FROM messages WHERE queued=2 LIMIT 1',
+                'SELECT 1 FROM telegram_claims LIMIT 1',
+                "SELECT 1 FROM telegram_outbox WHERE delivery_state='sending' LIMIT 1",
+                'SELECT 1 FROM diary_delivery_claims LIMIT 1',
+                "SELECT 1 FROM cycles WHERE status='running' AND session_id<>? LIMIT 1",
+            )
+            for query in checks:
+                if self.connection.execute(query, (session_id,) if '?' in query else ()).fetchone():
+                    return None
+            tables = {row[0] for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for table, condition in (
+                ('media_jobs', "state IN ('running','uncertain') OR delivery IN ('sending','uncertain')"),
+                ('media_avatar_proposals', "state IN ('applying','uncertain')"),
+            ):
+                if table in tables and self.connection.execute(f'SELECT 1 FROM {table} WHERE {condition} LIMIT 1').fetchone():
+                    return None
+            cycles = self.connection.execute(
+                "SELECT c.cycle_id,k.phase,k.owner_revision,k.research_id,k.research_revision,k.activity_id "
+                'FROM cycles c LEFT JOIN cycle_recovery_checkpoints k ON k.cycle_id=c.cycle_id '
+                "WHERE c.session_id=? AND c.status='running'", (session_id,),
+            ).fetchall()
+            if not cycles:
+                last = self.connection.execute(
+                    'SELECT status FROM cycles WHERE session_id=? ORDER BY started_at DESC,rowid DESC LIMIT 1',
+                    (session_id,),
+                ).fetchone()
+                # A crash can land between marking the cycle failed and
+                # writing the session error. That is not an idle session.
+                if last and last['status'] in {'failed', 'interrupted'}:
+                    return None
+                return 'idle'
+            if len(cycles) != 1:
+                return None
+            row = cycles[0]
+            if (row['phase'] not in {'prepared', 'model_confirmed'}
+                    or self.get_state('active_cycle_id', '') != row['cycle_id']
+                    or row['owner_revision'] != self.get_state('owner_control_revision', '0')):
+                return None
+            if self.connection.execute(
+                "SELECT 1 FROM cycle_tool_attempts WHERE cycle_id=? AND (outcome<>'returned' OR ?='prepared') LIMIT 1",
+                (row['cycle_id'], row['phase']),
+            ).fetchone():
+                return None
+            status = 'complete' if row['phase'] == 'model_confirmed' else 'stopped'
+            self.connection.execute('UPDATE cycles SET status=?,ended_at=? WHERE cycle_id=?',
+                                    (status, self.now(), row['cycle_id']))
+            self.connection.execute("DELETE FROM state WHERE key='active_cycle_id'")
+            receipt = {key: row[key] for key in row.keys() if key != 'owner_revision'}
+            self.connection.execute("INSERT INTO state(key,value) VALUES('session_recovery_checkpoint',?) "
+                                    'ON CONFLICT(key) DO UPDATE SET value=excluded.value', (json.dumps(receipt),))
+            self.connection.execute('INSERT INTO activity(event,created_at) VALUES(?,?)',
+                (f"Autonomous session recovered from confirmed checkpoint (phase={row['phase']})", self.now()))
+            self._research_event('cycle_finished', outcome=status, session_id=session_id, cycle_id=row['cycle_id'])
+            return row['phase']
 
     @database_locked
     def finish_cycle(self, cycle_id, status, actual_cost_usd=None):

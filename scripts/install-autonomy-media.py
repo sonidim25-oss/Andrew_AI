@@ -15,11 +15,11 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = 'd325230'
-UPGRADE_BASES = ('387162e', '8f3dc4d', '6d91b06', '0959c63', '5127ce2', '45ab856', 'eb80f5f', '1f60d34', '9e5d3df', 'b0a3439', '40418d9')
+UPGRADE_BASES = ('e3af2cd', '387162e', '8f3dc4d', '6d91b06', '0959c63', '5127ce2', '45ab856', 'eb80f5f', '1f60d34', '9e5d3df', 'b0a3439', '40418d9')
 TARGET = Path('/opt/andrew/prototype/andrewbot')
 DROPIN = Path('/etc/systemd/system/andrew-control.service.d/zz-autonomy-media.conf')
 MODULES = ('configuration.py', 'appserver.py', 'budget.py', 'controller.py', 'gateway.py', 'lifecycle_policy.py',
-           'main.py', 'media.py', 'memory.py', 'model.py', 'sessions.py', 'skills.py', 'telegram_menu.py', 'vault_cli.py')
+           'main.py', 'media.py', 'memory.py', 'model.py', 'sessions.py', 'skills.py', 'store.py', 'telegram_menu.py', 'vault_cli.py')
 SKILLS = ('voice-communication', 'image-creation')
 GUIDANCE = ('The owner has limited API credits in general and authorizes me to decide how to use them. '
             'The owner removed all controller daily, monthly, and per-job spending caps and daily media quotas. '
