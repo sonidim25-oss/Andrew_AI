@@ -310,6 +310,24 @@ class EditingTests(MediaCase):
         self.assertTrue(calls[0]['input_references'][0]['image_url']['url'].startswith('data:image/png;base64,'))
 
 class SpokenReplyTests(MediaCase):
+    def test_image_only_policy_rejects_voice_reply_before_creating_a_model_turn(self):
+        from dataclasses import replace
+        from unittest.mock import Mock
+        from andrewbot.controller import Controller
+        self.media.policy = replace(self.media.policy, voice_enabled=False)
+        model = Mock()
+        model.reply.return_value = ('Fixture image reply.', {'accounted_by_gateway': True})
+        controller = Controller(self.store, model, 42, media=self.media)
+        def message(text):
+            return {'update_id': 22, 'message': {'from': {'id': 42},
+                    'chat': {'id': 42, 'type': 'private'}, 'text': text}}
+        self.assertEqual(controller.handle_update(message('/voice_reply Hello')), 'Voice generation is disabled.')
+        model.reply.assert_not_called()
+        for table in ('messages', 'media_jobs', 'usage', 'budget_reservations'):
+            self.assertEqual(self.store.connection.execute('SELECT count(*) FROM ' + table).fetchone()[0], 0)
+        self.assertEqual(controller.handle_update(message('/image_reply Draw a cat')), 'Fixture image reply.')
+        model.reply.assert_called_once()
+
     def test_explicit_owner_reply_grants_one_media_generation(self):
         from andrewbot.controller import Controller
         class Model:

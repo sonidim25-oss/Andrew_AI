@@ -114,6 +114,8 @@ class Controller:
         if media_reply_kind:
             if self.media is None or not self.media.policy.enabled:
                 return 'Media generation is disabled.'
+            if media_reply_kind == 'voice' and not self.media.policy.voice_enabled:
+                return 'Voice generation is disabled.'
             if len(text.split(maxsplit=1)) != 2:
                 return 'Add your question after ' + command
         if command.startswith("/") and not media_reply_kind:

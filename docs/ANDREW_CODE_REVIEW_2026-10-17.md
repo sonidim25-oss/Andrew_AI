@@ -23,9 +23,9 @@ Passing existing tests does not cover these missing scenarios. These are code-le
 | P0 — Extra high | Immediate uncontrolled loss, unauthorized execution, or equivalent critical behavior | 0 confirmed |
 | P1 — High | Paid-request uncertainty, duplicate-delivery risk, or incorrect spending recovery | 0 |
 | P2 — Medium | Broken supported operations, deployment gaps, or reproducible runtime races | 0 |
-| P3 — Low | Avoidable inference cost or misleading capability handling | 1 |
+| P3 — Low | Avoidable inference cost or misleading capability handling | 0 |
 
-No P0 finding was established; the empty category is not a guarantee that none exists. 1 tasks remain open.
+No P0 finding was established; the empty category is not a guarantee that none exists. 0 tasks remain open.
 
 ## P0 — Extra high
 
@@ -123,12 +123,15 @@ No confirmed tasks at this priority.
 
 ### REVIEW-008 — Reject disabled voice replies before invoking the model
 
-- [ ] **Name:** Enforce voice-specific enablement at command admission.
+- [x] **Name:** Enforce voice-specific enablement at command admission.
 - **Short description:** `/voice_reply` checks only the overall media flag. With the deployed image-only configuration, it still enters model inference even though voice generation is disabled and the eventual voice tool will reject it. This wastes reasoning budget and may produce a misleading reply instead of a clear local capability response.
 - **Location:** `prototype/andrewbot/controller.py:112–117`; voice-specific enforcement currently happens later at `prototype/andrewbot/media.py:134–136`.
 - **Short fix suggestion:** Check the requested capability's enablement before saving/claiming the model turn. Return a local “voice generation is disabled” response without invoking the model.
 - **Evidence:** A temporary controller with `MediaPolicy(enabled=True, voice_enabled=False)` processed `/voice_reply Hello` and invoked the mocked model once.
 - **Acceptance check:** Under image-only policy, `/voice_reply` invokes no model/provider and creates no media job or usage charge; `/image_reply` remains available through the existing authorization flow.
+
+- **Resolution:** Reject disabled voice replies locally before creating or claiming a model turn; image replies retain their existing admission flow.
+- **Verification:** 389 core tests passed (2 optional skips); 88 installer/protocol tests passed with the pinned isolated backend. Source fixed and tested; production deployment is separate.
 
 ## Suggested implementation order
 
