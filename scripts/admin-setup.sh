@@ -15,6 +15,10 @@ if [[ ! -f /etc/os-release ]] || ! grep -q '^VERSION_ID="24.04"' /etc/os-release
   echo "This setup script is scoped to the reviewed Ubuntu 24.04 host." >&2
   exit 1
 fi
+if systemctl is-active --quiet andrew-control.service; then
+  echo 'Stop andrew-control.service before installing a controller package.' >&2
+  exit 1
+fi
 if [[ ! -d "$SOURCE_DIR" ]]; then
   echo "Controller source not found at $SOURCE_DIR" >&2
   exit 1
@@ -147,10 +151,7 @@ KEY_CHECK=
 python3 "$PROJECT_DIR/scripts/provision-controller-data-keys.py"
 install -d -o root -g andrew-control -m 0750 "$INSTALL_DIR"
 install -d -o root -g andrew-control -m 0750 "$INSTALL_DIR/andrewbot"
-cp --no-preserve=ownership,mode -R "$SOURCE_DIR/." "$INSTALL_DIR/andrewbot/"
-chown -R root:andrew-control "$INSTALL_DIR/andrewbot"
-find "$INSTALL_DIR/andrewbot" -type d -exec chmod 0750 {} +
-find "$INSTALL_DIR/andrewbot" -type f -exec chmod 0640 {} +
+python3 "$PROJECT_DIR/scripts/install-controller-package.py" "$PROJECT_DIR" "$INSTALL_DIR/andrewbot"
 
 printf 'ANDREW_DATA_DIR=/var/lib/andrew/control\nANDREW_VAULT_DIR=/var/lib/andrew/vault\nANDREW_OWNER_ID=%s\n' "$ANDREW_OWNER_ID" > /etc/andrew/controller.conf
 chown root:root /etc/andrew/controller.conf

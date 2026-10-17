@@ -24,6 +24,10 @@ class SkillCatalog:
     def __init__(self, root=None):
         self.root = Path(root) if root is not None else SKILL_ROOT
 
+    def validate(self):
+        for name in SKILL_DOCUMENT_HASHES:
+            self.execute('skills.load', {'name': name})
+
     def execute(self, name, arguments):
         if not isinstance(arguments, dict):
             raise ValueError('Skill arguments must be an object')

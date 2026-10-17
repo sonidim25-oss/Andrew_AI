@@ -66,3 +66,20 @@ Post-deployment verification matched all 21 installed module hashes and validate
 Every row in all 33 database tables matches the pre-install snapshot, including lifecycle and conversation IDs, messages, held deliveries, memory, research, and spending. Both existing sample media artifacts retain their original checksums and delivered message IDs. No wake, replay, paid request, avatar update, or repeated sample delivery occurred. Private verification summary: `media-deployment-verification.json` in the evidence directory.
 
 The running process confirms images enabled, voice disabled, and $3/month, $0.20/day, $0.10/job limits. The skill files and systemd setting reside on persistent server storage and remain part of the committed deployment source. Future updates must continue deploying the skill assets alongside their version-bound loader; they are not stored in Andrew's disposable execution container.
+
+
+## Complete package deployment — REVIEW-004 source correction
+
+All four general controller entrypoints now use `scripts/install-controller-package.py`:
+initial administrator setup, phase-one activation, validate/start, and browser
+commissioning. It plans trusted documents before changing the installed loader,
+installs modules/documents together, and rolls back both if the installation is
+interrupted. Private package backups also support explicit `--restore-backup`
+recovery. Browser commissioning includes these document backups in its outer
+rollback. Unrecognized local document edits are refused before module changes.
+
+Normal startup and validation now verify every trusted skill document before
+creating remote clients. A missing, changed, oversized or symlinked document
+therefore fails acceptance instead of advertising a package that cannot load its
+skills. These are source changes; the historical live verification above does
+not establish that this correction is already installed.

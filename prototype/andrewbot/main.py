@@ -29,6 +29,7 @@ from .media import MediaService, MediaWorker, load_media_policy
 from .media_provider import OpenRouterMedia
 from .dispatch import ControllerDispatch
 from .latency import LatencyMetrics
+from .skills import SkillCatalog
 
 
 def close_controller_resources(dispatch, gateway_thread, history, store):
@@ -130,6 +131,12 @@ def run(validate_only=False):
         logging.error('Restored database is halted pending administrator billing and action reconciliation')
         store.close()
         return 2 if validate_only else 0
+    try:
+        SkillCatalog().validate()
+    except ValueError:
+        logging.error('Startup validation failed: trusted skill documents unavailable or changed')
+        store.close()
+        return 2
     try:
         memory_backup_key = systemd_credential_bytes("andrew-memory-backup-key")
     except Exception as error:

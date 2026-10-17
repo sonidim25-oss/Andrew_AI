@@ -71,7 +71,9 @@ rollback() {
     for file in "${managed[@]}"; do
       if [ -e "$BACKUP$file" ]; then cp -a "$BACKUP$file" "$file" || restore_failed=1; else rm -f "$file" || restore_failed=1; fi
     done
-    if [ -d "$BACKUP/controller-package" ]; then
+    if [ -f "$BACKUP/controller-assets.json" ]; then
+      python3 "$PROJECT/scripts/install-controller-package.py" --restore-backup "$BACKUP/controller-assets.json" || restore_failed=1
+    elif [ -d "$BACKUP/controller-package" ]; then
       rm -rf /opt/andrew/prototype/andrewbot
       cp -a "$BACKUP/controller-package" /opt/andrew/prototype/andrewbot || restore_failed=1
     fi
@@ -255,7 +257,7 @@ controller_stopped=1
 systemctl stop andrew-control.service
 python3 "$PROJECT/scripts/verify-runtime-state.py" capture "$BACKUP/controller-state.json"
 install -d -o root -g andrew-control -m 0750 /opt/andrew/prototype /opt/andrew/prototype/andrewbot
-for file in "$PROJECT"/prototype/andrewbot/*.py; do install -o root -g andrew-control -m 0640 "$file" /opt/andrew/prototype/andrewbot/; done
+python3 "$PROJECT/scripts/install-controller-package.py" "$PROJECT" /opt/andrew/prototype/andrewbot --backup "$BACKUP/controller-assets.json"
 # Root-owned, code/image/policy-bound proof written only after all acceptance commands succeed.
 check='administrator acceptance proof'
 PYTHONPATH=/opt/andrew/prototype python3 - "$BACKUP" <<'PY'

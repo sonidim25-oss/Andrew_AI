@@ -45,9 +45,7 @@ on_exit() {
 trap on_exit EXIT
 
 install -d -o root -g root -m 0755 "$TARGET/andrewbot" "$TARGET/tests" /etc/systemd/system/andrew-control.service.d
-for file in "$SOURCE"/andrewbot/*.py; do
-  install -o root -g root -m 0644 "$file" "$TARGET/andrewbot/"
-done
+python3 "$PROJECT/scripts/install-controller-package.py" "$PROJECT" "$TARGET/andrewbot"
 for file in "$SOURCE"/tests/*.py; do
   install -o root -g root -m 0644 "$file" "$TARGET/tests/"
 done

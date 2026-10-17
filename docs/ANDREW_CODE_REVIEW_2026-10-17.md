@@ -22,10 +22,10 @@ Passing existing tests does not cover these missing scenarios. These are code-le
 | --- | --- | ---: |
 | P0 — Extra high | Immediate uncontrolled loss, unauthorized execution, or equivalent critical behavior | 0 confirmed |
 | P1 — High | Paid-request uncertainty, duplicate-delivery risk, or incorrect spending recovery | 0 |
-| P2 — Medium | Broken supported operations, deployment gaps, or reproducible runtime races | 4 |
+| P2 — Medium | Broken supported operations, deployment gaps, or reproducible runtime races | 3 |
 | P3 — Low | Avoidable inference cost or misleading capability handling | 1 |
 
-No P0 finding was established; the empty category is not a guarantee that none exists. 5 tasks remain open.
+No P0 finding was established; the empty category is not a guarantee that none exists. 4 tasks remain open.
 
 ## P0 — Extra high
 
@@ -73,12 +73,15 @@ No confirmed tasks at this priority.
 
 ### REVIEW-004 — Install skill assets through every supported deployment path
 
-- [ ] **Name:** Package trusted skill documents with the controller everywhere.
+- [x] **Name:** Package trusted skill documents with the controller everywhere.
 - **Short description:** The incident installer includes the three Markdown documents, but the other deployment scripts install Python modules without those documents. Fresh installations advertise three skills that cannot be loaded. A later update through these paths can install a new document-hash manifest while leaving incompatible old Markdown. Controller startup does not detect the missing/mismatched assets.
 - **Location:** `scripts/validate-and-start-controller.sh:38–41`; also `scripts/admin-setup.sh:148–153`, `scripts/activate-phase1.sh:47–50`, and `scripts/enable-browser-runtime.sh:257–258`.
 - **Short fix suggestion:** Reuse the trusted asset planning/install/rollback logic in every entry point. Validate all skill documents as part of package acceptance before reporting startup success, and preserve/refuse unknown local changes consistently.
 - **Evidence:** Recreating the Python-only deployed layout in a temporary directory caused `skills.list` to advertise all three skills while every `skills.load` failed with “Trusted skill document unavailable or changed.” Source inspection confirms these scripts do not install `/opt/andrew/skills`.
 - **Acceptance check:** A fresh-install fixture and an upgrade fixture for each supported path can load all three exact expected documents. An interrupted upgrade restores matching loader/document versions. The currently deployed incident-installer path already includes these assets; this task addresses the other paths.
+
+- **Resolution:** The four general deployment entrypoints now share a transactional module/document installer using trusted skill asset planning and checks. It preserves private backups, restores both loader and documents on interruption, and browser commissioning includes them in outer rollback. Startup validates all exact documents before remote clients initialize. Unknown local documents are refused before replacing modules.
+- **Verification:** 383 core tests passed (2 optional skips); 88 pinned-fixture script tests passed. Fixtures execute each entrypoint package command for fresh install and upgrade, plus partial-write rollback, durable-backup rollback, local-edit refusal and startup rejection. Four shell entrypoints passed syntax checks. Source fixed and tested; production deployment is separate.
 
 ### REVIEW-005 — Allow a fresh approval when returning to an older avatar
 

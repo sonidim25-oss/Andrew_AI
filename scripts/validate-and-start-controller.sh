@@ -36,7 +36,7 @@ python3 "$PROJECT/scripts/provision-controller-data-keys.py"
 
 # Install the current package and unit together; keep host configuration in drop-ins.
 install -d -o root -g andrew-control -m 0750 /opt/andrew/prototype "$TARGET"
-find "$SOURCE" -maxdepth 1 -type f -name '*.py' -exec install -o root -g andrew-control -m 0640 {} "$TARGET/" \;
+python3 "$PROJECT/scripts/install-controller-package.py" "$PROJECT" "$TARGET"
 for module in "$SOURCE/"*.py; do
   cmp -s "$module" "$TARGET/${module##*/}" || { echo "Installed module mismatch: ${module##*/}" >&2; exit 1; }
 done

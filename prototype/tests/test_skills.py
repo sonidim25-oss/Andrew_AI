@@ -9,6 +9,33 @@ from andrewbot.skills import SkillCatalog, SKILL_DOCUMENT_HASHES, SKILL_INDEX_PR
 
 
 class SkillCatalogTests(unittest.TestCase):
+    def test_package_acceptance_validates_every_document(self):
+        self.assertTrue(callable(getattr(SkillCatalog, 'validate', None)),
+                        'startup needs complete skill-asset validation')
+        SkillCatalog().validate()
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(ValueError):
+                SkillCatalog(directory).validate()
+
+    def test_missing_deployed_documents_fail_before_remote_clients_initialize(self):
+        import os
+        from andrewbot import main
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Mock()
+            vault.names.return_value = ['telegram_bot', 'openrouter_api']
+            vault.get_secret.return_value = 'fixture-token'
+            with patch('andrewbot.main.Vault', return_value=vault), \
+                 patch('andrewbot.main.data_directory', return_value=Path(directory)), \
+                 patch('andrewbot.main.SkillCatalog', return_value=SkillCatalog(Path(directory) / 'missing')), \
+                 patch.dict(os.environ, {'ANDREW_OWNER_ID': '17'}), \
+                 patch('andrewbot.main.TelegramAPI') as telegram, \
+                 patch('andrewbot.main.LettaAgent') as agent, \
+                 patch('andrewbot.main.systemd_credential_bytes') as credential:
+                self.assertEqual(main.run(), 2)
+            telegram.assert_not_called()
+            agent.assert_not_called()
+            credential.assert_not_called()
+
     def test_compact_index_is_metadata_only_and_does_not_read_documents(self):
         catalog = SkillCatalog()
         with patch.object(Path, 'open', side_effect=AssertionError('index must not load full skill text')):
