@@ -81,6 +81,21 @@ class WorkLimitDeployTests(unittest.TestCase):
             self.assertEqual(checks.read_bytes(), b'# original check\n')
             self.assertEqual(config.read_text().splitlines()[0], 'IMAGE=' + before['image'])
 
+    def test_reviewed_unlimited_runtime_check_can_upgrade_without_accepting_local_edits(self):
+        helper = load_assets(self)
+        baseline = (ROOT / 'scripts/tests/fixtures/verify-runtime-before-review006.py').read_bytes()
+        self.assertEqual(hashlib.sha256(baseline).hexdigest(),
+                         'f7e07c99fce3f57c99856125781a57e773b2ee1e4f6c7792576bc1f6455891c8')
+        with tempfile.TemporaryDirectory() as directory:
+            root, config, checks, other, readiness, before = self.fixture(directory, helper)
+            checks.write_bytes(baseline)
+            plan = helper.plan_assets(root, readiness, before, config, checks)
+            self.assertEqual(len(plan['files']), 2)
+            self.assertEqual(checks.read_bytes(), baseline)
+            checks.write_bytes(baseline + b'\n# unknown local edit\n')
+            with self.assertRaisesRegex(RuntimeError, 'differs from reviewed versions'):
+                helper.plan_assets(root, readiness, before, config, checks)
+
     def test_archive_hash_is_verified_before_podman_load(self):
         helper = load_assets(self)
         with tempfile.TemporaryDirectory() as directory:

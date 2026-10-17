@@ -141,3 +141,9 @@ No confirmed tasks at this priority.
 4. REVIEW-005 and REVIEW-008: avatar reuse and capability admission.
 
 Implementation should add the acceptance regressions listed above, preserve existing messages/memory/spending, and avoid replaying uncertain work. The original review made no changes. The repairs and verification recorded above were subsequently completed and pushed to `feature/andrew-multimodal`; production deployment remains separate.
+
+## Deployment preflight follow-up
+
+The first rollout attempt created `/var/backups/andrew-pre-review-deploy-IOfoqC22` and restarted the original services after backing up controller and Letta data. The reviewed-fix installer then refused before installing modules or runtime assets: its acceptance-script allowlist omitted the previously commissioned unlimited-runtime version. The installed `verify-runtime.py` exactly matches commit `22c80e0`, SHA-256 `f7e07c99fce3f57c99856125781a57e773b2ee1e4f6c7792576bc1f6455891c8`. Added only that reviewed hash, with a frozen historical fixture proving upgrade admission and rejection of local edits. This preflight correction does not itself deploy the eight fixes.
+
+Verification: all 90 installer/protocol tests passed with the pinned isolated Letta backend; all five deployment-asset tests passed. No controller or worker source changed in this follow-up.

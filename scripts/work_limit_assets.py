@@ -7,7 +7,11 @@ import pwd
 import re
 import subprocess
 
-CHECK_BASELINE_HASHES = frozenset({'f48cdee1869c651bdcfd3325b9f43170ff3604a80492762510fd6641bb5be64a'})
+CHECK_BASELINE_HASHES = frozenset({
+    'f48cdee1869c651bdcfd3325b9f43170ff3604a80492762510fd6641bb5be64a',
+    # verify-runtime.py at 22c80e0: commissioned unlimited-runtime check.
+    'f7e07c99fce3f57c99856125781a57e773b2ee1e4f6c7792576bc1f6455891c8',
+})
 IMAGE_SOURCES = frozenset({'runtime/Containerfile.release', 'runtime/browser_entry.py',
                            'runtime/worker_entry.py', 'prototype/andrewbot/browser_protocol.py'})
 
