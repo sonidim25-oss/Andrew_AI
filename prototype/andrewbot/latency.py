@@ -31,7 +31,7 @@ def record_failure(error, category=None):
 
 class LatencyMetrics:
     STAGES = frozenset({'poll', 'inbox_wait', 'control', 'chat', 'schedule',
-                        'queued', 'autonomous', 'outbox_wait', 'send', 'diary', 'backup'})
+                        'queued', 'autonomous', 'outbox_wait', 'send', 'diary', 'backup', 'media_send', 'media_generate'})
     WALL_AGES = frozenset({'inbox_wait', 'outbox_wait'})
 
     def __init__(self, clock=time.monotonic):

@@ -90,7 +90,7 @@ class IncidentFixTests(unittest.TestCase):
             manifest = {}
             installed_data = (b'# unreviewed change\n' if unknown_installed else
                               b'# reviewed intermediate\n' if intermediate else b'# original\n')
-            names = (['appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'workers.py', 'model.py', 'runner_client.py', 'process_limits.py']
+            names = (['appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'workers.py', 'model.py', 'runner_client.py', 'process_limits.py', 'media.py', 'media_provider.py']
                      if p1 else ['appserver.py', 'configuration.py', 'gateway.py', 'sessions.py'])
             for name in names:
                 (source / name).write_bytes(b'# tested\n')
@@ -254,6 +254,29 @@ class IncidentFixTests(unittest.TestCase):
                 store.claim_diary_sender(entry)
                 with self.assertRaises(RuntimeError):
                     installer.check_idle(path)
+            finally:
+                store.close()
+
+    def test_media_modules_are_deployed_and_rolled_back(self):
+        root = Path(__file__).resolve().parents[2]
+        manifest = json.loads((root / 'scripts/p1-fix-manifest.json').read_text())
+        self.assertIn('media.py', manifest)
+        self.assertIn('media_provider.py', manifest)
+        self.exercise_installer(p1=True, new_module='media.py', fail_start=True)
+
+    def test_idle_refuses_active_media_attempt(self):
+        from andrewbot.store import Store
+        from andrewbot.media import MediaService, MediaPolicy
+        installer = load('install-p1-fixes')
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / 'state.db')
+            try:
+                store.set_state('sleeping', '1')
+                media = MediaService(store, Path(directory) / 'artifacts', 42, MediaPolicy(enabled=True))
+                media.submit('voice', 'fixture', 'fixture', owner_requested=True)
+                media.claim()
+                with self.assertRaises(RuntimeError):
+                    installer.check_idle(store.path)
             finally:
                 store.close()
 

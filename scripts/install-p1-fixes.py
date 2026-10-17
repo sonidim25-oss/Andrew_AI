@@ -149,6 +149,12 @@ def check_idle(database=Path('/var/lib/andrew/control/controller.sqlite3')):
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='diary_delivery_claims'").fetchone():
             if db.execute('SELECT count(*) FROM diary_delivery_claims').fetchone()[0]:
                 raise RuntimeError('Active diary delivery prevents safe installation')
+        for table, predicate in (
+                ('media_jobs', "state IN ('queued','running') OR (state='succeeded' AND delivery IN ('pending','sending'))"),
+                ('media_avatar_proposals', "state IN ('approved','applying')")):
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                if db.execute(f'SELECT count(*) FROM {table} WHERE {predicate}').fetchone()[0]:
+                    raise RuntimeError('Pending media work prevents safe installation')
 
 
 def snapshot_store(backup, database=Path('/var/lib/andrew/control/controller.sqlite3')):
@@ -207,7 +213,7 @@ def main():
     if os.geteuid() != 0:
         raise SystemExit('Run this installer with sudo in your server terminal.')
     manifest = json.loads((ROOT / 'scripts/p1-fix-manifest.json').read_text())
-    if set(manifest) != {'appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'workers.py', 'model.py', 'runner_client.py', 'process_limits.py'}:
+    if set(manifest) != {'appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'workers.py', 'model.py', 'runner_client.py', 'process_limits.py', 'media.py', 'media_provider.py'}:
         raise SystemExit('Unexpected module manifest; installation refused.')
     replacements = {}
     originals = {}
@@ -221,7 +227,7 @@ def main():
             raise SystemExit('Symlink in installed module; installation refused: ' + name)
         original = path.read_bytes() if path.exists() else None
         installed_hash = hashlib.sha256(original).hexdigest() if original is not None else None
-        if installed_hash is None and (name not in {'latency.py', 'workers.py'} or hashes['original'] is not None):
+        if installed_hash is None and (name not in {'latency.py', 'workers.py', 'media.py', 'media_provider.py'} or hashes['original'] is not None):
             raise SystemExit('Required installed module missing; installation refused: ' + name)
         reviewed_hashes = {hashes['original'], hashes['tested'], *hashes.get('reviewed', {}).keys()}
         if installed_hash not in reviewed_hashes:

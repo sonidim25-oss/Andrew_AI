@@ -28,9 +28,13 @@ class ModelWorker:
         if not self._stop.is_set():
             self._ready.set()
 
-    def stop(self, timeout=2):
+    def request_stop(self):
+        """Close admission and wake the worker without waiting for its action."""
         self._stop.set()
         self._ready.set()
+
+    def stop(self, timeout=2):
+        self.request_stop()
         if self._thread is not None:
             self._thread.join(timeout=max(0, timeout))
         return self._thread is None or not self._thread.is_alive()

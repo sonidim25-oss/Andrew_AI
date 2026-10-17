@@ -9,6 +9,7 @@ from .telegram_menu import BUTTON_COMMANDS, HELP_TEXT
 from .appserver import AppServerClient, LettaTurnError, LettaTurnCancelled
 from .memory import ResearchJournal, validate_memory_text
 from .gmail_tools import GMAIL_TOOL_NAMES
+from .media import MEDIA_TOOL_NAMES, MEDIA_AUTHORIZATION
 import json
 
 
@@ -17,8 +18,9 @@ class Controller:
                  monthly_reserve_usd=1.0, daily_target_usd=0.30,
                  timezone_name="America/Toronto", fallback_wake_time="09:00",
                  autonomous_enabled=False, fallback_enabled=False, memory_service=None, model_config=None,
-                 tool_runtime=None, visit_history=None, gmail_tools=None, conversation_idle_seconds=300, health_snapshot=None):
+                 tool_runtime=None, visit_history=None, gmail_tools=None, conversation_idle_seconds=300, health_snapshot=None, media=None):
         self.store = store
+        self.media = media
         self.health_snapshot = health_snapshot
         self.model = model
         self.owner_id = int(owner_id)
@@ -105,9 +107,15 @@ class Controller:
         text = text.strip()
         text = BUTTON_COMMANDS.get(text, text)
         command = text.split(maxsplit=1)[0].split("@", 1)[0].lower()
-        if command.startswith("/"):
+        media_reply_kind = {'/voice_reply': 'voice', '/image_reply': 'image'}.get(command)
+        if media_reply_kind:
+            if self.media is None or not self.media.policy.enabled:
+                return 'Media generation is disabled.'
+            if len(text.split(maxsplit=1)) != 2:
+                return 'Add your question after ' + command
+        if command.startswith("/") and not media_reply_kind:
             self.store.set_state("telegram_wake_prompt_until", "")
-            return self._command(command, text)
+            return self._command(command, text, update_id=update.get("update_id"))
         prompt_until = self.store.get_state("telegram_wake_prompt_until", "")
         if prompt_until and allow_time_entry:
             try:
@@ -146,7 +154,11 @@ class Controller:
         if not self.store.claim_owner_message(self.owner_id, message_id):
             return "Your message is saved for delivery."
         try:
-            reply, usage = self.model.reply(messages)
+            if media_reply_kind:
+                messages[-1]['content'] += (f'\nThe owner explicitly authorizes one {media_reply_kind} response in this turn. '
+                                            f'Use {media_reply_kind}.generate with owner_request_id="owner-reply:{message_id}". '
+                                            'Do not claim delivery before the media job is acknowledged.')
+            reply, usage = self._reply_with_media(messages, message_id, media_reply_kind)
             month, day = self._periods()
             actual = self._actual_cost(usage)
             if not usage.get("accounted_by_gateway"):
@@ -287,9 +299,17 @@ class Controller:
             self.store.add_activity("Queued message replay outcome uncertain; messages held to avoid duplicate delivery")
             return self.failed_turn(error, owner_revision)
 
+    def _reply_with_media(self, messages, message_id, kind):
+        authorization = (self.media, kind, 'owner-reply:' + str(message_id)) if kind and self.media else None
+        token = MEDIA_AUTHORIZATION.set(authorization)
+        try:
+            return self.model.reply(messages)
+        finally:
+            MEDIA_AUTHORIZATION.reset(token)
+
     def execute_tool(self, name, arguments):
         known = (AppServerClient.SAFE_CONTROLLER_TOOL_NAMES | AppServerClient.EXTERNAL_TOOL_NAMES
-                 | GMAIL_TOOL_NAMES)
+                 | GMAIL_TOOL_NAMES | MEDIA_TOOL_NAMES)
         context = self.store.research_tool_context()
         outcome = 'error'
         try:
@@ -306,7 +326,7 @@ class Controller:
                 kind = "personality" if name == "memory_propose_personality_edit" else "experience"
                 self.memory_service.reject_edit_attempt(kind)
             raise ValueError("tool arguments must be an object")
-        read_tools = {"check_budget", "recent_activity", "memory_search", "gmail.status", 'research.list', 'research.get', 'research.observations'}
+        read_tools = {"check_budget", "recent_activity", "memory_search", "gmail.status", "media.status", "media.get", 'research.list', 'research.get', 'research.observations'}
         if self.store.get_state("paused", "0") == "1" and name not in read_tools:
             raise ValueError("owner pause can only be cleared by the owner with /wake")
         if self.store.get_state("sleeping", "0") == "1" and name not in read_tools:
@@ -314,6 +334,10 @@ class Controller:
         if (name in {"sleep", "wake_at"} and self.store.get_state("active_session_id", "")
                 and not self.store.diary_entry(datetime.now(ZoneInfo("America/Toronto")).date().isoformat())):
             raise ValueError("save today's diary before requesting autonomous sleep")
+        if name in {'media.status', 'media.get', 'voice.generate', 'image.generate', 'image.edit', 'profile.propose_avatar'}:
+            if self.media is None:
+                raise ValueError('Media unavailable')
+            return json.dumps(self.media.execute(name, arguments), ensure_ascii=False)
         if name.startswith('research.'):
             return json.dumps(self.research.execute(name.split('.', 1)[1], arguments), ensure_ascii=False)
         if name in {"memory_search", "memory_add_experience", "memory_propose_personality_edit"}:
@@ -467,7 +491,39 @@ class Controller:
                          f"failures={row['failures']}; last success age={duration(row['last_success_age_seconds'])}")
         return '\n'.join(lines)
 
-    def _command(self, command, text=""):
+    def _command(self, command, text="", update_id=None):
+        if command in {'/media_status', '/media_budget', '/voice', '/image', '/image_edit', '/media_cancel', '/voice_on', '/voice_off', '/avatar_propose', '/avatar_approve'}:
+            if self.media is None:
+                return 'Media is unavailable.'
+            if command in {'/media_status', '/media_budget'}:
+                return json.dumps(self.media.status(), ensure_ascii=False)
+            if command in {'/voice_on', '/voice_off'}:
+                return 'Spontaneous media is disabled in this release. Use /voice <text> for an explicit voice request.'
+            argument = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) == 2 else ''
+            if command in {'/avatar_propose', '/avatar_approve'}:
+                try:
+                    if command == '/avatar_propose':
+                        return 'Avatar proposal: ' + self.media.propose_avatar(argument)
+                    return 'Avatar approved for background publication.' if self.media.approve_avatar(argument) else 'Proposal is unavailable or already attempted.'
+                except ValueError as error:
+                    return str(error)
+            if command == '/media_cancel':
+                return 'Media job cancelled.' if self.media.cancel(argument) else 'Job cannot be cancelled; running or uncertain calls are never retried automatically.'
+            if update_id is None:
+                return 'Media generation requires a saved owner command.'
+            try:
+                request_id = 'telegram:' + str(update_id)
+                reference_id = None
+                if command == '/image_edit':
+                    parts = argument.split(maxsplit=1)
+                    if len(parts) != 2:
+                        return 'Use /image_edit <image_job_id> <edit instruction>.'
+                    reference_id, argument = parts
+                job = self.media.submit('voice' if command == '/voice' else 'image', argument, request_id,
+                                        owner_requested=True, reference_id=reference_id)
+                return f'Media job queued: {job}; owner request: {request_id}'
+            except ValueError as error:
+                return str(error)
         if command == '/health':
             return self._health()
         if command == '/research':

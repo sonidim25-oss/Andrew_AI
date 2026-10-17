@@ -14,7 +14,8 @@ from .telegram import deliver_saved_message
 class ControllerDispatch:
     def __init__(self, store, controller, telegram, sessions, limiter,
                  owner_id, autonomous_enabled, fallback_enabled, should_stop=lambda: False,
-                 metrics=None, utc_now=None, diary_action=None):
+                 metrics=None, utc_now=None, diary_action=None, media_worker=None):
+        self.media_worker = media_worker
         self.store, self.controller, self.telegram = store, controller, telegram
         self.sessions, self.limiter = sessions, limiter
         self.owner_id = owner_id
@@ -57,6 +58,8 @@ class ControllerDispatch:
         self._reply_thread.start()
         self._system_reply_thread.start()
         self._model_worker.start()
+        if self.media_worker is not None:
+            self.media_worker.start()
         if self._diary_worker is not None:
             self._diary_worker.start()
 
@@ -66,13 +69,21 @@ class ControllerDispatch:
         self._reply_ready.set()
         self._system_reply_ready.set()
         deadline = time.monotonic() + max(0, timeout)
+        # Close every worker's admission before any join can consume the
+        # shared deadline. In-flight calls retain storage until they settle.
+        self._model_worker.request_stop()
+        if self._diary_worker is not None:
+            self._diary_worker.request_stop()
+        if self.media_worker is not None:
+            self.media_worker.request_stop()
         model_stopped = self._model_worker.stop(timeout=max(0, deadline - time.monotonic()))
         diary_stopped = self._diary_worker is None or self._diary_worker.stop(timeout=max(0, deadline - time.monotonic()))
+        media_stopped = self.media_worker is None or self.media_worker.stop(timeout=max(0, deadline - time.monotonic()))
         workers = (self._poll_thread, self._reply_thread, self._system_reply_thread)
         for worker in workers:
             if worker is not None:
                 worker.join(timeout=max(0, deadline - time.monotonic()))
-        return model_stopped and diary_stopped and all(worker is None or not worker.is_alive() for worker in workers)
+        return model_stopped and diary_stopped and media_stopped and all(worker is None or not worker.is_alive() for worker in workers)
 
     def _reply_loop(self, lane):
         ready = self._system_reply_ready if lane == 'system' else self._reply_ready
@@ -100,7 +111,7 @@ class ControllerDispatch:
                     and (message.get('chat') or {}).get('id') == owner_id
                     and (message.get('chat') or {}).get('type') == 'private'
                     and not any(key in message for key in ('forward_origin', 'forward_from', 'forward_from_chat', 'forward_sender_name'))
-                    and ((command and command[0].startswith('/')) or (
+                    and ((command and command[0].startswith('/') and command[0].split('@', 1)[0].lower() not in {'/voice_reply', '/image_reply'}) or (
                         self.store.get_state('telegram_wake_prompt_until', '')
                         and update.get('update_id', -1) > int(self.store.get_state('telegram_wake_prompt_after_update_id', '-1')))))
 
@@ -135,7 +146,7 @@ class ControllerDispatch:
             # message a local time response before a later /wake executes.
             for _ in range(50):
                 with self._input_lock:
-                    pending = self.store.pending_owner_controls(self.owner_id, BUTTON_COMMANDS)
+                    pending = self.store.pending_owner_controls(self.owner_id, BUTTON_COMMANDS, model_commands=('/voice_reply', '/image_reply'))
                     if not pending or self._poll_stop.is_set() or self.should_stop():
                         return
                     self.process_updates(controls_only=True, updates=pending[:1])

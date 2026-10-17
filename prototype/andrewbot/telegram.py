@@ -1,10 +1,23 @@
 import json
 import time
+import uuid
 from collections import deque
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from .telegram_menu import command_keyboard
 from .latency import LatencyMetrics
+
+
+class TelegramMediaError(RuntimeError):
+    """Fixed diagnostics only: Telegram URLs contain the bot credential."""
+    CATEGORIES = frozenset({'http_error', 'api_rejected', 'timeout',
+                            'network_error', 'invalid_response', 'unexpected_error'})
+
+    def __init__(self, category, http_status=None):
+        self.category = category if category in self.CATEGORIES else 'unexpected_error'
+        self.http_status = http_status if type(http_status) is int and 100 <= http_status <= 599 else None
+        detail = self.category + (f', HTTP {self.http_status}' if self.http_status is not None else '')
+        super().__init__('Telegram media delivery outcome uncertain (' + detail + ')')
 
 
 def split_message(text, limit=3800):
@@ -77,6 +90,68 @@ class TelegramAPI:
             result = self.call("sendMessage", {"chat_id": chat_id, "text": chunk,
                                               "reply_markup": command_keyboard()})
         return result
+
+    def send_media(self, chat_id, data, mime, caption=None):
+        if mime not in {'audio/mpeg', 'image/png', 'image/jpeg'} or not isinstance(data, bytes) or not 0 < len(data) <= 8 * 1024 * 1024:
+            raise ValueError('Invalid Telegram media')
+        voice = mime == 'audio/mpeg'
+        return self._upload('sendVoice' if voice else 'sendPhoto',
+                            {'chat_id': str(chat_id), **({'caption': caption[:1000]} if caption else {})},
+                            'voice' if voice else 'photo', data, mime)
+
+    def set_profile_photo(self, jpeg):
+        if not isinstance(jpeg, bytes) or not jpeg.startswith(b'\xff\xd8') or len(jpeg) > 2 * 1024 * 1024:
+            raise ValueError('Invalid avatar image')
+        return self._upload('setMyProfilePhoto', {'photo': json.dumps({'type': 'static', 'photo': 'attach://avatar'})},
+                            'avatar', jpeg, 'image/jpeg')
+
+    def _upload(self, method, fields, field, data, mime):
+        boundary = uuid.uuid4().hex
+        parts = []
+        for name, value in fields.items():
+            parts.append((f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n').encode())
+        suffix = {'audio/mpeg': 'mp3', 'image/png': 'png', 'image/jpeg': 'jpg'}[mime]
+        parts.extend([(f'--{boundary}\r\nContent-Disposition: form-data; name="{field}"; filename="media.{suffix}"\r\nContent-Type: {mime}\r\n\r\n').encode(),
+                      data, f'\r\n--{boundary}--\r\n'.encode()])
+        request = Request(f'https://api.telegram.org/bot{self.token}/{method}', data=b''.join(parts),
+                          headers={'Content-Type': 'multipart/form-data; boundary=' + boundary}, method='POST')
+        try:
+            with self.metrics.measure('media_send'):
+                with self.opener(request, timeout=self.timeout if self.timeout is not None else 30) as response:
+                    raw = response.read(1024 * 1024 + 1)
+                    if len(raw) > 1024 * 1024:
+                        raise TelegramMediaError('invalid_response')
+                    result = json.loads(raw)
+            if not isinstance(result, dict):
+                raise TelegramMediaError('invalid_response')
+            if result.get('ok') is False:
+                raise TelegramMediaError('api_rejected', result.get('error_code'))
+            if result.get('ok') is not True or 'result' not in result:
+                raise TelegramMediaError('invalid_response')
+            value = result['result']
+            if method in {'sendVoice', 'sendPhoto'}:
+                if not isinstance(value, dict) or type(value.get('message_id')) is not int or value['message_id'] <= 0:
+                    raise TelegramMediaError('invalid_response')
+            elif method == 'setMyProfilePhoto' and value is not True:
+                raise TelegramMediaError('invalid_response')
+            return value
+        except TelegramMediaError:
+            raise
+        except HTTPError as error:
+            status = error.code
+            error.close()
+            raise TelegramMediaError('http_error', status) from None
+        except URLError as error:
+            category = 'timeout' if isinstance(error.reason, TimeoutError) else 'network_error'
+            raise TelegramMediaError(category) from None
+        except TimeoutError:
+            raise TelegramMediaError('timeout') from None
+        except OSError:
+            raise TelegramMediaError('network_error') from None
+        except (ValueError, UnicodeError):
+            raise TelegramMediaError('invalid_response') from None
+        except Exception:
+            raise TelegramMediaError('unexpected_error') from None
 
     def get_me(self):
         return self.call("getMe", {})

@@ -11,6 +11,7 @@ import threading
 from urllib.parse import urlsplit
 from .configuration import MAX_LETTA_OUTPUT_TOKENS, ModelConfig, load_model_config
 from .gmail_tools import GMAIL_TOOLS, GMAIL_TOOL_NAMES
+from .media import MEDIA_TOOLS, MEDIA_TOOL_NAMES
 from .gmail_policy import load_permissions as gmail_permissions
 from .runner_client import TOOL_CANCELLATION
 
@@ -278,13 +279,14 @@ class AppServerClient:
             _lifecycle_tool['description'] += ' Optional reason saves a brief stopping note; no explanation is required.'
 
     EXTERNAL_TOOL_NAMES = frozenset({'python.run','node.run','shell.run','browser.open','browser.control','browser.account'})
-    CONTROLLER_TOOLS = [{"tools": CONTROLLER_TOOLS[0]["tools"] + GMAIL_TOOLS}]
+    CONTROLLER_TOOLS = [{"tools": CONTROLLER_TOOLS[0]["tools"] + GMAIL_TOOLS + MEDIA_TOOLS}]
 
     @property
     def tool_names(self):
         return (self.SAFE_CONTROLLER_TOOL_NAMES
                 | (self.EXTERNAL_TOOL_NAMES if getattr(self, 'external_tools_enabled', False) else frozenset())
-                | (GMAIL_TOOL_NAMES if getattr(self, 'gmail_tools_enabled', False) else frozenset()))
+                | (GMAIL_TOOL_NAMES if getattr(self, 'gmail_tools_enabled', False) else frozenset())
+                | (MEDIA_TOOL_NAMES if getattr(self, 'media_tools_enabled', False) else frozenset()))
 
     def __init__(self, url="ws://127.0.0.1:8283/ws", timeout=120):
         self.url = url
@@ -602,6 +604,7 @@ class LettaAgent:
             self._startup_check("Letta agent ID persistence", self.store.set_state, "letta_agent_id", self.agent_id)
             client.external_tools_enabled = getattr(self, "external_tools_enabled", False)
             client.gmail_tools_enabled = gmail_permissions()['enabled']
+            client.media_tools_enabled = getattr(self, 'media_tools_enabled', False)
             self._startup_check("Letta capability instructions", client.request,
                 {"type":"agent_update", "agent_id":self.agent_id,"body":{"system":self.system_prompt,
                  "model_settings": {"provider_type": "openai-compatible", "temperature": 0.7,
@@ -692,6 +695,7 @@ class LettaAgent:
             if cancelled.is_set():
                 raise LettaTurnCancelled('Owner cancelled this turn')
             client.gmail_tools_enabled = gmail_permissions()['enabled']
+            client.media_tools_enabled = getattr(self, 'media_tools_enabled', False)
             if not self.agent_id:
                 self.agent_id = self.store.get_state("letta_agent_id", "")
             if not self.agent_id:

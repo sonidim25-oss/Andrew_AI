@@ -789,7 +789,7 @@ class Store:
         return [(row["update_id"], json.loads(row["payload"])) for row in rows]
 
     @database_locked
-    def pending_owner_controls(self, owner_id, buttons=()):
+    def pending_owner_controls(self, owner_id, buttons=(), model_commands=()):
         text = "lower(trim(COALESCE(json_extract(payload,'$.message.text'),'')))"
         clauses, values = [f"{text} GLOB '/*'"], [owner_id, owner_id]
         for button in buttons:
@@ -798,6 +798,15 @@ class Store:
         if self.get_state('telegram_wake_prompt_until', ''):
             clauses.append('update_id>?')
             values.append(int(self.get_state('telegram_wake_prompt_after_update_id', '-1')))
+        exclusion = ''
+        if model_commands:
+            for whitespace in (9, 10, 11, 12, 13):
+                text = f"replace({text},char({whitespace}),' ')"
+            text = f'trim({text})'
+            command = f"substr({text},1,instr({text} || ' ',' ')-1)"
+            base_command = f"substr({command},1,instr({command} || '@','@')-1)"
+            exclusion = f"AND {base_command} NOT IN ({','.join('?' for _ in model_commands)}) "
+            values.extend(model_commands)
         rows = self.connection.execute(
             "SELECT update_id,payload FROM telegram_inbox WHERE "
             "json_extract(payload,'$.message.from.id')=? AND json_extract(payload,'$.message.chat.id')=? "
@@ -807,8 +816,8 @@ class Store:
             "AND json_type(payload,'$.message.forward_from_chat') IS NULL "
             "AND json_type(payload,'$.message.forward_sender_name') IS NULL "
             "AND json_type(payload,'$.message.text')='text' "
-            "AND update_id NOT IN (SELECT update_id FROM telegram_claims) AND (" + ' OR '.join(clauses) + ') '
-            "ORDER BY update_id LIMIT 50", values).fetchall()
+            "AND update_id NOT IN (SELECT update_id FROM telegram_claims) AND (" + ' OR '.join(clauses) + ') ' +
+            exclusion + "ORDER BY update_id LIMIT 50", values).fetchall()
         return [(row['update_id'], json.loads(row['payload'])) for row in rows]
 
     @database_locked

@@ -25,6 +25,8 @@ from .browser_client import BrowserClient
 from .browser_tools import BrowserTools
 from .account_broker import StoredAccountBroker
 from .gmail_tools import GmailTools
+from .media import MediaService, MediaWorker, load_media_policy
+from .media_provider import OpenRouterMedia
 from .dispatch import ControllerDispatch
 from .latency import LatencyMetrics
 
@@ -90,6 +92,7 @@ def run(validate_only=False):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
         model_config = load_model_config(os.environ)
+        media_policy = load_media_policy(os.environ)
         lifecycle_policy = load_lifecycle_policy(os.environ)
     except ValueError as error:
         logging.error("Startup validation failed: model or lifecycle configuration (%s)", str(error))
@@ -167,6 +170,8 @@ def run(validate_only=False):
         model_config=model_config,
         owner_id=owner_id,
     )
+    media = MediaService(store, root / "media-artifacts", owner_id, media_policy)
+    agent.media_tools_enabled = media_policy.enabled
     tool_runtime = None
     if env_enabled("ANDREW_ISOLATED_RUNTIME_ENABLED", False):
         runner = RunnerClient(os.environ.get("ANDREW_RUNNER_SOCKET", "/run/andrew/runner.sock"))
@@ -190,6 +195,7 @@ def run(validate_only=False):
         visit_history=history,
         tool_runtime=tool_runtime,
         gmail_tools=GmailTools(vault_directory(), store),
+        media=media,
     )
     agent.tool_handler = controller.execute_tool
     check = "Letta provider and persistent agent initialization"
@@ -260,7 +266,8 @@ def run(validate_only=False):
     signal.signal(signal.SIGINT, stop)
     dispatch = ControllerDispatch(store, controller, telegram, sessions, limiter,
                                   owner_id, autonomous_enabled, fallback_enabled, lambda: stopping, metrics=metrics,
-                                  diary_action=deliver_diary_outbox)
+                                  diary_action=deliver_diary_outbox,
+                                  media_worker=MediaWorker(media, OpenRouterMedia(openrouter_key), telegram) if media_policy.enabled else None)
     dispatch.start()
     logging.info("Andrew Telegram controller started; secrets are loaded from the encrypted vault")
     try:
