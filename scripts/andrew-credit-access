@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ ${EUID} -ne 0 ]]; then
+  echo "Run with sudo: sudo bash $0 {status|put}" >&2
+  exit 1
+fi
+
+common=(--wait --collect --uid=andrew-control --gid=andrew-control
+  --property=LoadCredentialEncrypted=andrew-vault-key:/etc/credstore.encrypted/andrew-vault-key
+  --property=WorkingDirectory=/opt/andrew/prototype
+  --property=Environment=PYTHONPATH=/opt/andrew/prototype
+  --property=Environment=ANDREW_VAULT_DIR=/var/lib/andrew/vault)
+
+case "${1:-status}" in
+  put)
+    # The child prompts without echo. No credential enters command arguments or history.
+    systemd-run "${common[@]}" --pty /usr/bin/python3 -m andrewbot.vault_cli put openrouter_credits
+    ;;
+  status) ;;
+  *) echo "Use status or put. Never pass a key as an argument." >&2; exit 2 ;;
+esac
+
+systemd-run "${common[@]}" --pipe /usr/bin/python3 -c '
+import json
+from andrewbot.vault import Vault
+from andrewbot.model import OpenRouterModel
+vault = Vault("/var/lib/andrew/vault")
+try:
+    key = vault.get_secret("openrouter_api")
+    credit_key = vault.get_secret("openrouter_credits") if "openrouter_credits" in vault.names() else None
+finally:
+    vault.close()
+result = OpenRouterModel(key, credit_key_reader=lambda: credit_key).credit_status()
+print(json.dumps(result, indent=2))
+if result.get("credits_status") == "management_key_required":
+    print("OpenRouter requires a management key for the account balance. Use the put command to import it securely.")
+    raise SystemExit(2)
+if "credits" not in result:
+    print("Account balance could not be read; inspect the fixed status fields above.")
+    raise SystemExit(1)
+print("Account balance access verified. Andrew can read it through check_budget whenever he chooses.")
+'

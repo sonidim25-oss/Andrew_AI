@@ -152,7 +152,14 @@ def run(validate_only=False):
         logging.error("Startup validation failed: internal gateway systemd credential (%s)", type(error).__name__)
         store.close()
         return 2
-    provider = OpenRouterModel(openrouter_key, model_config=model_config)
+    def credit_key_reader():
+        # Read on demand so securely importing the balance credential needs no restart.
+        vault = Vault(vault_directory())
+        try:
+            return vault.get_secret('openrouter_credits') if 'openrouter_credits' in vault.names() else None
+        finally:
+            vault.close()
+    provider = OpenRouterModel(openrouter_key, model_config=model_config, credit_key_reader=credit_key_reader)
     memory_service = MemoryService(store)
     model_gateway = ModelGateway(
         provider, store, gateway_token, memory_service=memory_service, model_config=model_config,

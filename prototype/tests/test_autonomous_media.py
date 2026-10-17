@@ -81,6 +81,40 @@ class AutonomousMediaTests(MediaCase):
 
 
 class CreditMetadataTests(MediaCase):
+    def test_balance_credential_is_read_on_demand_and_used_only_for_account_credits(self):
+        def response(data):
+            result = Mock()
+            result.__enter__ = Mock(return_value=result)
+            result.__exit__ = Mock(return_value=False)
+            result.read.return_value = json.dumps({'data': data}).encode()
+            return result
+        opener = Mock()
+        opener.open.side_effect = [response({'usage': 4}), response({'total_credits': 25, 'total_usage': 4}),
+                                   response({'usage': 5}), response({'total_credits': 25, 'total_usage': 5})]
+        reader = Mock(side_effect=['first-private-credit-key', 'second-private-credit-key'])
+        model = OpenRouterModel('private-inference-key', credit_key_reader=reader)
+        with patch('urllib.request.build_opener', return_value=opener):
+            first = model.credit_status()
+            second = model.credit_status()
+        self.assertEqual(first['credits']['remaining_usd'], 21)
+        self.assertEqual(second['credits']['remaining_usd'], 20)
+        requests = [call.args[0] for call in opener.open.call_args_list]
+        self.assertEqual([request.get_header('Authorization') for request in requests],
+                         ['Bearer private-inference-key', 'Bearer first-private-credit-key',
+                          'Bearer private-inference-key', 'Bearer second-private-credit-key'])
+        self.assertTrue(second['balance_known'])
+        self.assertNotIn('private', json.dumps(second))
+        self.assertEqual(reader.call_count, 2)
+
+    def test_balance_credential_failure_does_not_expose_secret_error_text(self):
+        reader = Mock(side_effect=RuntimeError('private credential details'))
+        opener = Mock()
+        opener.open.side_effect = urllib.error.HTTPError('fixed', 403, 'private provider text', {}, None)
+        with patch('urllib.request.build_opener', return_value=opener):
+            result = OpenRouterModel('private-inference-key', credit_key_reader=reader).credit_status()
+        self.assertEqual(result['credit_credential_status'], 'unavailable')
+        self.assertNotIn('private', json.dumps(result))
+
     def test_provider_credit_response_excludes_key_identity_and_secrets(self):
         def response(data):
             mock = Mock()

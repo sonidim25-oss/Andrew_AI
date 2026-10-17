@@ -9,8 +9,9 @@ class OpenRouterModel:
     endpoint = "https://openrouter.ai/api/v1/chat/completions"
     model_id = "qwen/qwen3.8-flash"
 
-    def __init__(self, api_key, timeout=120, model_config=None):
+    def __init__(self, api_key, timeout=120, model_config=None, credit_key_reader=None):
         self.api_key = api_key
+        self.credit_key_reader = credit_key_reader
         self.timeout = timeout
         if model_config is not None and not isinstance(model_config, ModelConfig):
             raise ValueError("model configuration is invalid")
@@ -42,11 +43,17 @@ class OpenRouterModel:
                 return None
         opener = urllib.request.build_opener(NoRedirect())
         result = {'available': False, 'currency': 'USD', 'controller_spending_caps': False}
+        credit_key = self.api_key
+        if self.credit_key_reader is not None:
+            try:
+                credit_key = self.credit_key_reader() or self.api_key
+            except Exception:
+                result['credit_credential_status'] = 'unavailable'
         for endpoint, fields in (
                 ('key', ('limit', 'limit_remaining', 'usage', 'usage_daily', 'usage_monthly')),
                 ('credits', ('total_credits', 'total_usage'))):
             request = urllib.request.Request('https://openrouter.ai/api/v1/' + endpoint,
-                                            headers={'Authorization': 'Bearer ' + self.api_key})
+                                            headers={'Authorization': 'Bearer ' + (credit_key if endpoint == 'credits' else self.api_key)})
             try:
                 with opener.open(request, timeout=10) as response:
                     raw = response.read(65537)

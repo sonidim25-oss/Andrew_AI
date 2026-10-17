@@ -16,7 +16,7 @@ def main():
     parser.add_argument("--directory", type=Path, default=default_directory())
     args = parser.parse_args()
     if args.action == "put":
-        if args.name not in {"telegram_bot", "openrouter_api", "x_username", "x_password"}:
+        if args.name not in {"telegram_bot", "openrouter_api", "openrouter_credits", "x_username", "x_password"}:
             parser.error("unsupported credential name")
         prompt_for_secret(args.name, args.directory)
         return

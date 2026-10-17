@@ -20,4 +20,18 @@ The installer validates the current acceptance record, merges only these changes
 
 The installer saves the owner's credit-management and autonomous-media guidance as a persistent memory record with `source=owner`, makes it available in the recurring memory context, and sets spontaneous TTS on. This is idempotent. Records of uncertainty and billing reservations are preserved. The installer preserves pause/sleep/error state and does not request wake or replay. After successful installation, use `/wake`, `/budget`, and `/media_status` to inspect the active behavior.
 
-Account credit reads can require permissions unavailable to the existing inference key. The installer does not replace credentials or create a management key. If the balance is unknown, Andrew sees that fact alongside spending totals.
+Account credit reads can require permissions unavailable to the existing inference key. The installer does not replace the inference credential or create a management key. Andrew can read the exact account balance whenever he chooses once an OpenRouter management credential is stored separately as `openrouter_credits`. Only the controller uses that credential for the credit-read endpoint; it is never exposed in model context or used for inference. The credential is read on demand, so importing or rotating it needs no controller restart.
+
+After installing this release, check existing access:
+
+```sh
+sudo bash /home/daniel/andrew-autonomy-media/scripts/andrew-credit-access status
+```
+
+If OpenRouter reports management permission is required, create an OpenRouter management key in the account settings and import it through the hidden terminal prompt:
+
+```sh
+sudo bash /home/daniel/andrew-autonomy-media/scripts/andrew-credit-access put
+```
+
+Do not put the key in chat or in command arguments. The helper encrypts it in the existing vault and immediately verifies account balance access. Andrew can then call `check_budget` for the live balance with no per-check owner approval.

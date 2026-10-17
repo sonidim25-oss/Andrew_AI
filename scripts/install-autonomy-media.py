@@ -15,10 +15,11 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = 'd325230'
+UPGRADE_BASES = ('b0a3439', '40418d9')
 TARGET = Path('/opt/andrew/prototype/andrewbot')
 DROPIN = Path('/etc/systemd/system/andrew-control.service.d/zz-autonomy-media.conf')
 MODULES = ('appserver.py', 'budget.py', 'controller.py', 'gateway.py', 'lifecycle_policy.py',
-           'main.py', 'media.py', 'memory.py', 'model.py', 'sessions.py', 'skills.py', 'telegram_menu.py')
+           'main.py', 'media.py', 'memory.py', 'model.py', 'sessions.py', 'skills.py', 'telegram_menu.py', 'vault_cli.py')
 SKILLS = ('voice-communication', 'image-creation')
 GUIDANCE = ('The owner has limited API credits in general and authorizes me to decide how to use them. '
             'The owner removed all controller daily, monthly, and per-job spending caps and daily media quotas. '
@@ -147,6 +148,11 @@ def prepare(backup):
             raise ValueError('Symlink in deployed module: ' + name)
         live = path.read_bytes()
         base = subprocess.check_output(['git', '-C', str(ROOT), 'show', BASE + ':prototype/andrewbot/' + name])
+        for revision in UPGRADE_BASES:
+            previous = subprocess.check_output(['git', '-C', str(ROOT), 'show', revision + ':prototype/andrewbot/' + name])
+            if live == previous:
+                base = previous
+                break
         proposed = (ROOT / 'prototype/andrewbot' / name).read_bytes()
         if hashlib.sha256(proposed).hexdigest() != tested['modules'][name]:
             raise ValueError('Proposed source changed since testing: ' + name)

@@ -1,5 +1,7 @@
 import importlib.util
 import ast
+import hashlib
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -14,6 +16,32 @@ spec.loader.exec_module(installer)
 
 
 class AutonomyInstallerTests(unittest.TestCase):
+    def test_exact_previous_release_is_a_supported_upgrade_base(self):
+        base = b'def complete():\n    return "inference"\n'
+        previous = base + b'def credit_status():\n    return "inference-key"\n'
+        proposed = previous.replace(b'return "inference-key"', b'return "balance-key"')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            installed = root / 'installed'
+            installed.mkdir()
+            (installed / 'model.py').write_bytes(previous)
+            package = root / 'prototype/andrewbot'
+            package.mkdir(parents=True)
+            (package / 'model.py').write_bytes(proposed)
+            (root / 'scripts').mkdir()
+            (root / 'scripts/autonomy-media-manifest.json').write_text(json.dumps({
+                'modules': {'model.py': hashlib.sha256(proposed).hexdigest()}}))
+            backup = root / 'backup'
+            backup.mkdir()
+            def show(args):
+                return base if args[-1].startswith(installer.BASE + ':') else previous
+            with patch.object(installer, 'ROOT', root), patch.object(installer, 'TARGET', installed), \
+                 patch.object(installer, 'MODULES', ('model.py',)), \
+                 patch.object(installer.subprocess, 'check_output', side_effect=show):
+                originals, replacements = installer.prepare(backup)
+            self.assertEqual(originals['model.py'], previous)
+            self.assertEqual(replacements['model.py'], proposed)
+
     def test_skill_merge_keeps_live_research_versions_and_updates_media_entries(self):
         base = (b"SKILL_DOCUMENT_HASHES = {'voice': 'old-voice', 'image': 'old-image', 'research': 'old-research'}\n"
                 b"SKILL_SUMMARIES = {'voice': 'requested voice', 'research': 'old research guidance'}\n"
