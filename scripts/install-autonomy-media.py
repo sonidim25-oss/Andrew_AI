@@ -63,12 +63,69 @@ def idle():
                 raise ValueError('An attempted operation is still settling; installation deferred')
 
 
+def merge_skill_catalogs(live, base, proposed):
+    """Merge literal catalog entries independently, preserving live-only skills."""
+    sources = (live, base, proposed)
+    trees = [ast.parse(source) for source in sources]
+    catalogs = {}
+    for name in ('SKILL_DOCUMENT_HASHES', 'SKILL_SUMMARIES'):
+        nodes = []
+        values = []
+        for tree in trees:
+            matches = [node.value for node in tree.body if isinstance(node, ast.Assign)
+                       and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)]
+            if len(matches) != 1:
+                raise ValueError('Expected one literal skill catalog: ' + name)
+            try:
+                value = ast.literal_eval(matches[0])
+            except (ValueError, TypeError):
+                raise ValueError('Skill catalog is no longer a literal dictionary: ' + name) from None
+            if not isinstance(value, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()):
+                raise ValueError('Unexpected skill catalog structure: ' + name)
+            nodes.append(matches[0])
+            values.append(value)
+        live_values, base_values, proposed_values = values
+        missing = object()
+        merged = {}
+        for key in dict.fromkeys([*base_values, *live_values, *proposed_values]):
+            current, previous, candidate = (value.get(key, missing) for value in values)
+            if key in SKILLS and candidate is not missing:
+                # These two documents are explicitly replaced by this release;
+                # their hashes and descriptions must match those documents.
+                selected = candidate
+            elif current == previous:
+                selected = candidate
+            elif candidate == previous or current == candidate:
+                selected = current
+            else:
+                raise ValueError('Deployed and proposed skill entries overlap: ' + name + '/' + key)
+            if selected is not missing:
+                merged[key] = selected
+        catalogs[name] = (nodes, repr(merged).encode('utf-8'))
+    normalized = []
+    for index, source in enumerate(sources):
+        lines = source.splitlines(keepends=True)
+        edits = []
+        for nodes, replacement in catalogs.values():
+            node = nodes[index]
+            start = sum(map(len, lines[:node.lineno - 1])) + node.col_offset
+            end = sum(map(len, lines[:node.end_lineno - 1])) + node.end_col_offset
+            edits.append((start, end, replacement))
+        for start, end, replacement in sorted(edits, reverse=True):
+            source = source[:start] + replacement + source[end:]
+        ast.parse(source)
+        normalized.append(source)
+    return tuple(normalized)
+
+
 def merge_source(live, base, proposed, directory, name):
     if live == proposed:
         return live
     if live == base:
         ast.parse(proposed)
         return proposed
+    if name == 'skills.py':
+        live, base, proposed = merge_skill_catalogs(live, base, proposed)
     paths = [directory / (name + suffix) for suffix in ('.live', '.base', '.proposed')]
     for path, data in zip(paths, (live, base, proposed)):
         path.write_bytes(data)
