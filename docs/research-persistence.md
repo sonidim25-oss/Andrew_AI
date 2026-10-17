@@ -1,0 +1,11 @@
+# Durable research sources and progress
+
+Andrew's standing instructions now make incremental preservation part of research he chooses to undertake. The version-bound `research-workflow` document explains the procedure. The existing journal, browser and isolated code tools are used; this adds no new tool, permission or model-triggered background downloader.
+
+Each topic uses `/workspace/research/<topic>/` for source PDFs and other needed documents, `sources.json` for public URLs and download state, and `progress.md` for findings, unresolved questions and the next concrete step. URLs should be recorded before downloads and lengthy analysis. Documents are verified before a `.part` file becomes the final source; notes are replaced atomically. A research journal entry points to the progress file, enabling later sessions to locate it. Resumption checks the actual files and preserves surviving notes rather than assuming every failed session erased all work.
+
+`/tmp` remains disposable scratch space. Browser download handles and opaque artifact IDs are not workspace files and have separate retention. Useful files must be saved into the persistent projects mount through the permitted tools. Private URLs, credentials and private reasoning do not belong in these records. Saving does not block owner controls or force research before sleep.
+
+Verification on 2026-10-17: 391 core tests passed (2 optional skips) and all 90 installer/protocol tests passed with the pinned isolated backend. A local synthetic fixture killed an actual worker child after writing a PDF, public example URL, checksum and atomic progress note; deleting its isolated scratch directory and starting a fresh child preserved and verified those artifacts. Reopening the controller database restored the journal's checkpoint path. This fixture demonstrates saved-artifact continuity, not guaranteed model compliance, host power-loss durability or live Andrew behavior.
+
+Deployment: the controller prompt, trusted research document, loader hash and reviewed installer manifest must be installed together. Production rollout remains separate and requires the server's sudo credentials. Existing conversation and memory data are not reset. This change does not recover the missing SF Commentary #31 PDF or its unknown URL, and it cannot save progress that was never written before an interruption.
