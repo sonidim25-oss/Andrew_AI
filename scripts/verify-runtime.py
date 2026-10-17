@@ -17,6 +17,9 @@ def run(code):
     return json.loads(result['stdout'])
 
 def main(strict_workspace=True):
+    escaped = runner.run({'type': 'python', 'code': "import os; os.write(1, bytes(16384)); os.write(2, bytes(16384))"})
+    assert escaped['status'] == 'ok' and escaped.get('output_truncated') is True
+    assert len(json.dumps(escaped, ensure_ascii=False, separators=(',', ':')).encode()) <= 40 * 1024
     kernel=run('''import json,os,socket
 from pathlib import Path
 cg=Path('/sys/fs/cgroup')

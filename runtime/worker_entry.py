@@ -17,12 +17,37 @@ from urllib.parse import urlsplit, urlunsplit
 
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_OUTPUT_BYTES = 16 * 1024
+MAX_RESPONSE_BYTES = 40 * 1024
 MAX_ARTIFACTS = 32
 REQUEST_FIELDS = {"python": {"type", "code"}, "node": {"type", "code"}, "shell": {"type", "command"}, "browser_open": {"type", "url"}}
 
 
-def _result(status="ok", stdout="", stderr="", artifacts=None, safe_error=None, visit=None):
-    return {"status": status, "stdout": stdout, "stderr": stderr, "artifacts": artifacts or [], "safe_error": safe_error, "visit": visit}
+def _encode_result(result):
+    # ASCII escaping also represents surrogate filenames without a UTF-8 crash.
+    return json.dumps(result, ensure_ascii=True, separators=(',', ':')).encode('ascii')
+
+
+def _result(status="ok", stdout="", stderr="", artifacts=None, safe_error=None, visit=None, output_truncated=False):
+    result = {"status": status, "stdout": stdout, "stderr": stderr,
+              "artifacts": list(artifacts or []), "safe_error": safe_error, "visit": visit}
+    for stream in ('stdout', 'stderr'):
+        original = result[stream]
+        result[stream] = original.encode('utf-8', errors='replace')[:MAX_OUTPUT_BYTES].decode('utf-8', errors='ignore')
+        output_truncated |= result[stream] != original
+    if output_truncated or len(_encode_result(result)) > MAX_RESPONSE_BYTES:
+        result['output_truncated'] = True
+    # First make metadata itself fit; stream truncation cannot fix an oversized
+    # artifact list. A dropped artifact name is reported by the same flag.
+    def metadata_size():
+        return len(_encode_result({**result, 'stdout': '', 'stderr': ''}))
+    while metadata_size() > MAX_RESPONSE_BYTES and result['artifacts']:
+        result['artifacts'].pop()
+    if metadata_size() > MAX_RESPONSE_BYTES:
+        result['visit'] = None
+    while len(_encode_result(result)) > MAX_RESPONSE_BYTES:
+        stream = max(('stdout', 'stderr'), key=lambda key: len(_encode_result(result[key])))
+        result[stream] = result[stream][:len(result[stream]) // 2]
+    return result
 
 
 class _BridgeHandler(socketserver.BaseRequestHandler):
@@ -101,6 +126,7 @@ def _run_child(command, environment, cwd, timeout=None):
         selector.register(stream, selectors.EVENT_READ)
     deadline = None if timeout is None else time.monotonic() + timeout
     timed_out = False
+    output_truncated = False
     while selector.get_map():
         remaining = None if deadline is None else deadline - time.monotonic()
         if remaining is not None and remaining <= 0:
@@ -120,24 +146,26 @@ def _run_child(command, environment, cwd, timeout=None):
                 key.fileobj.close()
                 continue
             output = outputs[key.fileobj]
+            if len(output) + len(chunk) > MAX_OUTPUT_BYTES:
+                output_truncated = True
             if len(output) < MAX_OUTPUT_BYTES:
                 output.extend(chunk[:MAX_OUTPUT_BYTES - len(output)])
         if process.poll() is not None and not selector.get_map():
             break
     if timed_out:
         process.wait(timeout=5)
-        return -1, bytes(outputs[process.stdout]), bytes(outputs[process.stderr]), True
+        return -1, bytes(outputs[process.stdout]), bytes(outputs[process.stderr]), True, output_truncated
     selector.close()
     remaining = None if deadline is None else max(0.001, deadline - time.monotonic())
     try:
-        return process.wait(timeout=remaining), bytes(outputs[process.stdout]), bytes(outputs[process.stderr]), False
+        return process.wait(timeout=remaining), bytes(outputs[process.stdout]), bytes(outputs[process.stderr]), False, output_truncated
     except subprocess.TimeoutExpired:
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
         process.wait(timeout=5)
-        return -1, bytes(outputs[process.stdout]), bytes(outputs[process.stderr]), True
+        return -1, bytes(outputs[process.stdout]), bytes(outputs[process.stderr]), True, output_truncated
 
 
 def _browser(url, proxy_url, environment, cwd):
@@ -162,7 +190,7 @@ with sync_playwright() as p:
     try:
         browser_environment = dict(environment)
         browser_environment["HOME"] = "/tmp"
-        code, stdout, _stderr, timed_out = _run_child([sys.executable, "-c", script, url, proxy_url], browser_environment, cwd, timeout=35)
+        code, stdout, _stderr, timed_out, _truncated = _run_child([sys.executable, "-c", script, url, proxy_url], browser_environment, cwd, timeout=35)
     except OSError:
         return _result("error", safe_error="worker_unavailable")
     if timed_out:
@@ -204,15 +232,15 @@ def execute_request(request, proxy_url=None, workspace=None, timeout=None):
         return _browser(value, proxy_url, env, cwd)
     command = [sys.executable, "-c", value] if kind == "python" else ["node", "-e", value] if kind == "node" else ["/bin/sh", "-lc", value]
     try:
-        code, stdout, stderr, timed_out = _run_child(command, env, cwd, timeout=timeout)
+        code, stdout, stderr, timed_out, truncated = _run_child(command, env, cwd, timeout=timeout)
     except OSError:
         return _result("error", safe_error="unsupported_tool" if kind == "node" else "execution_failed")
     if timed_out:
-        return _result("error", stdout.decode("utf-8", errors="replace"), stderr.decode("utf-8", errors="replace"), safe_error="timeout")
+        return _result("error", stdout.decode("utf-8", errors="replace"), stderr.decode("utf-8", errors="replace"), safe_error="timeout", output_truncated=truncated)
     artifacts = _artifacts(cwd)
     return _result("ok" if code == 0 else "error", stdout.decode("utf-8", errors="replace"),
                    stderr.decode("utf-8", errors="replace"), artifacts,
-                   None if code == 0 else "execution_failed")
+                   None if code == 0 else "execution_failed", output_truncated=truncated)
 
 
 def main():
@@ -230,7 +258,7 @@ def main():
             response = execute_request(request, proxy_url=proxy_url)
         finally:
             bridge.close()
-    sys.stdout.write(json.dumps(response, ensure_ascii=False, separators=(",", ":")))
+    sys.stdout.write(_encode_result(response).decode('ascii'))
     sys.stdout.flush()
 
 

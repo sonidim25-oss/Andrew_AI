@@ -97,12 +97,16 @@ class RunnerService:
         except (UnicodeDecodeError, json.JSONDecodeError):
             return {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "worker_unavailable"}
         required = {"status", "stdout", "stderr", "artifacts", "safe_error"}
-        if not isinstance(value, dict) or set(value) not in (required, required | {"visit"}):
+        if (not isinstance(value, dict) or not required <= set(value) <= required | {"visit", "output_truncated"}
+                or ("output_truncated" in value and type(value["output_truncated"]) is not bool)):
             return {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "worker_unavailable"}
         if value["status"] not in {"ok", "error"} or not isinstance(value["stdout"], str) or not isinstance(value["stderr"], str):
             return {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "worker_unavailable"}
-        value["stdout"] = value["stdout"].encode("utf-8")[:MAX_STREAM_BYTES].decode("utf-8", errors="ignore")
-        value["stderr"] = value["stderr"].encode("utf-8")[:MAX_STREAM_BYTES].decode("utf-8", errors="ignore")
+        for stream in ('stdout', 'stderr'):
+            original = value[stream]
+            value[stream] = original.encode('utf-8')[:MAX_STREAM_BYTES].decode('utf-8', errors='ignore')
+            if value[stream] != original:
+                value['output_truncated'] = True
         value["artifacts"] = [p for p in value["artifacts"] if isinstance(p, str) and not p.startswith("/") and ".." not in p.split("/")][:32] if isinstance(value["artifacts"], list) else []
         if value["safe_error"] not in {None, "invalid_request", "unsupported_tool", "execution_failed", "timeout", "cancelled", "proxy_unavailable", "policy_rejected", "worker_unavailable"}:
             value["safe_error"] = "worker_unavailable"

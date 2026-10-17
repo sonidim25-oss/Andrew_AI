@@ -80,7 +80,8 @@ class RunnerServiceTests(unittest.TestCase):
         with patch("andrewbot.runner_service.run_bounded", return_value=completed), patch("andrewbot.runner_service.subprocess.run"):
             result = service.run({"type": "python", "code": "print(1)"})
         self.assertLessEqual(len(result["stdout"].encode()), 16 * 1024)
-        self.assertEqual(set(result), {"status", "stdout", "stderr", "artifacts", "safe_error", "visit"})
+        self.assertTrue(result['output_truncated'])
+        self.assertEqual(set(result), {"status", "stdout", "stderr", "artifacts", "safe_error", "visit", "output_truncated"})
 
     def test_timeout_removes_named_container(self):
         module = runner_module(self)

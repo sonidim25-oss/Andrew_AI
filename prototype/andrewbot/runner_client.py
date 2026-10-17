@@ -103,7 +103,8 @@ class RunnerClient:
     @staticmethod
     def _validate_result(result):
         required = {"status", "stdout", "stderr", "artifacts", "safe_error"}
-        if not isinstance(result, dict) or set(result) not in (required, required | {"visit"}):
+        if (not isinstance(result, dict) or not required <= set(result) <= required | {"visit", "output_truncated"}
+                or ("output_truncated" in result and type(result["output_truncated"]) is not bool)):
             raise RunnerProtocolError("runner returned an invalid response")
         if result["status"] not in {"ok", "error"}:
             raise RunnerProtocolError("runner returned an invalid response")

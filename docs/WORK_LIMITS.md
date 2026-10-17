@@ -71,3 +71,23 @@ A separate temporary source fixture ran real Python work for 130 seconds through
 both host `run_bounded(timeout=None)` and the inner worker. It completed in
 130.105 seconds with no timeout. This verifies those source paths; it is not a
 claim about the currently installed container image or production deployment.
+
+
+## Encoded worker responses — REVIEW-006
+
+Worker responses, including JSON escaping, metadata and artifact names, fit the
+40 KiB transport budget. Streams retain the existing 16 KiB raw capture cap.
+The optional Boolean `output_truncated` reports discarded stream data or artifact
+names independently of `status` and `safe_error`; a completed command is never
+rerun to recover its output. Unicode prefixes remain valid. Host and client
+accept both older responses and the new flag, and live runtime acceptance checks
+the worst-case escaped-stream path.
+
+The source worker image was rebuilt offline as
+`localhost/andrew-browser:review-006-20261017`; the immutable reference, source,
+config and local OCI archive digests are recorded in `runtime/browser-release.json`.
+Real disposable-container proofs returned 39,726 and 39,743 bytes for successful
+and failed commands with worst-case escaping and long artifact names. Both
+preserved the execution status and recorded one execution. This is local image
+verification, not a production rollout. Deploy the image and runtime/client
+modules together through the acceptance installer.

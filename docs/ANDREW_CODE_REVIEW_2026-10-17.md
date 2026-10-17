@@ -22,10 +22,10 @@ Passing existing tests does not cover these missing scenarios. These are code-le
 | --- | --- | ---: |
 | P0 — Extra high | Immediate uncontrolled loss, unauthorized execution, or equivalent critical behavior | 0 confirmed |
 | P1 — High | Paid-request uncertainty, duplicate-delivery risk, or incorrect spending recovery | 0 |
-| P2 — Medium | Broken supported operations, deployment gaps, or reproducible runtime races | 2 |
+| P2 — Medium | Broken supported operations, deployment gaps, or reproducible runtime races | 1 |
 | P3 — Low | Avoidable inference cost or misleading capability handling | 1 |
 
-No P0 finding was established; the empty category is not a guarantee that none exists. 3 tasks remain open.
+No P0 finding was established; the empty category is not a guarantee that none exists. 2 tasks remain open.
 
 ## P0 — Extra high
 
@@ -97,12 +97,15 @@ No confirmed tasks at this priority.
 
 ### REVIEW-006 — Bound the encoded worker response rather than only its raw streams
 
-- [ ] **Name:** Make worker output limits compatible with the wire protocol.
+- [x] **Name:** Make worker output limits compatible with the wire protocol.
 - **Short description:** Each worker stream is bounded to 16 KiB before JSON encoding, but the outer runner accepts only 40 KiB for the entire encoded response. JSON escaping can expand otherwise permitted output beyond that limit. A successfully completed command is then reported as `worker_unavailable`, with its output discarded, obscuring whether its actions completed.
 - **Location:** `runtime/worker_entry.py:93–124` and response serialization at `runtime/worker_entry.py:233`; outer capture/error mapping at `prototype/andrewbot/runner_service.py:124–136`.
 - **Short fix suggestion:** Enforce a total budget on the final encoded response, including metadata and artifacts. Truncate streams safely to fit and report truncation separately from execution status; do not turn a completed command into an ambiguous worker-startup failure.
 - **Evidence:** A local child wrote 16,384 NUL bytes to each stream, respecting both stream limits. The resulting valid response encoded to **196,693 bytes**, against the **40,960-byte** outer limit. Quotes/newlines can also increase encoded size; this is not limited to invalid UTF-8.
 - **Acceptance check:** Exercise worst-case escaping on both streams and long artifact names. The response stays within the transport limit, retains correct completion/error status, and explicitly indicates truncation without rerunning the command.
+
+- **Resolution:** Worker results now enforce a 40 KiB encoded JSON budget including escaping, metadata and artifacts. Unicode-safe truncation and the optional Boolean output_truncated preserve completion/error status; raw capture truncation is tracked too. Host/client validation accepts the new flag and older responses. Runtime acceptance now exercises escaped output; the offline-built image, OCI archive and source/config/digest bindings were refreshed.
+- **Verification:** 386 core tests passed (2 optional skips); 88 pinned-fixture script tests passed. Real rootless containers returned 39,726/39,743 bytes for success/failure with worst-case escaped streams and long artifact names, preserved status, and executed each command once. Archive and local image manifest digests match. Source fixed and tested; production deployment is separate.
 
 ### REVIEW-007 — Serialize browser reaping with request execution
 

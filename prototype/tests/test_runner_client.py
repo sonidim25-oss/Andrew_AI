@@ -20,6 +20,16 @@ def send_frame(connection, value):
 
 
 class RunnerClientTests(unittest.TestCase):
+    def test_truncation_flag_is_optional_and_must_be_boolean(self):
+        module = load_client(self)
+        response = {'status': 'ok', 'stdout': 'partial', 'stderr': '', 'artifacts': [], 'safe_error': None}
+        self.assertEqual(module.RunnerClient._validate_result(dict(response))['stdout'], 'partial')
+        for flag in (True, False):
+            self.assertIs(module.RunnerClient._validate_result({**response, 'output_truncated': flag})['output_truncated'], flag)
+        for flag in ('true', 1, None):
+            with self.assertRaises(module.RunnerProtocolError):
+                module.RunnerClient._validate_result({**response, 'output_truncated': flag})
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.socket_path = str(Path(self.temp.name) / "runner.sock")
