@@ -218,7 +218,7 @@ class ControllerTests(unittest.TestCase):
         self.store = Store(path)
         self.assertEqual(self.store.recent_messages(123456789)[0]["content"], "founding memory")
 
-    def test_budget_gate_preserves_rollover_and_monthly_reserve(self):
+    def test_budget_gate_preserves_monthly_reserve(self):
         frozen = datetime(2026, 10, 31, 16, 0, tzinfo=timezone.utc)
         with patch("andrewbot.budget.datetime") as clock:
             clock.now.return_value = frozen

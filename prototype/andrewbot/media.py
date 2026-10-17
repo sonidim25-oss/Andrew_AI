@@ -63,7 +63,7 @@ class MediaPolicy:
     tts_model: str = 'elevenlabs/eleven-v3'
     image_model: str = 'openai/gpt-image-1-mini'
     monthly_usd: float = 3.0  # per capability, separate from reasoning
-    daily_usd: float = .20
+    daily_usd: float = .20  # advisory target, not an admission limit
     voice_job_usd: float = .08
     image_job_usd: float = .10
     voice_character_usd: float = .00008  # regular list rate, not temporary discount
@@ -175,8 +175,7 @@ class MediaService:
             count = self.store.connection.execute("SELECT count(*) FROM media_jobs WHERE kind=? AND created_at LIKE ? AND state!='cancelled'", (kind, now[:10] + '%')).fetchone()[0]
             if count >= (20 if kind == 'voice' else 2):
                 raise ValueError('Media daily job quota exhausted')
-            if (self._usage(kind, now[:7]) + reserve > self.policy.monthly_usd + 1e-9
-                    or self._usage(kind, now[:10]) + reserve > self.policy.daily_usd + 1e-9):
+            if self._usage(kind, now[:7]) + reserve > self.policy.monthly_usd + 1e-9:
                 raise ValueError('Media budget exhausted')
             job = uuid.uuid4().hex
             self.store.connection.execute('''INSERT INTO media_jobs
@@ -242,8 +241,7 @@ class MediaService:
                 if ((kind == 'voice' and not self.policy.voice_enabled)
                         or row['reserved_usd'] > cap + 1e-9
                         or estimate > row['reserved_usd'] + 1e-9
-                        or self._usage(kind, now[:7]) > self.policy.monthly_usd + 1e-9
-                        or self._usage(kind, now[:10]) > self.policy.daily_usd + 1e-9):
+                        or self._usage(kind, now[:7]) > self.policy.monthly_usd + 1e-9):
                     self.store.connection.execute("UPDATE media_jobs SET state='cancelled',error='policy_changed',updated_at=? WHERE id=?", (now, row['id']))
                     self.store.connection.execute("INSERT INTO telegram_outbox(chat_id,text,created_at,lane) VALUES(?,?,?,'system')",
                                                   (self.owner_id, 'Queued media request cancelled because current permissions or budget no longer allow it. No provider call was made. Job: ' + row['id'], now))
@@ -415,7 +413,8 @@ class MediaService:
                 reserved = self.store.connection.execute("SELECT coalesce(sum(reserved_usd),0) FROM media_jobs WHERE kind=? AND state IN ('queued','running','uncertain') AND created_at LIKE ?", (kind, now[:7] + '%')).fetchone()[0]
                 result[kind] = {'enabled': self.policy.enabled and (kind != 'voice' or self.policy.voice_enabled), 'monthly_usd': self._usage(kind, now[:7]), 'daily_usd': self._usage(kind, now[:10]),
                                 'reserved_usd': reserved, 'monthly_cap_usd': self.policy.monthly_usd,
-                                'daily_cap_usd': self.policy.daily_usd}
+                                'daily_target_usd': self.policy.daily_usd,
+                                'daily_target_enforced': False}
             result['counts'] = [dict(row) for row in self.store.connection.execute('SELECT kind,state,delivery,count(*) AS count FROM media_jobs GROUP BY kind,state,delivery')]
             result['avatars'] = [dict(row) for row in self.store.connection.execute('SELECT * FROM media_avatar_proposals ORDER BY created_at DESC LIMIT 10')]
             result['jobs'] = [dict(row) for row in self.store.connection.execute('SELECT id,kind,state,delivery,error,created_at,updated_at,(julianday(updated_at)-julianday(created_at))*86400 AS duration_seconds FROM media_jobs ORDER BY created_at DESC LIMIT 10')]

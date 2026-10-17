@@ -83,6 +83,20 @@ class ModelGatewayTests(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertEqual(self.provider.calls, [])
 
+    def test_daily_target_is_advisory_but_monthly_limit_still_blocks_provider(self):
+        from datetime import datetime, timezone
+        with patch('andrewbot.gateway.datetime') as clock, \
+                patch.object(self.store, 'now', return_value='2026-10-01T16:00:00+00:00'):
+            clock.now.return_value = datetime(2026, 10, 1, 16, tzinfo=timezone.utc)
+            self.store.record_usage('2026-10', '2026-10-01', .5, 1, 1)
+            payload = {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'hello'}]}
+            self.assertEqual(self.gateway.complete('Bearer gateway-test-token', payload)[0], 200)
+            context = self.provider.calls[0]['messages'][0]['content']
+            self.assertIn('advisory', context)
+            self.store.record_usage('2026-10', '2026-10-01', 8.5, 1, 1)
+            self.assertEqual(self.gateway.complete('Bearer gateway-test-token', payload)[0], 429)
+            self.assertEqual(len(self.provider.calls), 1)
+
     def test_larger_output_allowance_is_capped_and_reserved_before_provider_call(self):
         original = self.provider.complete
         def check_reservation(payload):

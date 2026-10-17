@@ -736,7 +736,8 @@ class Controller:
             cycles = self.store.cycle_count(snapshot["day"])
             return (f"This month: ${snapshot['monthly_cost']:.4f} of ${self.monthly_limit_usd:.2f}. "
                     f"Protected reserve: ${self.monthly_reserve_usd:.2f}. Spent today: ${snapshot['daily_cost']:.4f}. "
-                    f"Month allowance accrued: ${snapshot['accrued_allowance']:.2f}; remaining ordinary allowance: "
+                    f"Daily target (advisory): ${self.daily_target_usd:.2f}; you may choose to exceed it. "
+                    f"Remaining ordinary monthly allowance: "
                     f"${snapshot['remaining_ordinary']:.4f}. Autonomous cycles: {cycles}.")
         if command == "/activity":
             entries = self.store.recent_activity(8)

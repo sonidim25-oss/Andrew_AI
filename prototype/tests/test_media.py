@@ -18,6 +18,17 @@ class MediaCase(unittest.TestCase):
 
 
 class MediaTests(MediaCase):
+    def test_daily_money_target_does_not_block_submission_or_claim_but_monthly_cap_does(self):
+        self.media.policy = MediaPolicy(enabled=True, daily_usd=.01, monthly_usd=.10)
+        first = self.media.submit('image', 'a cat', 'advisory-target', owner_requested=True)
+        status = self.media.status()['image']
+        self.assertEqual(status['daily_target_usd'], .01)
+        self.assertFalse(status['daily_target_enforced'])
+        self.assertGreater(status['daily_usd'], status['daily_target_usd'])
+        self.assertEqual(self.media.claim()['id'], first)
+        with self.assertRaisesRegex(ValueError, 'budget exhausted'):
+            self.media.submit('image', 'a dog', 'monthly-cap', owner_requested=True)
+
     def test_disabled_and_recipient_policy(self):
         disabled = MediaService(self.store, Path(self.tmp.name) / 'media', 42, MediaPolicy())
         with self.assertRaises(ValueError):

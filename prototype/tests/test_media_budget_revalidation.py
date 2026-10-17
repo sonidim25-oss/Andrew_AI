@@ -6,8 +6,8 @@ from andrewbot.media import MediaWorker, load_media_policy
 
 
 class BudgetRevalidationTests(MediaCase):
-    def test_lowered_daily_monthly_and_job_caps_block_existing_queue(self):
-        for change in ({'daily_usd': .05}, {'monthly_usd': .05}, {'image_job_usd': .05}):
+    def test_lowered_monthly_and_job_caps_block_existing_queue(self):
+        for change in ({'monthly_usd': .05}, {'image_job_usd': .05}):
             with self.subTest(change=change):
                 self.media.policy = replace(self.media.policy, daily_usd=.20, monthly_usd=3, image_job_usd=.10)
                 job = self.media.submit('image', 'a cat', 'cap-' + next(iter(change)), owner_requested=True)
@@ -18,12 +18,18 @@ class BudgetRevalidationTests(MediaCase):
                 self.assertEqual('cancelled', self.media.job(job)['state'])
                 self.assertEqual('policy_changed', self.media.job(job)['error'])
         self.assertEqual(0, self.media.status()['image']['reserved_usd'])
-        self.assertEqual(3, self.store.connection.execute('SELECT count(*) FROM telegram_outbox').fetchone()[0])
+        self.assertEqual(2, self.store.connection.execute('SELECT count(*) FROM telegram_outbox').fetchone()[0])
+
+    def test_lowering_daily_guideline_does_not_cancel_saved_authorization(self):
+        job = self.media.submit('image', 'a cat', 'lower-target', owner_requested=True)
+        self.media.policy = replace(self.media.policy, daily_usd=.01)
+        self.assertEqual(job, self.media.claim()['id'])
+        self.assertEqual('running', self.media.job(job)['state'])
 
     def test_queue_reservations_count_together_before_claim(self):
         first = self.media.submit('image', 'one', 'one', owner_requested=True)
         second = self.media.submit('image', 'two', 'two', owner_requested=True)
-        self.media.policy = replace(self.media.policy, daily_usd=.15)
+        self.media.policy = replace(self.media.policy, monthly_usd=.15)
         self.assertIsNone(self.media.claim())
         self.assertEqual('cancelled', self.media.job(first)['state'])
         self.assertEqual(second, self.media.claim()['id'])

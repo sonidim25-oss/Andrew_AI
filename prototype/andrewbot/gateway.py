@@ -119,7 +119,9 @@ class ModelGateway:
                                       for k, v in snapshot.items()}, sort_keys=True)
                         + '. Totals include unsettled reservations. check_budget is a local read-only '
                           'tool with no approval requirement or provider call of its own. '
-                          'Budget limits remain enforced; never infer current permissions from an old diary.'),
+                          'The daily target is advisory: you may choose to exceed it or stay within it. '
+                          'Monthly limits and the protected reserve remain enforced; '
+                          'never infer current permissions from an old diary.'),
         })
         if self.memory_service is not None:
             try:

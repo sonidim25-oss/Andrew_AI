@@ -12,6 +12,12 @@ from andrewbot.store import Store
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_session_can_start_after_first_day_advisory_target_is_exceeded(self):
+        first_day = datetime(2026, 10, 1, 16, tzinfo=timezone.utc)
+        with patch.object(self.store, 'now', return_value='2026-10-01T16:00:00+00:00'):
+            self.store.record_usage('2026-10', '2026-10-01', .5, 1, 1)
+        self.assertIsNotNone(self.runner.start('owner_wake', first_day))
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)

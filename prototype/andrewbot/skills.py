@@ -5,7 +5,7 @@ from pathlib import Path
 
 MAX_SKILL_BYTES = 12_000
 SKILL_ROOT = Path(__file__).resolve().parents[2] / 'skills'
-SKILL_DOCUMENT_HASHES = {'voice-communication': '6619dbc32bff6980de4ab4d8ecb50604f3264df7a1b1887b664fd425357c31ec', 'image-creation': '9fd6bb9f854569fbb56dece9ad158944498e29a998fc2e1e058f3a3af1a6a0c9', 'research-workflow': 'fa50c34986a9442ccbe47289c723640bb0867d36a7ea63aeb20ca6b4a630ca7f'}
+SKILL_DOCUMENT_HASHES = {'voice-communication': '77efc9f873a1ad1e97b4cdace18e92db02d56a38337858e626bec321fedc3652', 'image-creation': 'f69f3f5d445c82b25267b7bfcbf3544568a1610614e9f9d98347ed24eb132c7a', 'research-workflow': 'fa50c34986a9442ccbe47289c723640bb0867d36a7ea63aeb20ca6b4a630ca7f'}
 SKILL_SUMMARIES = {
     'voice-communication': 'Requested spoken replies: concise speech, current voice settings, budget and delivery checks.',
     'image-creation': 'Requested images and edits: useful prompts, economical settings, and owner-approved avatar proposals.',
