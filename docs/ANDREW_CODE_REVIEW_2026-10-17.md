@@ -22,10 +22,10 @@ Passing existing tests does not cover these missing scenarios. These are code-le
 | --- | --- | ---: |
 | P0 — Extra high | Immediate uncontrolled loss, unauthorized execution, or equivalent critical behavior | 0 confirmed |
 | P1 — High | Paid-request uncertainty, duplicate-delivery risk, or incorrect spending recovery | 0 |
-| P2 — Medium | Broken supported operations, deployment gaps, or reproducible runtime races | 3 |
+| P2 — Medium | Broken supported operations, deployment gaps, or reproducible runtime races | 2 |
 | P3 — Low | Avoidable inference cost or misleading capability handling | 1 |
 
-No P0 finding was established; the empty category is not a guarantee that none exists. 4 tasks remain open.
+No P0 finding was established; the empty category is not a guarantee that none exists. 3 tasks remain open.
 
 ## P0 — Extra high
 
@@ -85,12 +85,15 @@ No confirmed tasks at this priority.
 
 ### REVIEW-005 — Allow a fresh approval when returning to an older avatar
 
-- [ ] **Name:** Stop reusing terminal applied avatar proposals.
+- [x] **Name:** Stop reusing terminal applied avatar proposals.
 - **Short description:** `propose_avatar()` deduplicates proposals in the terminal `applied` state. After applying image A and then image B, requesting A again returns its old, already-applied proposal. That proposal cannot be approved again, so the supported flow cannot restore A even with fresh owner approval.
 - **Location:** `prototype/andrewbot/media.py:353–370`, specifically the state filter at line 360.
 - **Short fix suggestion:** Deduplicate only pending/in-flight proposals. Create a new proposal after a prior application has finished, retaining the requirement for fresh owner approval on every change.
 - **Evidence:** Two temporary delivered PNG jobs were applied in sequence using local state transitions. Reproposing the first returned its original proposal ID; `approve_avatar()` returned `False`; `claim_avatar()` returned `None`. No Telegram or provider call occurred.
 - **Acceptance check:** Apply A, apply B, propose A again: a new proposal is returned, nothing publishes before approval, and fresh approval permits exactly one application.
+
+- **Resolution:** Avatar deduplication now covers only proposed, approved or applying proposals. Returning to a previously applied image creates a fresh proposal and requires a new owner approval; repeated requests while that proposal is pending still deduplicate.
+- **Verification:** 384 core tests passed (2 optional skips); 88 pinned-fixture script tests passed. A → B → A regression verifies a new proposal, no claim before fresh approval and exactly one claim after approval. Source fixed and tested; production deployment is separate.
 
 ### REVIEW-006 — Bound the encoded worker response rather than only its raw streams
 

@@ -363,7 +363,7 @@ class MediaService:
             if row['kind'] != 'image' or row['state'] != 'succeeded' or row['delivery'] != 'delivered':
                 raise ValueError('An image preview must be delivered to the owner first')
             self.artifact(row)
-            previous = self.store.connection.execute("SELECT id FROM media_avatar_proposals WHERE job_id=? AND state IN ('proposed','approved','applying','applied')", (job_id,)).fetchone()
+            previous = self.store.connection.execute("SELECT id FROM media_avatar_proposals WHERE job_id=? AND state IN ('proposed','approved','applying')", (job_id,)).fetchone()
             if previous:
                 return previous['id']
             proposal = uuid.uuid4().hex

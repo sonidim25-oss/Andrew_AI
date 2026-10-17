@@ -108,6 +108,26 @@ class ShutdownReviewTests(MediaReviewCase):
         self.assertEqual('pending', self.media.job(job)['delivery'])
         self.telegram.send_media.assert_not_called()
 
+class AvatarReuseReviewTests(MediaReviewCase):
+    def test_returning_to_previous_avatar_requires_new_approval_and_one_application(self):
+        first, second = self.saved_image('first-avatar'), self.saved_image('second-avatar')
+        applied = []
+        for job in (first, second):
+            proposal = self.media.propose_avatar(job)
+            self.assertTrue(self.media.approve_avatar(proposal))
+            self.assertEqual(self.media.claim_avatar()['id'], proposal)
+            self.media.finish_avatar(proposal, True)
+            applied.append(proposal)
+        proposed_again = self.media.propose_avatar(first)
+        self.assertNotIn(proposed_again, applied)
+        self.assertEqual(self.media.propose_avatar(first), proposed_again)
+        self.assertIsNone(self.media.claim_avatar())
+        self.assertTrue(self.media.approve_avatar(proposed_again))
+        self.assertEqual(self.media.claim_avatar()['id'], proposed_again)
+        self.assertIsNone(self.media.claim_avatar())
+        self.media.finish_avatar(proposed_again, True)
+        self.assertFalse(self.media.approve_avatar(proposed_again))
+
 class RetentionReviewTests(MediaReviewCase):
     def old_image(self):
         job = self.saved_image()
