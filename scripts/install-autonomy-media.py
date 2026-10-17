@@ -288,6 +288,12 @@ def main():
             helper.verify_controller_startup(backup)
             print('Original deployment restored; startup verified.', flush=True)
         raise
+    print('Verification: checking account balance with the existing API key.', flush=True)
+    try:
+        print(helper.command('/usr/bin/bash', str(ROOT / 'scripts/check-existing-credit-access')), flush=True)
+    except subprocess.SubprocessError:
+        print('Deployment succeeded; the final balance probe did not complete. '
+              'Andrew can query check_budget, or rerun scripts/check-existing-credit-access.', flush=True)
     print('Installed and startup verified: no controller spending caps; TTS and spontaneous voice/images enabled. '
           'Owner guidance saved in persistent memory. Existing pause/sleep/error state and uncertain attempts are preserved. '
           'Use /wake when ready; no wake or replay was requested by this installer.')

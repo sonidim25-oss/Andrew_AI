@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ ${EUID} -ne 0 ]]; then
+  echo "Run with sudo bash $0" >&2
+  exit 1
+fi
+exec systemd-run --wait --pipe --collect --uid=andrew-control --gid=andrew-control \
+  --property=LoadCredentialEncrypted=andrew-vault-key:/etc/credstore.encrypted/andrew-vault-key \
+  --property=WorkingDirectory=/opt/andrew/prototype \
+  --property=Environment=PYTHONPATH=/opt/andrew/prototype \
+  /usr/bin/python3 -c '
+import json, math
+from urllib.request import Request, build_opener, HTTPRedirectHandler
+from urllib.error import HTTPError
+from andrewbot.vault import Vault
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+vault = Vault("/var/lib/andrew/vault")
+try:
+    key = vault.get_secret("openrouter_api")
+finally:
+    vault.close()
+opener = build_opener(NoRedirect())
+for endpoint, fields in (("credits", ("total_credits", "total_usage")),
+                         ("key", ("limit", "limit_remaining", "usage"))):
+    request = Request("https://openrouter.ai/api/v1/" + endpoint,
+                      headers={"Authorization": "Bearer " + key})
+    try:
+        with opener.open(request, timeout=15) as response:
+            body = response.read(65537)
+            if len(body) > 65536:
+                raise ValueError()
+            data = json.loads(body)["data"]
+        safe = {}
+        for field in fields:
+            value = data.get(field)
+            if value is None:
+                safe[field] = None
+            elif type(value) in (int, float) and math.isfinite(value) and value >= 0:
+                safe[field] = value
+            else:
+                raise ValueError()
+        if endpoint == "credits":
+            if any(safe[field] is None for field in fields):
+                raise ValueError()
+            safe["account_balance_usd"] = max(0, safe["total_credits"] - safe["total_usage"])
+        print(json.dumps({endpoint: safe}))
+    except HTTPError as error:
+        print(json.dumps({endpoint: {"http_status": error.code,
+              "status": "management_key_required" if endpoint == "credits" and error.code == 403 else "access_failed"}}))
+    except Exception:
+        print(json.dumps({endpoint: {"status": "request_failed"}}))
+'
