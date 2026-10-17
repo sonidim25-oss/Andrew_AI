@@ -36,7 +36,7 @@ class LettaCommandError(RuntimeError):
 
 
 class LettaTurnError(RuntimeError):
-    CATEGORIES = frozenset({"output_token_limit", "turn_failed", "missing_assistant_text", "active_run_conflict"})
+    CATEGORIES = frozenset({"output_token_limit", "turn_failed", "missing_assistant_text", "active_run_conflict", "provider_attempt_uncertain"})
 
     def __init__(self, category):
         self.safe_category = category if category in self.CATEGORIES else "turn_failed"
@@ -386,6 +386,7 @@ class AppServerClient:
         deadline = None if timeout is None else time.monotonic() + timeout
         failure = False
         active_run_conflict = False
+        provider_uncertain = False
         output_limit = False
         assistant_message_ids = set()
         early_reply = None
@@ -414,6 +415,8 @@ class AppServerClient:
                     output_limit = True
                 if delta.get("message_type") in {"loop_error", "error_message"}:
                     failure = True
+                    if 'provider_attempt_uncertain' in json.dumps(delta):
+                        provider_uncertain = True
                 if delta.get("message_type") == "assistant_message" and delta.get("id"):
                     assistant_message_ids.add(delta["id"])
                 # A model-step stop (including requires_approval) precedes
@@ -464,6 +467,8 @@ class AppServerClient:
             raise TimeoutError("Letta agent turn timed out")
         if output_limit:
             raise LettaTurnError("output_token_limit")
+        if provider_uncertain:
+            raise LettaTurnError('provider_attempt_uncertain')
         if active_run_conflict:
             raise LettaTurnError('active_run_conflict')
         if failure:

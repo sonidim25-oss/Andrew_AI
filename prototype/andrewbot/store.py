@@ -501,11 +501,17 @@ class Store:
 
     @database_locked
     def retry_uncertain_messages(self, owner_id):
-        cursor = self.connection.execute(
-            "UPDATE messages SET queued=1 WHERE owner_id=? AND role='user' AND queued=3", (owner_id,)
-        )
-        self.connection.commit()
-        return cursor.rowcount
+        with self.connection:
+            cursor = self.connection.execute(
+                "UPDATE messages SET queued=1 WHERE owner_id=? AND role='user' AND queued=3", (owner_id,)
+            )
+            if cursor.rowcount:
+                # Only explicit owner replay authorizes another attempt at a
+                # previously uncertain payload. Existing reservations stay held.
+                self.connection.execute(
+                    "INSERT INTO state(key,value) VALUES('provider_retry_revision',?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (uuid.uuid4().hex,))
+            return cursor.rowcount
 
     @database_locked
     def get_state(self, key, default=None):
@@ -1040,11 +1046,13 @@ class Store:
 
     @database_locked
     def reserve_usage(self, reservation_id, month, day, cost_usd):
-        self.connection.execute(
-            "INSERT INTO budget_reservations(reservation_id,month,day,cost_usd,created_at) VALUES(?,?,?,?,?)",
+        cursor = self.connection.execute(
+            "INSERT INTO budget_reservations(reservation_id,month,day,cost_usd,created_at) VALUES(?,?,?,?,?) "
+            "ON CONFLICT(reservation_id) DO NOTHING",
             (reservation_id, month, day, max(0.0, float(cost_usd)), self.now()),
         )
         self.connection.commit()
+        return cursor.rowcount == 1
 
     @database_locked
     def settle_usage(self, reservation_id, month, day, cost_usd, input_tokens, output_tokens):

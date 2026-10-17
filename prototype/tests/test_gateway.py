@@ -46,6 +46,38 @@ class ModelGatewayTests(unittest.TestCase):
         self.assertEqual(self.provider.calls[0]["model"], "qwen/qwen3.8-flash")
         self.assertEqual(self.store.usage_totals(*self.gateway.periods())["monthly_cost"], 0.000002)
 
+    def test_uncertain_provider_attempt_is_not_retried_after_gateway_restart(self):
+        payload = {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'uncertain fixture'}]}
+        calls = []
+        def lost_response(outbound):
+            calls.append(outbound)
+            raise TimeoutError('private provider response lost')
+        self.provider.complete = lost_response
+        status, result = self.gateway.complete('Bearer gateway-test-token', payload)
+        self.assertEqual(status, 422)
+        self.assertEqual(result['error']['code'], 'provider_attempt_uncertain')
+        self.assertNotIn('private', json.dumps(result))
+        restarted = ModelGateway(self.provider, self.store, 'gateway-test-token')
+        self.assertEqual(restarted.complete('Bearer gateway-test-token', payload)[0], 422)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 1)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 0)
+
+    def test_explicit_owner_replay_allows_a_new_attempt_without_releasing_old_reservation(self):
+        from andrewbot.controller import Controller
+        payload = {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'retry fixture'}]}
+        original = self.provider.complete
+        self.provider.complete = lambda _: (_ for _ in ()).throw(TimeoutError())
+        self.gateway.complete('Bearer gateway-test-token', payload)
+        held = self.store.add_message(17, 'user', 'retry fixture', queued=True)
+        self.store.claim_owner_message(17, held)
+        self.store.hold_uncertain_queued_claim([held])
+        Controller(self.store, object(), 17)._command('/replay')
+        self.provider.complete = original
+        self.assertEqual(self.gateway.complete('Bearer gateway-test-token', payload)[0], 200)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 1)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 1)
+
     def test_rejects_unauthenticated_requests_without_provider_call(self):
         status, _ = self.gateway.complete("Bearer wrong", {"model": "openai/qwen/qwen3.8-flash", "messages": []})
         self.assertEqual(status, 401)
@@ -94,11 +126,11 @@ class ModelGatewayTests(unittest.TestCase):
         self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
 
     def test_invalid_provider_response_keeps_reservation_and_returns_safe_failure(self):
-        for response in (['invalid'], {'error': 'private provider text'}):
+        for index, response in enumerate((['invalid'], {'error': 'private provider text'})):
             self.provider.response = response
             status, result = self.gateway.complete('Bearer gateway-test-token',
-                {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'hi'}]})
-            self.assertEqual(status, 502)
+                {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': str(index)}]})
+            self.assertEqual(status, 422)
             self.assertNotIn('private', json.dumps(result))
         self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 2)
 

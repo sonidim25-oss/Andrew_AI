@@ -1,4 +1,5 @@
 import hmac
+import hashlib
 import json
 import logging
 import math
@@ -29,6 +30,13 @@ class ModelGateway:
         self.input_rate = self.model_config.input_usd_per_million / 1_000_000
         self.output_rate = self.model_config.output_usd_per_million / 1_000_000
         self._budget_lock = threading.Lock()
+
+    @staticmethod
+    def uncertain_response():
+        # 422 is deliberately non-retryable in the pinned provider SDK. A 5xx
+        # would resend an already-dispatched, potentially billable request.
+        return 422, {'error': {'message': 'Provider attempt outcome uncertain; explicit owner replay required',
+                              'type': 'invalid_request_error', 'code': 'provider_attempt_uncertain'}}
 
     @staticmethod
     def periods():
@@ -103,8 +111,14 @@ class ModelGateway:
             return 429, {"error": {"message": "monthly model budget reached", "type": "rate_limit_error"}}
 
         month, day = snapshot["month"], snapshot["day"]
-        reservation_id = uuid.uuid4().hex
-        self.store.reserve_usage(reservation_id, month, day, reserved)
+        # Hash the original request, before changing budget/memory context.
+        # The reservation itself is the durable duplicate-dispatch guard.
+        identity = json.dumps({'request': payload,
+                               'owner_retry': self.store.get_state('provider_retry_revision', '')},
+                              sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+        reservation_id = 'provider-' + hashlib.sha256(identity.encode()).hexdigest()
+        if not self.store.reserve_usage(reservation_id, month, day, reserved):
+            return self.uncertain_response()
 
         outbound["model"] = self.model_id
         outbound["max_tokens"] = max_tokens
@@ -116,10 +130,10 @@ class ModelGateway:
             self.store.add_activity("Letta model gateway provider request failed")
             # Keep the reservation: the request may have reached the provider
             # even though its response was lost.
-            return 502, {"error": {"message": "model provider request failed", "type": "server_error"}}
+            return self.uncertain_response()
         if not isinstance(result, dict) or not isinstance(result.get('choices'), list) or not result['choices']:
             self.store.add_activity('Letta model gateway received an invalid provider response; reservation retained')
-            return 502, {"error": {"message": "invalid model provider response", "type": "server_error"}}
+            return self.uncertain_response()
         usage = result.get("usage") or {}
         invalid_usage = False
         try:
