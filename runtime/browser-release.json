@@ -1,12 +1,13 @@
 {
-  "image": "localhost/andrew-browser@sha256:a03a18620a23d9fcf2659d0d4bcf02c1d10deeb75f233111dc82be8af84c6a31",
-  "archive_sha256": "be3ca9a770f3e9961162d97d8313bbaf30ba134008e16885a3ecbd7adc5582fa",
+  "image": "localhost/andrew-browser@sha256:3c641154407a1acc6d80316822f484629bd2fb6e24e3492f7d231395990c7849",
+  "archive_sha256": "4d69fa3fc6796cf5edbbc19ffdd07c7bf48fcd44cd7324ea2c30df0e828dec89",
   "sources": {
     "runtime/Containerfile.release": "83733cccd2c202896a2a76ae325ed2c33f71d9181841a49b69935b5b41a76d0b",
     "runtime/browser_entry.py": "65b5d4cf532ea53b82e885d1a9d02e7a8adcb63d8fd511b14dca05ffe3fa7dcd",
-    "runtime/worker_entry.py": "4b5957d88c483dcf8bed7a8f9f1aef1e627f0fe27787a3c1c5cc8c39c0cac5b7",
+    "runtime/worker_entry.py": "b284b153a5d1136113e1952c7197db6b7a6d7235400d03461c4e434649b13dc9",
     "prototype/andrewbot/browser_protocol.py": "6cb6a714933dcb17df48d4e68d1a058e3a99e72d11f608507de3ac717c229aeb"
   },
-  "build": "podman build --network=none -t localhost/andrew-browser:integration -f runtime/Containerfile.release .",
-  "image_config_id": "sha256:79845fb4e1050ae2e0d6f8fd8df86eb6fd6c660e8b7b443cad5e6ce6ca0c4021"
+  "build": "runuser -u daniel -- podman build --network=none --pull=never -t localhost/andrew-browser:release-20261017 -f runtime/Containerfile.release .",
+  "image_config_id": "sha256:4acb90da8f237e371b3418ecfb733fc164a403bbe7d3785c3b146231f030d52c",
+  "archive_path": "/var/tmp/andrew-release-uncompressed-3c641154407a1acc6d80316822f484629bd2fb6e24e3492f7d231395990c7849.tar"
 }

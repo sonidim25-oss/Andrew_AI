@@ -17,6 +17,13 @@ import pwd
 from datetime import datetime, timezone
 
 
+_asset_spec = importlib.util.spec_from_file_location('work_limit_assets', Path(__file__).with_name('work_limit_assets.py'))
+_assets = importlib.util.module_from_spec(_asset_spec)
+_asset_spec.loader.exec_module(_assets)
+plan_assets = _assets.plan_assets
+prepare_images = _assets.prepare_images
+
+
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = Path('/opt/andrew/prototype/andrewbot')
 SERVICE = 'andrew-control.service'
@@ -24,21 +31,37 @@ RUNTIME_PACKAGE = Path('/opt/andrew/runtime-services/andrewbot')
 
 
 def runtime_patch(manifest):
-    """Review the one runtime-service replacement before stopping any service."""
-    path = RUNTIME_PACKAGE / 'runner_service.py'
-    original = path.read_bytes()
-    hashes = manifest['runner_service.py']
-    if hashlib.sha256(original).hexdigest() not in {hashes['original'], hashes['tested'], *hashes.get('reviewed', {})}:
-        raise RuntimeError('Installed runtime runner differs from reviewed versions; installation refused')
-    tested = (ROOT / 'prototype/andrewbot/runner_service.py').read_bytes()
-    if original == tested:
+    """Predict the complete reviewed runtime dependency replacement."""
+    files = []
+    replacements = {}
+    for name in ('runner_service.py', 'process_limits.py', 'runner_client.py'):
+        if name not in manifest:
+            continue
+        path = RUNTIME_PACKAGE / name
+        if path.is_symlink():
+            raise RuntimeError('Symlink in runtime service package; installation refused')
+        original = path.read_bytes()
+        hashes = manifest[name]
+        if hashlib.sha256(original).hexdigest() not in {hashes['original'], hashes['tested'], *hashes.get('reviewed', {})}:
+            raise RuntimeError('Installed runtime module differs from reviewed versions: ' + name)
+        tested = (ROOT / 'prototype/andrewbot' / name).read_bytes()
+        if hashlib.sha256(tested).hexdigest() != hashes['tested']:
+            raise RuntimeError('Runtime source changed since testing: ' + name)
+        if original != tested:
+            replacements[path] = tested
+            files.append({'path': path, 'original': original, 'tested': tested, 'backup': 'runtime-' + name})
+    if not files:
         return None
     digest = hashlib.sha256()
     for module in sorted(RUNTIME_PACKAGE.glob('*.py')):
         if module.is_symlink():
             raise RuntimeError('Symlink in runtime service package; installation refused')
-        digest.update(module.name.encode() + b'\0' + (tested if module == path else module.read_bytes()) + b'\0')
-    return {'path': path, 'original': original, 'tested': tested, 'expected_service_code': digest.hexdigest()}
+        digest.update(module.name.encode() + b'\0' + replacements.get(module, module.read_bytes()) + b'\0')
+    return {**files[0], 'files': files, 'expected_service_code': digest.hexdigest()}
+
+
+def runtime_files(plan):
+    return plan.get('files', [plan]) if plan else []
 
 
 def command(*args):
@@ -90,11 +113,15 @@ def acceptance(backup, readiness):
           '-p', 'test_*protocol.py', '-q')
 
 
-def renew_proof(readiness, original, before, backup, expected_service_code=None):
+def renew_proof(readiness, original, before, backup, expected_service_code=None, expected_bindings=None):
     after = readiness.bindings()
     expected = {**before}
     if expected_service_code is not None:
         expected['service_code'] = expected_service_code
+    if expected_bindings:
+        if set(expected_bindings) - {'image', 'policy'}:
+            raise RuntimeError('Unexpected runtime binding override')
+        expected.update(expected_bindings)
     if any(after.get(key) != value for key, value in expected.items() if key != 'code'):
         raise RuntimeError('Runtime service code, image, or policy changed during installation')
     proof = {**original, **after, 'verified_at': datetime.now(timezone.utc).isoformat(), 'evidence': str(backup)}
@@ -119,6 +146,9 @@ def check_idle(database=Path('/var/lib/andrew/control/controller.sqlite3')):
                       "SELECT count(*) FROM telegram_delivery_progress WHERE chunk_attempts>0"):
             if db.execute(query).fetchone()[0]:
                 raise RuntimeError('Pending work or uncertain delivery prevents safe installation')
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='diary_delivery_claims'").fetchone():
+            if db.execute('SELECT count(*) FROM diary_delivery_claims').fetchone()[0]:
+                raise RuntimeError('Active diary delivery prevents safe installation')
 
 
 def snapshot_store(backup, database=Path('/var/lib/andrew/control/controller.sqlite3')):
@@ -177,7 +207,7 @@ def main():
     if os.geteuid() != 0:
         raise SystemExit('Run this installer with sudo in your server terminal.')
     manifest = json.loads((ROOT / 'scripts/p1-fix-manifest.json').read_text())
-    if set(manifest) != {'appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py'}:
+    if set(manifest) != {'appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'workers.py', 'model.py', 'runner_client.py', 'process_limits.py'}:
         raise SystemExit('Unexpected module manifest; installation refused.')
     replacements = {}
     originals = {}
@@ -191,7 +221,7 @@ def main():
             raise SystemExit('Symlink in installed module; installation refused: ' + name)
         original = path.read_bytes() if path.exists() else None
         installed_hash = hashlib.sha256(original).hexdigest() if original is not None else None
-        if installed_hash is None and (name != 'latency.py' or hashes['original'] is not None):
+        if installed_hash is None and (name not in {'latency.py', 'workers.py'} or hashes['original'] is not None):
             raise SystemExit('Required installed module missing; installation refused: ' + name)
         reviewed_hashes = {hashes['original'], hashes['tested'], *hashes.get('reviewed', {}).keys()}
         if installed_hash not in reviewed_hashes:
@@ -207,6 +237,7 @@ def main():
     before = readiness.bindings()
     readiness.check_proof(original_proof, before)
     runtime = runtime_patch(manifest)
+    assets = plan_assets(ROOT, readiness, before)
     # Protocol checks use the checkout; require it to match every unchanged installed module.
     for path in TARGET.glob('*.py'):
         if path.name not in replacements and path.read_bytes() != (ROOT / 'prototype/andrewbot' / path.name).read_bytes():
@@ -218,28 +249,48 @@ def main():
             shutil.copy2(TARGET / name, backup / name)
     (backup / 'module-presence.json').write_text(json.dumps({name: data is not None for name, data in originals.items()}) + '\n')
     (backup / 'runtime-proof.json').write_bytes(original_proof_bytes)
-    if runtime:
-        (backup / 'runtime-runner_service.py').write_bytes(runtime['original'])
+    for item in runtime_files(runtime):
+        (backup / item.get('backup', 'runtime-' + item['path'].name)).write_bytes(item['original'])
+    if assets:
+        for item in assets['files']:
+            (backup / item['backup']).write_bytes(item['original'])
+        (backup / 'image-release.json').write_text(json.dumps(assets['release'], indent=2) + '\n')
     print('Original modules backed up in ' + str(backup), flush=True)
     controller_stopped = False
     runtime_changed = False
+    assets_changed = False
     new_controller_attempted = False
     stage = 'acceptance'
     try:
-        if runtime:
+        if assets:
+            stage = 'image_preload'
+            prepare_images(assets)
+        if runtime or assets:
             # No autonomous work may run against an unaccepted service binding.
             command('systemctl', 'stop', SERVICE)
             controller_stopped = True
             check_idle()
-            stage = 'runtime_deadline_patch'
+            stage = 'runtime_work_limits_patch'
             command('systemctl', 'stop', 'andrew-runner.service')
-            runtime_changed = True
-            replace(runtime['path'], runtime['tested'], 0, mode=0o644)
+            if assets:
+                command('systemctl', 'stop', 'andrew-browser.service')
+            if runtime:
+                runtime_changed = True
+                for item in runtime_files(runtime):
+                    replace(item['path'], item['tested'], 0, mode=0o644)
+            if assets:
+                assets_changed = True
+                for item in assets['files']:
+                    replace(item['path'], item['tested'], 0, mode=0o644)
             command('systemctl', 'start', 'andrew-runner.service')
             command('systemctl', 'is-active', 'andrew-runner.service')
+            if assets:
+                command('systemctl', 'start', 'andrew-browser.service')
+                command('systemctl', 'is-active', 'andrew-browser.service')
         stage = 'acceptance'
         acceptance(backup, readiness)
-        expected_before = {**before, **({'service_code': runtime['expected_service_code']} if runtime else {})}
+        expected_before = {**before, **({'service_code': runtime['expected_service_code']} if runtime else {}),
+                           **(assets['bindings'] if assets else {})}
         if readiness.bindings() != expected_before:
             raise RuntimeError('Runtime bindings changed unexpectedly during acceptance')
         check_idle()
@@ -261,7 +312,11 @@ def main():
         for name, data in replacements.items():
             replace(TARGET / name, data, gid)
         stage = 'proof_renewal'
-        if runtime:
+        if assets:
+            renew_proof(readiness, original_proof, before, backup,
+                        expected_service_code=runtime['expected_service_code'] if runtime else None,
+                        expected_bindings=assets['bindings'])
+        elif runtime:
             renew_proof(readiness, original_proof, before, backup, expected_service_code=runtime['expected_service_code'])
         else:
             renew_proof(readiness, original_proof, before, backup)
@@ -285,10 +340,19 @@ def main():
                 (TARGET / name).unlink(missing_ok=True)
             else:
                 replace(TARGET / name, (backup / name).read_bytes(), gid)
-        if runtime_changed:
+        if runtime_changed or assets_changed:
             command('systemctl', 'stop', 'andrew-runner.service')
-            replace(runtime['path'], runtime['original'], 0, mode=0o644)
+            if assets_changed:
+                command('systemctl', 'stop', 'andrew-browser.service')
+            if runtime_changed:
+                for item in runtime_files(runtime):
+                    replace(item['path'], item['original'], 0, mode=0o644)
+            if assets_changed:
+                for item in assets['files']:
+                    replace(item['path'], item['original'], 0, mode=0o644)
             command('systemctl', 'start', 'andrew-runner.service')
+            if assets_changed:
+                command('systemctl', 'start', 'andrew-browser.service')
         replace(readiness.PROOF, original_proof_bytes, 0, mode=0o644)
         if new_controller_attempted:
             # A new sender may have persisted held/claimed deliveries. The older
