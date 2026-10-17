@@ -20,7 +20,7 @@ class LatencyIntegrationTests(unittest.TestCase):
                 clock = [100.0]
                 calls = []
                 class Model:
-                    def reply(self, messages):
+                    def reply(self, messages, timeout=120):
                         calls.append('model')
                         clock[0] += 2
                         return 'fixture reply', {'cost': 0.001, 'prompt_tokens': 10, 'completion_tokens': 2}
@@ -70,7 +70,7 @@ class LatencyIntegrationTests(unittest.TestCase):
         for stage in ('chat', 'queued', 'autonomous', 'diary'):
             with self.subTest(stage=stage), tempfile.TemporaryDirectory() as directory:
                 class FailingModel:
-                    def reply(self, messages):
+                    def reply(self, messages, timeout=120):
                         raise TimeoutError('private provider content')
                     def autonomous_turn(self, prompt, timeout):
                         raise TimeoutError('private provider content')

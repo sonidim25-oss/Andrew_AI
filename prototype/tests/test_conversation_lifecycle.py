@@ -35,7 +35,7 @@ class ConversationLifecycleTests(unittest.TestCase):
         self.autonomous_action = None
 
         class Agent:
-            def reply(self, messages):
+            def reply(self, messages, timeout=120):
                 outer.reply_calls.append(messages)
                 if outer.reply_action:
                     outer.reply_action()

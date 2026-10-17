@@ -150,6 +150,7 @@ class IncidentFixTests(unittest.TestCase):
                 self.addCleanup(skill_patcher.stop)
             with patch.object(installer, 'ROOT', root), patch.object(installer, 'TARGET', target), \
                  patch.object(installer.os, 'geteuid', return_value=0), \
+                 patch.object(installer.os, 'chown'), \
                  patch.object(installer.grp, 'getgrnam', return_value=types.SimpleNamespace(gr_gid=1000)), \
                  patch.object(installer, 'check_idle'), patch.object(installer, 'command', side_effect=command) as commands, \
                  patch.object(installer, 'runtime_patch', return_value=runtime, create=True), \

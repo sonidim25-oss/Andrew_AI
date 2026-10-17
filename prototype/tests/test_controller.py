@@ -14,13 +14,13 @@ class FakeModel:
     def __init__(self):
         self.calls = 0
 
-    def reply(self, messages):
+    def reply(self, messages, timeout=120):
         self.calls += 1
         return "I remember our conversation.", {"prompt_tokens": 10, "completion_tokens": 5}
 
 
 class GatewayAccountedModel(FakeModel):
-    def reply(self, messages):
+    def reply(self, messages, timeout=120):
         self.calls += 1
         return "A Letta reply.", {"accounted_by_gateway": True, "cost": 0.25}
 

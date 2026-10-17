@@ -11,12 +11,20 @@ Policy requested on 2026-10-17; implemented in `22c80e0` and installed from
 | Python, Node and shell execution | No host, container or inner execution deadline |
 | Waiting for a code/shell runner response | No execution timeout; owner cancellation interrupts the wait |
 | Model-provider socket wait | 120 seconds |
+| Saved owner messages delivered after a wake | No total turn limit; provider waits and owner cancellation remain |
 | Ordinary owner-message turn | Existing 120-second turn policy |
 
 The owner request supersedes the older 120-second autonomous/worker, 180-minute
 session and 150-cycle policies in historical implementation documents. Budget
 admission, spending reservations, output allowance (6,000), sandbox CPU/memory/PID
 limits and finite browser, connection-setup and administrative waits remain.
+
+The saved-message policy is corrected following the 2026-10-17 12:02 UTC
+incident. The owner reported installing it, and controller startup passed at
+12:27:10 UTC. Installed hashes and a subsequent live wake have not independently
+been verified. Previously the queued-message path still inherited the ordinary
+120-second turn deadline before autonomous work could start. See the incident
+record for verification and deployment status.
 
 ## Cancellation and records
 

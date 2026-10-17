@@ -284,7 +284,10 @@ class Controller:
         owner_revision = self.store.get_state('owner_control_revision', '0')
         self.note_conversation(owner_revision)
         try:
-            reply, usage = self.model.reply(bounded)
+            # Saved work runs before the autonomous cycle after a wake. Its
+            # model/tool rounds need the same absence of a total turn deadline;
+            # provider network waits and owner cancellation still apply.
+            reply, usage = self.model.reply(bounded, timeout=None)
             month, day = self._periods()
             if not usage.get("accounted_by_gateway"):
                 actual = self._actual_cost(usage)
