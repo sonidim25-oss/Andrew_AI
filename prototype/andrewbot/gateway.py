@@ -12,6 +12,44 @@ from .configuration import OUTPUT_TOKEN_COST_ESTIMATE, ModelConfig, load_model_c
 from .model import ProviderRequestError
 
 
+def usable_provider_choices(result):
+    """Validate the assistant wire shape before releasing its dispatch guard."""
+    if not isinstance(result, dict):
+        return False
+    choices = result.get('choices')
+    if not isinstance(choices, list) or not choices:
+        return False
+    for choice in choices:
+        if not isinstance(choice, dict):
+            return False
+        message = choice.get('message')
+        if not isinstance(message, dict) or message.get('role', 'assistant') != 'assistant':
+            return False
+        content = message.get('content')
+        if content is not None and not isinstance(content, str):
+            return False
+        tools = message.get('tool_calls')
+        if tools is not None and not isinstance(tools, list):
+            return False
+        if not content and not tools:
+            return False
+        for tool in tools or []:
+            if not isinstance(tool, dict) or tool.get('type') != 'function':
+                return False
+            function = tool.get('function')
+            if not isinstance(function, dict):
+                return False
+            if not isinstance(tool.get('id'), str) or not tool['id']:
+                return False
+            if not isinstance(function.get('name'), str) or not function['name']:
+                return False
+            # Truncated argument strings remain provider truth; do not require
+            # parseable JSON or replay a length-limited tool response.
+            if not isinstance(function.get('arguments'), str):
+                return False
+    return True
+
+
 class ModelGateway:
     def __init__(self, provider, store, gateway_token, monthly_limit_usd=10.0,
                  monthly_reserve_usd=1.0, daily_target_usd=0.30, memory_service=None, model_config=None):
@@ -170,7 +208,7 @@ class ModelGateway:
             # even though its response was lost.
             return self.uncertain_response()
         self.store.set_state('model_turn_progress', json.dumps({'phase': 'processing the model response', 'at': datetime.now(timezone.utc).timestamp()}))
-        if not isinstance(result, dict) or not isinstance(result.get('choices'), list) or not result['choices']:
+        if not usable_provider_choices(result):
             event = 'Letta model gateway received an invalid provider response; reservation retained'
             logging.warning('%s', event)
             self.store.add_activity(event)

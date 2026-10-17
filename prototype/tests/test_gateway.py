@@ -55,6 +55,37 @@ class ModelGatewayTests(unittest.TestCase):
         self.assertIn('blocked a repeated uncertain provider request', events)
         self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 1)
 
+    def test_unusable_choice_shapes_remain_held_without_duplicate_dispatch(self):
+        invalid = [None, {}, {'role': 'assistant', 'content': None},
+                   {'role': 'user', 'content': 'wrong role'},
+                   {'role': 'assistant', 'tool_calls': [{'type': 'function', 'id': '',
+                       'function': {'name': 'check_budget', 'arguments': '{}'}}]}]
+        for index, message in enumerate(invalid):
+            with self.subTest(message=message):
+                self.provider.response = {'choices': [{'message': message}]}
+                payload = {'model': self.gateway.model_id,
+                           'messages': [{'role': 'user', 'content': f'fixture {index}'}]}
+                status, result = self.gateway.complete('Bearer gateway-test-token', payload)
+                self.assertEqual(status, 422)
+                self.assertEqual(result['error']['code'], 'provider_attempt_uncertain')
+                calls = len(self.provider.calls)
+                self.gateway.complete('Bearer gateway-test-token', payload)
+                self.assertEqual(len(self.provider.calls), calls)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 0)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], len(invalid))
+
+    def test_validator_preserves_truncated_tool_arguments_without_replaying(self):
+        self.provider.response = {'choices': [{'message': {'role': 'assistant', 'content': None,
+            'tool_calls': [{'type': 'function', 'id': 'fixture-tool',
+                'function': {'name': 'check_budget', 'arguments': '{"unfinished":'}}]}, 'finish_reason': 'length'}],
+            'usage': {'prompt_tokens': 10, 'completion_tokens': 20, 'cost': .001}}
+        status, result = self.gateway.complete('Bearer gateway-test-token', {
+            'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'fixture'}]})
+        self.assertEqual(status, 200)
+        self.assertEqual(result['choices'][0]['message']['tool_calls'][0]['function']['arguments'], '{"unfinished":')
+        self.assertEqual(len(self.provider.calls), 1)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
+
     def test_unknown_provider_error_text_is_never_logged(self):
         from unittest.mock import Mock
         self.provider.complete = Mock(side_effect=RuntimeError('private credentials or response body'))

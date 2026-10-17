@@ -41,6 +41,14 @@ current reply phase and the age of its last update. These are local snapshots,
 not claims that an idle or interrupted model is thinking. Old held requests stay
 held; there is no evidence-based reason to mark them all answered or replay them.
 
+The published gateway now includes the already deployed assistant-response
+validator. This preserves the existing dispatch guard and lets the reply-mode
+upgrade merge without treating that live-only helper as a competing import edit.
+All updated modules are checked against a read-only export of the deployed Python
+and skill source before rerunning core and pinned-protocol checks on the complete
+merged package. `scripts/export-deployment-source.py` exports only those source
+files, excluding controller databases, credentials and messages.
+
 Agent model settings clear the former output-token setting. The gateway removes
 both `max_tokens` and `max_completion_tokens`, including values supplied by the
 runtime. The direct provider reply path also omits its old 512-token cap. Provider
