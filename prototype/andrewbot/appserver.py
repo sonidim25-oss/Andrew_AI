@@ -702,8 +702,6 @@ class LettaAgent:
                         pass
 
     def reply(self, messages, timeout=None, *, origin='owner'):
-        # Owner replies can span multiple model/tool rounds just like autonomous
-        # work. Bound network operations separately and retain explicit cancellation.
         text = next((row["content"] for row in reversed(messages) if row["role"] == "user"), None)
         if not isinstance(text, str) or not text:
             raise ValueError("a user message is required")

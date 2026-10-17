@@ -16,6 +16,27 @@ spec.loader.exec_module(installer)
 
 
 class AutonomyInstallerTests(unittest.TestCase):
+    def test_reply_origin_upgrade_preserves_live_comment_deletion_and_research_guidance(self):
+        comment = (b'        # Owner replies can span multiple model/tool rounds just like autonomous\n'
+                   b'        # work. Bound network operations separately and retain explicit cancellation.\n')
+        base = (b'class LettaAgent:\n    system_prompt = "old"\n'
+                b'    def unchanged(self):\n        value = 1\n        value += 2\n        value += 3\n'
+                b'        value += 4\n        return value\n\n'
+                b'    def reply(self, messages, timeout=None):\n' + comment + b'        return messages\n')
+        live = base.replace(comment, b'').replace(b'"old"', b'"preserve research progress"')
+        proposed = base.replace(comment, b'').replace(b'timeout=None):', b'timeout=None, *, origin="owner"):')
+        with tempfile.TemporaryDirectory() as directory:
+            merged = installer.merge_source(live, base, proposed, Path(directory), 'appserver.py')
+        self.assertIn(b'preserve research progress', merged)
+        self.assertIn(b'origin="owner"', merged)
+        self.assertNotIn(comment, merged)
+        ast.parse(merged)
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, 'overlap'):
+                installer.merge_source(live.replace(b'return messages', b'return "live behavior"'), base,
+                                       proposed.replace(b'return messages', b'return "new behavior"'),
+                                       Path(directory), 'appserver.py')
+
     def test_gateway_diagnostics_preserve_live_response_validator(self):
         base = (b'import logging\n\nclass ModelGateway:\n'
                 b'    def complete(self, result):\n'

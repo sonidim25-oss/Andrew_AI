@@ -171,6 +171,14 @@ def merge_source(live, base, proposed, directory, name):
     if live == base:
         ast.parse(proposed)
         return proposed
+    if name == 'appserver.py':
+        # The deployed timeout patch removed this obsolete comment immediately
+        # below reply(). Both sides agree on deletion; normalize the ancestor
+        # so git can merge the neighbouring new origin parameter independently.
+        comment = (b'        # Owner replies can span multiple model/tool rounds just like autonomous\n'
+                   b'        # work. Bound network operations separately and retain explicit cancellation.\n')
+        if comment not in live and comment not in proposed and base.count(comment) == 1:
+            base = base.replace(comment, b'')
     if name == 'skills.py':
         live, base, proposed = merge_skill_catalogs(live, base, proposed)
     if name == 'gateway.py':
