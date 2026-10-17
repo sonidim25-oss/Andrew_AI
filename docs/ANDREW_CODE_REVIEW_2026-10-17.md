@@ -21,11 +21,11 @@ Passing existing tests does not cover these missing scenarios. These are code-le
 | Priority | Meaning | Open tasks |
 | --- | --- | ---: |
 | P0 — Extra high | Immediate uncontrolled loss, unauthorized execution, or equivalent critical behavior | 0 confirmed |
-| P1 — High | Paid-request uncertainty, duplicate-delivery risk, or incorrect spending recovery | 1 |
+| P1 — High | Paid-request uncertainty, duplicate-delivery risk, or incorrect spending recovery | 0 |
 | P2 — Medium | Broken supported operations, deployment gaps, or reproducible runtime races | 5 |
 | P3 — Low | Avoidable inference cost or misleading capability handling | 1 |
 
-No P0 finding was established; the empty category is not a guarantee that none exists. 7 tasks remain open.
+No P0 finding was established; the empty category is not a guarantee that none exists. 6 tasks remain open.
 
 ## P0 — Extra high
 
@@ -47,7 +47,7 @@ No confirmed tasks at this priority.
 
 ### REVIEW-002 — Quarantine restored queues and reconcile spending before restart
 
-- [ ] **Name:** Add an operational recovery gate to snapshot restore.
+- [x] **Name:** Add an operational recovery gate to snapshot restore.
 - **Short description:** The feature named “memory restore” replaces the entire controller database, including operational queues and spending tables. Restoring an older snapshot can revive replies that were delivered after the snapshot and erase later settled charges. Those restored pending rows look unattempted to normal startup recovery and can be delivered again. The separate Letta database is not rewound with this snapshot.
 - **Location:** `prototype/andrewbot/memory_backup.py:134–149`; restore entry point `prototype/andrewbot/memory_backup_cli.py:53–58`.
 - **Short fix suggestion:** Restore into a mandatory recovery-halted state. Hold restored inbound work, outgoing deliveries, media jobs, and external-mutation attempts until their outcomes are reconciled. Preserve newer ledgers when available; otherwise require billing reconciliation before paid work resumes. Never interpret missing post-snapshot records as proof that actions or spending did not happen.
@@ -55,6 +55,9 @@ No confirmed tasks at this priority.
 - **Acceptance check:** Restore a snapshot preceding confirmed sends and charges, then start the controller. No restored work is automatically sent or executed, and no model/media spending is admitted until recovery reconciliation completes. Saved memory remains readable.
 
 ## P2 — Medium
+
+- **Resolution:** Restore now stages a recovery-halted database, quarantines inbox/reply/diary/media/avatar work, retains encrypted pre-restore evidence, and preserves verified newer reasoning/media ledgers, reservations and Telegram checkpoints. Startup, model admission and media admission respect a separate recovery gate. Administrator reconciliation requires an explicit confirmation and leaves old work held and Andrew paused. Updated the backup CLI/helper and operations guide.
+- **Verification:** 380 core tests passed (2 optional skips); 83 pinned-fixture script tests passed; 42 installer tests and backup-helper shell syntax passed. Regressions cover already-delivered replies, retained charges/reservations/checkpoints, blocked clients and paid work, and held queues after reconciliation. Source fixed and tested; production deployment is separate.
 
 ### REVIEW-003 — Use one canonical definition of an owner control
 

@@ -3,7 +3,7 @@ import re
 import sys
 
 from .main import data_directory, systemd_credential_bytes
-from .memory_backup import create_encrypted_snapshot, restore_snapshot
+from .memory_backup import create_encrypted_snapshot, restore_snapshot, reconcile_restored_database
 from .store import Store
 
 
@@ -16,6 +16,8 @@ def _parser():
     commands.add_parser("snapshot", help="create an encrypted local database snapshot")
     restore = commands.add_parser("restore", help="restore a named encrypted snapshot")
     restore.add_argument("snapshot_filename")
+    reconcile = commands.add_parser('reconcile', help='confirm manual billing and action reconciliation after restore')
+    reconcile.add_argument('--confirm', required=True, choices=['BILLING_AND_ACTIONS_RECONCILED'])
     return parser
 
 
@@ -32,7 +34,7 @@ def main(argv=None):
     if database_path.is_symlink():
         print("Controller database is unavailable.", file=sys.stderr)
         return 2
-    if arguments.action == "snapshot" and not database_path.is_file():
+    if arguments.action != "restore" and not database_path.is_file():
         print("Controller database is unavailable.", file=sys.stderr)
         return 2
     if database_path.exists() and not database_path.is_file():
@@ -41,6 +43,14 @@ def main(argv=None):
     try:
         key = systemd_credential_bytes("andrew-memory-backup-key")
         backup_directory = root / "backups"
+        if arguments.action == 'reconcile':
+            store = Store(database_path)
+            try:
+                reconcile_restored_database(store, arguments.confirm)
+            finally:
+                store.close()
+            print('Restore reconciliation confirmed; old queues remain held and Andrew remains paused.')
+            return 0
         if arguments.action == "snapshot":
             store = Store(database_path)
             try:
@@ -55,7 +65,7 @@ def main(argv=None):
             print("Requested memory snapshot is unavailable.", file=sys.stderr)
             return 2
         restore_snapshot(source, database_path, key)
-        print("Memory database restored from encrypted snapshot.")
+        print("Memory database restored; operational queues are held pending billing and action reconciliation.")
         return 0
     except Exception as error:
         print(f"Memory backup operation failed ({type(error).__name__}).", file=sys.stderr)

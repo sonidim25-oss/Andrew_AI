@@ -14,6 +14,15 @@ case "$1" in
   snapshot)
     [[ "$#" -eq 1 ]] || { echo "Usage: andrew-memory-backup snapshot" >&2; exit 2; }
     ;;
+  reconcile)
+    [[ "$#" -eq 3 && "$2" == '--confirm' && "$3" == 'BILLING_AND_ACTIONS_RECONCILED' ]] || {
+      echo 'Usage: andrew-memory-backup reconcile --confirm BILLING_AND_ACTIONS_RECONCILED' >&2; exit 2;
+    }
+    if systemctl is-active --quiet andrew-control.service; then
+      echo 'Keep andrew-control.service stopped during restore reconciliation.' >&2
+      exit 1
+    fi
+    ;;
   restore)
     [[ "$#" -eq 2 ]] || { echo "Usage: andrew-memory-backup restore <snapshot-filename>" >&2; exit 2; }
     if systemctl is-active --quiet andrew-control.service; then

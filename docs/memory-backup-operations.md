@@ -26,6 +26,15 @@ Restore a snapshot:
    ```
 
 3. The restore checks the authenticated encryption tag, SQLite integrity, and required diary and memory tables before atomically replacing `/var/lib/andrew/control/controller.sqlite3`. It refuses if SQLite WAL/SHM sidecar files remain beside the destination; inspect them before retrying.
-4. Run the controller's one-shot validation command. Phase 4 does not start the controller service or enable autonomous/scheduled sessions.
+4. Restoration quarantines inbound work, outgoing replies, diaries, media jobs and avatar proposals. The controller refuses to start operational work until billing and external actions are reconciled. A separate restore gate cannot be cleared by `/wake`.
+5. When restoring over a healthy descendant database, the latest reasoning ledger, unsettled reservations and media ledger are retained. Conflicting histories are refused. Encrypted `restore-evidence-*.andrewdb` files beside the database preserve the pre-restore data for reconciliation and are not removed by daily snapshot rotation. If no healthy live database is available, reconcile billing externally before authorizing work.
+6. Review delivery outcomes, provider charges, external account/actions and the separate Letta conversation. Quarantined records are never evidence that an action did not happen. After completing that review, explicitly acknowledge it while the controller remains stopped:
+
+   ```bash
+   sudo andrew-memory-backup reconcile --confirm BILLING_AND_ACTIONS_RECONCILED
+   ```
+
+   This removes only the recovery gate. Old queues stay held and Andrew stays paused; a subsequent owner wake is required for fresh work. Do not use `/replay` to guess whether older actions happened.
+7. Install the updated `scripts/andrew-memory-backup` helper together with the controller modules when rolling out this release (`sudo install -o root -g root -m 0755 scripts/andrew-memory-backup /usr/local/sbin/andrew-memory-backup`). Run one-shot validation, start the controller, then wake only when ready.
 
 Snapshots are local only. They protect against database corruption and mistaken deletion while the host and systemd host key are available. They do not protect against host loss, host-key loss, or a root compromise, and no off-host copy is configured.

@@ -85,6 +85,8 @@ class Controller:
         raise ValueError("no future local wake time could be resolved")
 
     def budget_allows(self, estimated_cost_usd):
+        if self.store.get_state('restore_recovery_required', '0') == '1':
+            return False, 'restore_reconciliation'
         snapshot = budget_snapshot(
             self.store,
             monthly_limit_usd=self.monthly_limit_usd,

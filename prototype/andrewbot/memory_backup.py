@@ -131,6 +131,109 @@ def create_encrypted_snapshot(store, backup_dir, key, retention=7):
     return destination
 
 
+
+def _preserve_newer_ledgers(restored, destination):
+    """Use only a verified descendant ledger; never guess across conflicting histories."""
+    with sqlite3.connect(destination.resolve().as_uri() + '?mode=ro', uri=True) as current:
+        if current.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
+            return False
+        for key in ('letta_agent_id', 'letta_conversation_id'):
+            row = current.execute('SELECT value FROM state WHERE key=?', (key,)).fetchone()
+            old = restored.get_state(key)
+            if row and old and row[0] != old:
+                raise ValueError('Restore ledger belongs to another conversation; manual reconciliation required')
+        latest = {row[0]: tuple(row) for row in current.execute('SELECT * FROM usage')}
+        if any(latest.get(row['id']) != tuple(row) for row in restored.connection.execute('SELECT * FROM usage')):
+            raise ValueError('Restore ledger histories conflict; manual reconciliation required')
+        tables = ('usage', 'budget_reservations', 'media_jobs', 'media_avatar_proposals', 'updates')
+        available = {row[0] for row in current.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        with restored.connection:
+            for name in reversed(tables):
+                if name in available:
+                    schema = current.execute("SELECT sql FROM sqlite_master WHERE name=?", (name,)).fetchone()[0]
+                    restored.connection.execute(schema.replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS ', 1))
+                    restored.connection.execute('DELETE FROM ' + name)
+            for name in tables:
+                if name in available:
+                    rows = current.execute('SELECT * FROM ' + name).fetchall()
+                    if rows:
+                        marks = ','.join('?' for _ in rows[0])
+                        restored.connection.executemany('INSERT INTO ' + name + ' VALUES(' + marks + ')', rows)
+            # Do not fetch already-processed Telegram inputs again after
+            # releasing recovery. Any newer pending inputs are quarantined too.
+            for name in ('telegram_inbox', 'telegram_uncertain'):
+                if name in available:
+                    rows = current.execute('SELECT * FROM ' + name).fetchall()
+                    restored.connection.executemany('INSERT OR IGNORE INTO telegram_uncertain VALUES(?,?,?)', rows)
+                    restored.connection.executemany('INSERT OR IGNORE INTO updates VALUES(?)', [(r[0],) for r in rows])
+            revision = current.execute("SELECT value FROM state WHERE key='provider_retry_revision'").fetchone()
+            if revision:
+                restored.connection.execute("INSERT INTO state VALUES('provider_retry_revision',?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (revision[0],))
+    return True
+
+
+def _prepare_recovery_snapshot(serialized, destination, key):
+    from .store import Store
+    # Keep encrypted pre-restore evidence outside rotating daily snapshots.
+    if destination.exists():
+        before = destination.read_bytes()
+        nonce = token_bytes(_NONCE_LENGTH)
+        evidence = destination.parent / ('restore-evidence-' +
+            datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '.andrewdb')
+        _atomic_write(evidence, _MAGIC + nonce + AESGCM(key).encrypt(nonce, before, _MAGIC))
+    with tempfile.TemporaryDirectory(prefix='andrew-recovery-') as directory:
+        path = Path(directory) / 'controller.sqlite3'
+        _atomic_write(path, serialized)
+        restored = Store(path)
+        try:
+            ledger_available = False
+            if destination.exists():
+                try:
+                    ledger_available = _preserve_newer_ledgers(restored, destination)
+                except sqlite3.DatabaseError:
+                    # Corrupt live data still has encrypted evidence; billing
+                    # remains gated until an administrator reconciles it.
+                    pass
+            with restored.connection:
+                db = restored.connection
+                db.execute("UPDATE messages SET queued=3 WHERE role='user' AND queued IN (1,2)")
+                db.execute('INSERT OR IGNORE INTO telegram_uncertain SELECT * FROM telegram_inbox')
+                db.execute('INSERT OR IGNORE INTO updates SELECT update_id FROM telegram_inbox')
+                db.execute('DELETE FROM telegram_claims')
+                db.execute('DELETE FROM telegram_inbox')
+                db.execute("UPDATE telegram_outbox SET delivery_state='held',claim_token=NULL")
+                db.execute("UPDATE diary_entries SET delivery_state='uncertain' WHERE delivery_state='pending'")
+                db.execute('DELETE FROM diary_delivery_claims')
+                db.execute("UPDATE cycles SET status='interrupted' WHERE status='running'")
+                tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                if 'media_jobs' in tables:
+                    db.execute("UPDATE media_jobs SET state='uncertain',error='restore_reconciliation' WHERE state IN ('queued','running')")
+                    db.execute("UPDATE media_jobs SET delivery='uncertain',error='restore_reconciliation' WHERE delivery IN ('pending','sending')")
+                if 'media_avatar_proposals' in tables:
+                    db.execute("UPDATE media_avatar_proposals SET state='uncertain' WHERE state IN ('proposed','approved','applying')")
+                updates = {'restore_recovery_required': '1', 'restore_ledger_preserved': str(int(ledger_available)),
+                           'paused': '1', 'sleeping': '0', 'sleep_until': '', 'session_start_requested': '',
+                           'active_session_id': '', 'active_session_started_at': '',
+                           'active_session_status': 'error', 'autonomy_error': 'restore_reconciliation'}
+                db.executemany('INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', updates.items())
+                db.execute("INSERT INTO activity(event,created_at) VALUES('Snapshot restored; operational work quarantined pending billing and action reconciliation',?)", (restored.now(),))
+            return restored.connection.serialize()
+        finally:
+            restored.close()
+
+
+def reconcile_restored_database(store, confirmation):
+    if confirmation != 'BILLING_AND_ACTIONS_RECONCILED':
+        raise ValueError('Explicit billing and action reconciliation confirmation required')
+    if store.get_state('restore_recovery_required', '0') != '1':
+        raise ValueError('No restored database awaits reconciliation')
+    # Old queues stay quarantined. New work still requires a separate owner wake.
+    store.transition_state({'restore_recovery_required': '0', 'paused': '1',
+                            'autonomy_error': '', 'active_session_status': 'paused'},
+                           'Administrator confirmed restore billing and action reconciliation')
+
+
 def restore_snapshot(snapshot_path, destination_path, key):
     source = Path(snapshot_path)
     destination = Path(destination_path)
@@ -146,6 +249,7 @@ def restore_snapshot(snapshot_path, destination_path, key):
     destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if destination.parent.is_symlink():
         raise ValueError("restore parent cannot be a symlink")
+    serialized = _prepare_recovery_snapshot(serialized, destination, key)
     _atomic_write(destination, serialized)
 
 

@@ -51,6 +51,8 @@ class ModelGateway:
         expected = f"Bearer {self.gateway_token}"
         if not isinstance(authorization, str) or not hmac.compare_digest(authorization, expected):
             return 401, {"error": {"message": "unauthorized", "type": "authentication_error"}}
+        if self.store.get_state('restore_recovery_required', '0') == '1':
+            return 423, {'error': {'message': 'Restore requires billing and action reconciliation', 'type': 'recovery_blocked'}}
         if self.store.get_state("paused", "0") == "1" or self.store.get_state("sleeping", "0") == "1":
             return 423, {"error": {"message": "Andrew is sleeping or paused", "type": "lifecycle_blocked"}}
         if not isinstance(payload, dict) or payload.get("model") not in {

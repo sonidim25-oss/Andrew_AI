@@ -132,6 +132,8 @@ class MediaService:
         return float(row[0])
 
     def submit(self, kind, text, request_key, *, owner_requested=False, voice_id=None, reference_id=None):
+        if self.store.get_state('restore_recovery_required', '0') == '1':
+            raise ValueError('Restore requires billing and action reconciliation')
         if not self.policy.enabled or (kind == 'voice' and not self.policy.voice_enabled):
             raise ValueError('Media generation is disabled')
         if kind not in {'voice', 'image'} or not owner_requested:
@@ -217,6 +219,8 @@ class MediaService:
             return dict(row)
 
     def claim(self):
+        if self.store.get_state('restore_recovery_required', '0') == '1':
+            return None
         if not self.policy.enabled:
             return None
         with self.store._lock, self.store.connection:
@@ -311,6 +315,8 @@ class MediaService:
         return data
 
     def claim_delivery(self):
+        if self.store.get_state('restore_recovery_required', '0') == '1':
+            return None
         with self.store._lock, self.store.connection:
             self.store.connection.execute('BEGIN IMMEDIATE')
             row = self.store.connection.execute("SELECT * FROM media_jobs WHERE state='succeeded' AND delivery='pending' ORDER BY created_at,id LIMIT 1").fetchone()
@@ -370,6 +376,8 @@ class MediaService:
             return bool(self.store.connection.execute("UPDATE media_avatar_proposals SET state='approved' WHERE id=? AND state='proposed'", (proposal,)).rowcount)
 
     def claim_avatar(self):
+        if self.store.get_state('restore_recovery_required', '0') == '1':
+            return None
         if not self.policy.enabled:
             return None
         with self.store._lock, self.store.connection:

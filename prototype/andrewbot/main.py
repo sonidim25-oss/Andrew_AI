@@ -126,6 +126,10 @@ def run(validate_only=False):
     except Exception as error:
         logging.error("Startup validation failed: controller database access (%s)", type(error).__name__)
         return 2
+    if store.get_state('restore_recovery_required', '0') == '1':
+        logging.error('Restored database is halted pending administrator billing and action reconciliation')
+        store.close()
+        return 2 if validate_only else 0
     try:
         memory_backup_key = systemd_credential_bytes("andrew-memory-backup-key")
     except Exception as error:
