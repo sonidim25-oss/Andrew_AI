@@ -21,13 +21,20 @@ from andrewbot.store import Store
 class MediaProtocolTests(unittest.TestCase):
     @patch('andrewbot.appserver.gmail_permissions', return_value={'enabled': False})
     def test_real_harness_preserves_turn_scoped_media_authorization(self, permissions):
+        self.exercise(False)
+
+    @patch('andrewbot.appserver.gmail_permissions', return_value={'enabled': False})
+    def test_autonomous_turn_can_queue_voice_and_image_with_standing_permission(self, permissions):
+        self.exercise(True)
+
+    def exercise(self, autonomous):
         with tempfile.TemporaryDirectory(prefix='andrew-media-protocol-') as directory:
             root = Path(directory)
             with socket.socket() as listener:
                 listener.bind(('127.0.0.1', 0))
                 port = listener.getsockname()[1]
             store = Store(root / 'controller.sqlite3')
-            media = MediaService(store, root / 'artifacts', 17, MediaPolicy(enabled=True))
+            media = MediaService(store, root / 'artifacts', 17, MediaPolicy(enabled=True, spontaneous_voice=autonomous, spontaneous_image=autonomous))
             calls = []
             class Provider:
                 def complete(inner, payload):
@@ -36,7 +43,15 @@ class MediaProtocolTests(unittest.TestCase):
                     self.assertIn('voice.generate', tools)
                     message = {'role': 'assistant', 'content': 'Fixture response.'}
                     finish = 'stop'
-                    if len(calls) == 2:
+                    if autonomous and len(calls) in (2, 3):
+                        kind = 'voice' if len(calls) == 2 else 'image'
+                        message = {'role': 'assistant', 'content': None, 'tool_calls': [
+                            {'id': kind + '-autonomous-fixture', 'type': 'function', 'function': {
+                                'name': kind + '.generate', 'arguments': json.dumps({
+                                    'text': 'An independently chosen ' + kind,
+                                    'request_id': kind + '-autonomous-1'})}}]}
+                        finish = 'tool_calls'
+                    elif len(calls) == 2:
                         message = {'role': 'assistant', 'content': None, 'tool_calls': [
                             {'id': 'skill-fixture', 'type': 'function', 'function': {
                                 'name': 'skills.load', 'arguments': json.dumps({'name': 'voice-communication'})}}]}
@@ -83,12 +98,16 @@ class MediaProtocolTests(unittest.TestCase):
                         controller = Controller(store, agent, 17, media=media)
                         agent.tool_handler = controller.execute_tool
                         controller.flush_queued()
-                        controller.handle_update({'update_id': 101, 'message': {'from': {'id': 17},
-                                                 'chat': {'id': 17, 'type': 'private'}, 'text': '/voice_reply Hello'}})
+                        if autonomous:
+                            agent.autonomous_turn('Choose something to share with the owner.')
+                        else:
+                            controller.handle_update({'update_id': 101, 'message': {'from': {'id': 17},
+                                                     'chat': {'id': 17, 'type': 'private'}, 'text': '/voice_reply Hello'}})
                         self.assertEqual(4, len(calls))
-                        self.assertTrue(any('# Voice communication' in json.dumps(call['messages']) for call in calls))
-                        self.assertEqual(1, len(media.status()['jobs']))
-                        self.assertEqual('queued', media.status()['jobs'][0]['state'])
+                        if not autonomous:
+                            self.assertTrue(any('# Voice communication' in json.dumps(call['messages']) for call in calls))
+                        self.assertEqual(2 if autonomous else 1, len(media.status()['jobs']))
+                        self.assertTrue(all(job['state'] == 'queued' for job in media.status()['jobs']))
                 finally:
                     process.terminate()
                     try:

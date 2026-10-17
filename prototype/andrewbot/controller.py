@@ -18,7 +18,7 @@ class Controller:
     def __init__(self, store, model, owner_id, monthly_limit_usd=10.0,
                  monthly_reserve_usd=1.0, daily_target_usd=0.30,
                  timezone_name="America/Toronto", fallback_wake_time="09:00",
-                 autonomous_enabled=False, fallback_enabled=False, memory_service=None, model_config=None,
+                 autonomous_enabled=False, fallback_enabled=False, memory_service=None, model_config=None, credit_reader=None,
                  tool_runtime=None, visit_history=None, gmail_tools=None, conversation_idle_seconds=300, health_snapshot=None, media=None, skill_catalog=None):
         self.store = store
         self.media = media
@@ -29,6 +29,7 @@ class Controller:
         self.monthly_limit_usd = float(monthly_limit_usd)
         self.monthly_reserve_usd = float(monthly_reserve_usd)
         self.daily_target_usd = float(daily_target_usd)
+        self.credit_reader = credit_reader
         self.timezone_name = timezone_name
         self.fallback_wake_time = fallback_wake_time
         self.autonomous_enabled = bool(autonomous_enabled)
@@ -87,14 +88,6 @@ class Controller:
     def budget_allows(self, estimated_cost_usd):
         if self.store.get_state('restore_recovery_required', '0') == '1':
             return False, 'restore_reconciliation'
-        snapshot = budget_snapshot(
-            self.store,
-            monthly_limit_usd=self.monthly_limit_usd,
-            monthly_reserve_usd=self.monthly_reserve_usd,
-            daily_target_usd=self.daily_target_usd,
-        )
-        if estimated_cost_usd > snapshot["remaining_ordinary"]:
-            return False, "monthly_reserve"
         return True, "ok"
 
     def handle_update(self, update, allow_time_entry=True):
@@ -507,7 +500,11 @@ class Controller:
             if command in {'/media_status', '/media_budget'}:
                 return json.dumps(self.media.status(), ensure_ascii=False)
             if command in {'/voice_on', '/voice_off'}:
-                return 'Spontaneous media is disabled in this release. Use /voice <text> for an explicit voice request.'
+                if command == '/voice_on' and not self.media.policy.voice_enabled:
+                    return 'Voice generation is disabled in the service configuration.'
+                self.store.set_state('media_spontaneous_voice', '1' if command == '/voice_on' else '0')
+                return ('TTS is on. Andrew may choose to send voice notes spontaneously.'
+                        if command == '/voice_on' else 'Spontaneous TTS is off. Explicit /voice requests remain available.')
             argument = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) == 2 else ''
             if command in {'/avatar_propose', '/avatar_approve'}:
                 try:
@@ -732,11 +729,10 @@ class Controller:
                 monthly_reserve_usd=self.monthly_reserve_usd,
                 daily_target_usd=self.daily_target_usd,
             )
-            cycles = self.store.cycle_count(snapshot["day"])
-            return (f"This month: ${snapshot['monthly_cost']:.4f} of ${self.monthly_limit_usd:.2f}. "
-                    f"Protected reserve: ${self.monthly_reserve_usd:.2f}. Spent today: ${snapshot['daily_cost']:.4f}. "
-                    f"Month allowance accrued: ${snapshot['accrued_allowance']:.2f}; remaining ordinary allowance: "
-                    f"${snapshot['remaining_ordinary']:.4f}. Autonomous cycles: {cycles}.")
+            credits = self.credit_reader() if self.credit_reader else {'available': False, 'reason': 'credit_reader_unavailable'}
+            return json.dumps({'policy': 'Andrew manages API credits; no controller spending caps',
+                               'reasoning_usage': snapshot, 'provider_credits': credits,
+                               'media': self.media.status() if self.media else None}, ensure_ascii=False)
         if command == "/activity":
             entries = self.store.recent_activity(8)
             return "Recent objective activity (event ID — summary):\n" + (

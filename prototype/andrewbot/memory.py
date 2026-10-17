@@ -92,8 +92,9 @@ class MemoryService:
 
     def current_personality_context(self):
         revision = self.store.current_personality_revision()
+        guidance = self.store.get_state("owner_credit_guidance", "")
         if revision is None:
-            return ""
+            return guidance
         header = (
             f"Current personality revision {revision['revision_id']} "
             f"(effective {revision['effective_date']}; source {revision['source']}):\n"
@@ -101,7 +102,7 @@ class MemoryService:
         suffix = f"\nReason: {revision['reason']}"
         available = max(0, 4000 - len(header) - len(suffix))
         content = revision["content"][:available]
-        return f"{header}{content}{suffix}"
+        return (guidance + "\n" if guidance else "") + f"{header}{content}{suffix}"
 
 
 class ResearchJournal:

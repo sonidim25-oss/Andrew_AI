@@ -178,7 +178,7 @@ class ModelGatewayTests(unittest.TestCase):
         self.assertEqual(gateway.input_rate, 0.25 / 1_000_000)
         self.assertEqual(gateway.output_rate, 1.5 / 1_000_000)
 
-    def test_configured_rates_drive_gateway_reservations(self):
+    def test_high_estimated_cost_does_not_create_a_spending_cap(self):
         config = load_model_config({
             "ANDREW_MODEL_ID": "google/gemini-2.5-flash",
             "ANDREW_MODEL_INPUT_USD_PER_MILLION": "0",
@@ -189,8 +189,8 @@ class ModelGatewayTests(unittest.TestCase):
             "Bearer gateway-test-token",
             {"model": "openai/google/gemini-2.5-flash", "messages": [{"role": "user", "content": "hello"}]},
         )
-        self.assertEqual(status, 429)
-        self.assertEqual(self.provider.calls, [])
+        self.assertEqual(status, 200)
+        self.assertEqual(len(self.provider.calls), 1)
 
     def test_missing_provider_cost_uses_configured_model_rates(self):
         config = load_model_config({
@@ -214,12 +214,12 @@ class ModelGatewayTests(unittest.TestCase):
             (12 * 7.75 + 2 * 23.5) / 1_000_000,
         )
 
-    def test_enforces_monthly_reserve_before_forwarding(self):
+    def test_legacy_monthly_reserve_does_not_block_forwarding(self):
         month, day = self.gateway.periods()
         self.store.record_usage(month, day, 9.0, 1, 1)
         status, _ = self.gateway.complete("Bearer gateway-test-token", {"model": "openai/qwen/qwen3.8-flash", "messages": [{"role": "user", "content": "hello"}]})
-        self.assertEqual(status, 429)
-        self.assertEqual(self.provider.calls, [])
+        self.assertEqual(status, 200)
+        self.assertEqual(len(self.provider.calls), 1)
 
     def test_openai_compatible_http_route_supports_models_and_streaming(self):
         server = make_server(self.gateway, port=0)

@@ -14,6 +14,8 @@ The [browser runtime guide](docs/BROWSER_RUNTIME.md) describes owner-authorized 
 
 Chromium currently runs with `--no-sandbox` inside the rootless, networkless, capability-free worker because nested user namespaces are unavailable in the development environment. The owner approved that setting for this outer isolation boundary. This reduces defense in depth and should be revisited where nested Chromium sandboxing is supported.
 
+The [self-managed credits and autonomous media guide](docs/SELF_MANAGED_CREDITS_AND_MEDIA.md) covers the owner-authorized removal of controller spending caps, provider credit checks, persistent owner guidance, spontaneous TTS and images, and the guarded deployment command. Source and tests are complete; the guide describes the separate live installation step.
+
 ## Development checks
 
 ```sh

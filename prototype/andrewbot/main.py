@@ -200,6 +200,7 @@ def run(validate_only=False):
         tool_runtime=tool_runtime,
         gmail_tools=GmailTools(vault_directory(), store),
         media=media,
+        credit_reader=provider.credit_status,
     )
     agent.tool_handler = controller.execute_tool
     check = "Letta provider and persistent agent initialization"

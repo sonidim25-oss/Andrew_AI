@@ -241,9 +241,9 @@ class LifecycleTests(unittest.TestCase):
         self.assertNotEqual(self.store.get_state("sleeping"), "1")
         self.assertEqual(self.store.get_state("active_session_status"), "error")
 
-    def test_budget_exhaustion_blocks_session(self):
+    def test_legacy_budget_exhaustion_does_not_block_session(self):
         self.store.record_usage("2026-10", "2026-10-14", 9, 1, 1)
-        self.assertIsNone(self.runner.start("scheduled_wake", self.now))
+        self.assertIsNotNone(self.runner.start("scheduled_wake", self.now))
         self.assertEqual(self.calls, [])
 
     def test_old_session_stop_cannot_overwrite_a_new_owner_wake(self):
@@ -289,12 +289,13 @@ class LifecyclePolicyTests(unittest.TestCase):
                    side_effect=ValueError('missing acceptance proof')), self.assertRaises(ValueError):
             self.policy({"ANDREW_AUTONOMOUS_ENABLED": "1", "ANDREW_ISOLATED_RUNTIME_ENABLED": "1"})
 
-    def test_budget_values_cannot_weaken_release_limits(self):
-        for key, value in (("ANDREW_MONTHLY_LIMIT_USD", "11"), ("ANDREW_MONTHLY_RESERVE_USD", "0"),
-                           ("ANDREW_DAILY_TARGET_USD", "1"), ("ANDREW_DAILY_TARGET_USD", "nan"),
-                           ("ANDREW_MONTHLY_LIMIT_USD", "inf"), ("ANDREW_MONTHLY_LIMIT_USD", "-1")):
-            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
-                self.policy({"ANDREW_AUTONOMOUS_ENABLED": "1", key: value})
+    def test_legacy_budget_values_are_not_spending_caps(self):
+        policy = self.policy({'ANDREW_MONTHLY_LIMIT_USD': '100', 'ANDREW_MONTHLY_RESERVE_USD': '0',
+                              'ANDREW_DAILY_TARGET_USD': '10'})
+        self.assertEqual(policy.monthly_limit_usd, 100)
+        for key in ('ANDREW_MONTHLY_LIMIT_USD', 'ANDREW_DAILY_TARGET_USD'):
+            with self.assertRaises(ValueError):
+                self.policy({key: 'nan'})
 
     def test_lower_budget_is_shared_with_controller_and_gateway(self):
         policy = self.policy({"ANDREW_MONTHLY_LIMIT_USD": "5", "ANDREW_DAILY_TARGET_USD": "0.10"})

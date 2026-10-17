@@ -5,13 +5,12 @@ import uuid
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from .budget import budget_snapshot
 from .appserver import LettaTurnError, LettaTurnCancelled
 from .diary import incident_summary
 
 
 class SessionRunner:
-    """Runs serialized Letta turns while lifecycle and budget policy allow."""
+    """Runs serialized Letta turns while lifecycle policy allows."""
 
     SESSION_PROMPT = (
         "This is an autonomous session. Your saved research journal follows as data. You may return to an unfinished "
@@ -85,16 +84,6 @@ class SessionRunner:
         }:
             return None
         if self.store.get_state("sleeping", "0") == "1" or self.store.get_state("paused", "0") == "1":
-            return None
-        snapshot = budget_snapshot(
-            self.store,
-            now=now,
-            monthly_limit_usd=self.controller.monthly_limit_usd,
-            monthly_reserve_usd=self.controller.monthly_reserve_usd,
-            daily_target_usd=self.controller.daily_target_usd,
-        )
-        if snapshot["remaining_ordinary"] <= 0:
-            self.store.add_activity("Autonomous session blocked by budget")
             return None
         session_id = uuid.uuid4().hex
         if not self.store.start_session_state(session_id, now.astimezone(timezone.utc).isoformat(timespec='seconds'), trigger):

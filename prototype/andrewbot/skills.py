@@ -5,10 +5,10 @@ from pathlib import Path
 
 MAX_SKILL_BYTES = 12_000
 SKILL_ROOT = Path(__file__).resolve().parents[2] / 'skills'
-SKILL_DOCUMENT_HASHES = {'voice-communication': '6619dbc32bff6980de4ab4d8ecb50604f3264df7a1b1887b664fd425357c31ec', 'image-creation': '9fd6bb9f854569fbb56dece9ad158944498e29a998fc2e1e058f3a3af1a6a0c9', 'research-workflow': 'f6dede29bb764f0d08974e6b09569b1a7f3096a089e2fb34e44d3093ef70a097'}
+SKILL_DOCUMENT_HASHES = {'voice-communication': '7702c951f807d65a261f655484b650af48a74cc0f3481fbf884053f10e2f8793', 'image-creation': 'fe903a38e5b6fec6db0ba119a45806028653aa3ab02d52523c7fa66785f7af3d', 'research-workflow': 'f6dede29bb764f0d08974e6b09569b1a7f3096a089e2fb34e44d3093ef70a097'}
 SKILL_SUMMARIES = {
-    'voice-communication': 'Requested spoken replies: concise speech, current voice settings, budget and delivery checks.',
-    'image-creation': 'Requested images and edits: useful prompts, economical settings, and owner-approved avatar proposals.',
+    'voice-communication': 'Optional spoken replies and spontaneous voice notes: concise speech, current voice settings, budget and delivery checks.',
+    'image-creation': 'Requested or autonomous images and explicit edits: useful prompts, economical settings, and owner-approved avatar proposals.',
     'research-workflow': 'Optional investigations: test hypotheses, preserve evidence and doubts, and resume saved questions.',
 }
 SKILL_INDEX_PROMPT = (

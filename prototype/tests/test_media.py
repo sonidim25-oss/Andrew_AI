@@ -40,11 +40,11 @@ class MediaTests(MediaCase):
         self.assertTrue(self.media.cancel(job))
         self.assertEqual(0, self.media.status()['image']['reserved_usd'])
 
-    def test_budget_is_atomic_and_separate_from_reasoning(self):
+    def test_media_has_no_daily_spending_cap_and_keeps_separate_accounting(self):
         for i in range(2):
             self.media.submit('image', 'a cat', str(i), owner_requested=True)
-        with self.assertRaises(ValueError):
-            self.media.submit('image', 'a cat', 'over', owner_requested=True)
+        self.media.submit('image', 'a cat', 'over', owner_requested=True)
+        self.assertAlmostEqual(.3, self.media.status()['image']['reserved_usd'])
         self.assertEqual(0, self.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0])
 
     def test_delivery_attempt_is_not_replayed_after_restart(self):
@@ -178,11 +178,10 @@ class ConfigurationTests(unittest.TestCase):
         media_worker.stop.assert_called_once()
 
 class ResilienceTests(MediaCase):
-    def test_queue_count_limit_and_oversized_requests(self):
+    def test_no_daily_job_quota_but_payload_size_is_bounded(self):
         for index in range(20):
             self.media.submit('voice', 'a', 'q' + str(index), owner_requested=True)
-        with self.assertRaises(ValueError):
-            self.media.submit('voice', 'a', 'overquota', owner_requested=True)
+        self.media.submit('voice', 'a', 'overquota', owner_requested=True)
         with self.assertRaises(ValueError):
             self.media.submit('voice', 'a' * 1001, 'big', owner_requested=True)
 
@@ -272,7 +271,7 @@ class ConcurrencyTests(MediaCase):
         self.assertIn('voice.generate', client.tool_names)
         self.assertNotIn('profile.apply_avatar', client.tool_names)
 
-    def test_two_connections_cannot_oversubscribe_budget(self):
+    def test_concurrent_admission_records_every_reservation_without_a_spending_cap(self):
         import concurrent.futures
         other_store = Store(self.store.path)
         other = MediaService(other_store, self.media.artifacts, 42, self.media.policy)
@@ -285,8 +284,8 @@ class ConcurrencyTests(MediaCase):
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
                 results = list(pool.map(submit, [(self.media, 'one'), (other, 'two'), (self.media, 'three')]))
-            self.assertEqual(2, sum(value is not None for value in results))
-            self.assertAlmostEqual(.2, self.media.status()['image']['reserved_usd'])
+            self.assertEqual(3, sum(value is not None for value in results))
+            self.assertAlmostEqual(.3, self.media.status()['image']['reserved_usd'])
         finally:
             other_store.close()
 

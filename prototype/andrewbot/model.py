@@ -1,4 +1,5 @@
 import json
+import math
 import urllib.error
 import urllib.request
 from .configuration import ModelConfig, load_model_config
@@ -33,6 +34,49 @@ class OpenRouterModel:
         if not isinstance(content, str) or not content.strip():
             raise RuntimeError("model returned no text")
         return content.strip(), data.get("usage") or {}
+
+    def credit_status(self):
+        """Read billing metadata without exposing the key, label, or account identity."""
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *args, **kwargs):
+                return None
+        opener = urllib.request.build_opener(NoRedirect())
+        result = {'available': False, 'currency': 'USD', 'controller_spending_caps': False}
+        for endpoint, fields in (
+                ('key', ('limit', 'limit_remaining', 'usage', 'usage_daily', 'usage_monthly')),
+                ('credits', ('total_credits', 'total_usage'))):
+            request = urllib.request.Request('https://openrouter.ai/api/v1/' + endpoint,
+                                            headers={'Authorization': 'Bearer ' + self.api_key})
+            try:
+                with opener.open(request, timeout=10) as response:
+                    raw = response.read(65537)
+                    if len(raw) > 65536:
+                        raise ValueError()
+                    data = json.loads(raw)['data']
+                safe = {}
+                for field in fields:
+                    value = data.get(field)
+                    if value is None:
+                        safe[field] = None
+                    elif type(value) in (int, float) and math.isfinite(value) and value >= 0:
+                        safe[field] = value
+                    else:
+                        raise ValueError()
+                if endpoint == 'credits':
+                    if safe['total_credits'] is None or safe['total_usage'] is None:
+                        raise ValueError()
+                    safe['remaining_usd'] = max(0.0, safe['total_credits'] - safe['total_usage'])
+                result[endpoint] = safe
+                result['available'] = True
+            except urllib.error.HTTPError as error:
+                result[endpoint + '_status'] = 'management_key_required' if endpoint == 'credits' and error.code == 403 else 'unavailable'
+            except Exception:
+                result[endpoint + '_status'] = 'unavailable'
+        remaining = [value for value in (result.get('key', {}).get('limit_remaining'),
+                                        result.get('credits', {}).get('remaining_usd')) if value is not None]
+        result['balance_known'] = bool(remaining)
+        result['remaining_usd'] = min(remaining) if remaining else None
+        return result
 
     def complete(self, payload):
         payload = dict(payload)

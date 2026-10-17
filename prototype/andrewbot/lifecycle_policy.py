@@ -38,7 +38,7 @@ def load_lifecycle_policy(environment):
         raise ValueError("budget settings must be finite numbers") from None
     if not all(math.isfinite(value) for value in (monthly, reserve, daily)):
         raise ValueError("budget settings must be finite numbers")
-    if not (0 < monthly <= 10 and 1 <= reserve <= monthly and 0 < daily <= 0.30):
-        raise ValueError("budget settings exceed the approved lifecycle limits")
+    # Legacy amounts remain readable for configuration compatibility; they do
+    # not restrict spending. Andrew manages the available provider credits.
     return LifecyclePolicy(autonomous, autonomous and enabled(environment, "ANDREW_FALLBACK_WAKE_ENABLED"),
                            monthly, reserve, daily)

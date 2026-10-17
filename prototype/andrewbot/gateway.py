@@ -80,8 +80,11 @@ class ModelGateway:
                         + json.dumps({k: round(v, 6) if isinstance(v, float) else v
                                       for k, v in snapshot.items()}, sort_keys=True)
                         + '. Totals include unsettled reservations. check_budget is a local read-only '
-                          'tool with no approval requirement or provider call of its own. '
-                          'Budget limits remain enforced; never infer current permissions from an old diary.'),
+                          'tool: it may fetch current provider credit metadata but does not run inference. '
+                          'There are no controller spending caps. API credits are finite: you are responsible '
+                          'for checking provider credits with check_budget and planning your activity. '
+                          'Daily totals are observations, not allowances. Choose how to allocate credits '
+                          'across reasoning, voice, and images; never infer current permissions from an old diary.'),
         })
         if self.memory_service is not None:
             try:
@@ -109,8 +112,6 @@ class ModelGateway:
             return 400, {"error": {"message": "invalid output token limit", "type": "invalid_request_error"}}
         input_tokens_bound = max(1, input_bytes)
         reserved = input_tokens_bound * self.input_rate + max_tokens * self.output_rate
-        if reserved > snapshot["remaining_ordinary"]:
-            return 429, {"error": {"message": "monthly model budget reached", "type": "rate_limit_error"}}
 
         month, day = snapshot["month"], snapshot["day"]
         # Hash the original request, before changing budget/memory context.

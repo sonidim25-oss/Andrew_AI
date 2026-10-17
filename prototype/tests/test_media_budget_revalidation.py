@@ -6,33 +6,26 @@ from andrewbot.media import MediaWorker, load_media_policy
 
 
 class BudgetRevalidationTests(MediaCase):
-    def test_lowered_daily_monthly_and_job_caps_block_existing_queue(self):
-        for change in ({'daily_usd': .05}, {'monthly_usd': .05}, {'image_job_usd': .05}):
+    def test_legacy_daily_monthly_and_job_amounts_do_not_restrict_queue(self):
+        for change in ({'daily_usd': .0001}, {'monthly_usd': .0001}, {'image_job_usd': .0001}):
             with self.subTest(change=change):
                 self.media.policy = replace(self.media.policy, daily_usd=.20, monthly_usd=3, image_job_usd=.10)
                 job = self.media.submit('image', 'a cat', 'cap-' + next(iter(change)), owner_requested=True)
                 self.media.policy = replace(self.media.policy, **change)
-                provider = Mock()
-                MediaWorker(self.media, provider, Mock()).step()
-                provider.generate.assert_not_called()
-                self.assertEqual('cancelled', self.media.job(job)['state'])
-                self.assertEqual('policy_changed', self.media.job(job)['error'])
-        self.assertEqual(0, self.media.status()['image']['reserved_usd'])
-        self.assertEqual(3, self.store.connection.execute('SELECT count(*) FROM telegram_outbox').fetchone()[0])
+                self.assertEqual(job, self.media.claim()['id'])
+                self.media.fail(job, uncertain=False)
 
-    def test_queue_reservations_count_together_before_claim(self):
-        first = self.media.submit('image', 'one', 'one', owner_requested=True)
-        second = self.media.submit('image', 'two', 'two', owner_requested=True)
-        self.media.policy = replace(self.media.policy, daily_usd=.15)
-        self.assertIsNone(self.media.claim())
-        self.assertEqual('cancelled', self.media.job(first)['state'])
-        self.assertEqual(second, self.media.claim()['id'])
+    def test_reservations_are_accounting_not_an_admission_limit(self):
+        jobs = [self.media.submit('image', str(index), 'image-' + str(index), owner_requested=True)
+                for index in range(35)]
+        self.assertEqual(len(jobs), 35)
+        self.assertAlmostEqual(self.media.status()['image']['reserved_usd'], 3.5)
+        self.assertIsNone(self.media.status()['image']['monthly_cap_usd'])
 
-    def test_voice_rate_increase_cannot_exceed_saved_reservation(self):
+    def test_voice_estimate_changes_do_not_cancel_saved_work(self):
         job = self.media.submit('voice', 'hello', 'rate', owner_requested=True)
         self.media.policy = replace(self.media.policy, voice_character_usd=.001)
-        self.assertIsNone(self.media.claim())
-        self.assertEqual('cancelled', self.media.job(job)['state'])
+        self.assertEqual(job, self.media.claim()['id'])
 
     def test_image_enablement_does_not_require_enabling_voice(self):
         policy = load_media_policy({'ANDREW_MEDIA_ENABLED': '1', 'ANDREW_MEDIA_CAPABILITIES_VERIFIED': '1',

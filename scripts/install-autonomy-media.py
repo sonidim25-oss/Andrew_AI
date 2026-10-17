@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""Install uncapped self-managed credits and owner-authorized autonomous media."""
+import argparse
+import ast
+import grp
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import shutil
+import sqlite3
+import subprocess
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[1]
+BASE = 'd325230'
+TARGET = Path('/opt/andrew/prototype/andrewbot')
+DROPIN = Path('/etc/systemd/system/andrew-control.service.d/zz-autonomy-media.conf')
+MODULES = ('appserver.py', 'budget.py', 'controller.py', 'gateway.py', 'lifecycle_policy.py',
+           'main.py', 'media.py', 'memory.py', 'model.py', 'sessions.py', 'skills.py', 'telegram_menu.py')
+SKILLS = ('voice-communication', 'image-creation')
+GUIDANCE = ('The owner has limited API credits in general and authorizes me to decide how to use them. '
+            'The owner removed all controller daily, monthly, and per-job spending caps and daily media quotas. '
+            'I am responsible for checking available provider credits with check_budget, reviewing reasoning and '
+            'media spending, allocating credits, and planning my activity. Credit availability may be unknown '
+            'when the provider does not expose it; I must not invent a balance or assume unlimited credits. '
+            'The owner gives standing permission for me to choose, generate, and send voice notes and images '
+            'to the owner, including during autonomous activity. Spontaneous TTS starts on and can be controlled '
+            'with /voice_on and /voice_off. Uncertain paid or delivery attempts remain held without automatic replay.')
+CONFIG = b'''# Owner authorized self-managed credits and autonomous media.
+[Service]
+Environment=ANDREW_MEDIA_ENABLED=1
+Environment=ANDREW_MEDIA_CAPABILITIES_VERIFIED=1
+Environment=ANDREW_MEDIA_VOICE_ENABLED=1
+Environment=ANDREW_MEDIA_SPONTANEOUS_VOICE=1
+Environment=ANDREW_MEDIA_SPONTANEOUS_IMAGE=1
+UnsetEnvironment=ANDREW_MONTHLY_LIMIT_USD ANDREW_MONTHLY_RESERVE_USD ANDREW_DAILY_TARGET_USD ANDREW_MEDIA_MONTHLY_PER_KIND_USD ANDREW_MEDIA_DAILY_PER_KIND_USD ANDREW_MEDIA_VOICE_JOB_USD
+'''
+
+
+def load_helper():
+    spec = importlib.util.spec_from_file_location('autonomy_deployment', ROOT / 'scripts/install-p1-fixes.py')
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    return helper
+
+
+def idle():
+    with sqlite3.connect('file:/var/lib/andrew/control/controller.sqlite3?mode=ro', uri=True, timeout=5) as db:
+        state = dict(db.execute("SELECT key,value FROM state WHERE key IN "
+                                "('paused','sleeping','autonomy_error','active_session_id','session_start_requested')"))
+        if not (state.get('paused') == '1' or state.get('sleeping') == '1' or state.get('autonomy_error')):
+            raise ValueError('Send Andrew /pause before installation; no services changed')
+        if state.get('active_session_id') or state.get('session_start_requested'):
+            raise ValueError('Andrew still has an active session; wait for /pause to settle')
+        for query in ("SELECT count(*) FROM cycles WHERE status='running'",
+                      "SELECT count(*) FROM messages WHERE queued=2",
+                      "SELECT count(*) FROM telegram_claims",
+                      "SELECT count(*) FROM media_jobs WHERE state='running' OR delivery='sending'",
+                      "SELECT count(*) FROM media_avatar_proposals WHERE state='applying'"):
+            if db.execute(query).fetchone()[0]:
+                raise ValueError('An attempted operation is still settling; installation deferred')
+
+
+def merge_source(live, base, proposed, directory, name):
+    if live == proposed:
+        return live
+    if live == base:
+        ast.parse(proposed)
+        return proposed
+    paths = [directory / (name + suffix) for suffix in ('.live', '.base', '.proposed')]
+    for path, data in zip(paths, (live, base, proposed)):
+        path.write_bytes(data)
+    result = subprocess.run(['git', 'merge-file', '-p', *map(str, paths)], capture_output=True, timeout=10)
+    if result.returncode:
+        raise ValueError('Deployed changes overlap the proposed change in ' + name + '; no services changed')
+    ast.parse(result.stdout)
+    return result.stdout
+
+
+def prepare(backup):
+    tested = json.loads((ROOT / 'scripts/autonomy-media-manifest.json').read_text())
+    originals, replacements = {}, {}
+    work = backup / 'merge'
+    work.mkdir()
+    for name in MODULES:
+        path = TARGET / name
+        if path.is_symlink():
+            raise ValueError('Symlink in deployed module: ' + name)
+        live = path.read_bytes()
+        base = subprocess.check_output(['git', '-C', str(ROOT), 'show', BASE + ':prototype/andrewbot/' + name])
+        proposed = (ROOT / 'prototype/andrewbot' / name).read_bytes()
+        if hashlib.sha256(proposed).hexdigest() != tested['modules'][name]:
+            raise ValueError('Proposed source changed since testing: ' + name)
+        originals[name] = live
+        replacements[name] = merge_source(live, base, proposed, work, name)
+        (backup / name).write_bytes(live)
+    return originals, replacements
+
+
+def snapshot(backup, replacements):
+    root = backup / 'acceptance-source'
+    package = root / 'prototype/andrewbot'
+    package.mkdir(parents=True)
+    for path in TARGET.glob('*.py'):
+        if path.is_symlink():
+            raise ValueError('Symlink in deployed code')
+        (package / path.name).write_bytes(replacements.get(path.name, path.read_bytes()))
+    shutil.copytree(TARGET.parents[1] / 'skills', root / 'skills')
+    tested = json.loads((ROOT / 'scripts/autonomy-media-manifest.json').read_text())
+    for name in SKILLS:
+        source = ROOT / 'skills' / name / 'SKILL.md'
+        if hashlib.sha256(source.read_bytes()).hexdigest() != tested['skills'][name]:
+            raise ValueError('Skill guidance changed since testing: ' + name)
+        shutil.copy2(ROOT / 'skills' / name / 'SKILL.md', root / 'skills' / name / 'SKILL.md')
+    tests = root / 'scripts/tests'
+    tests.mkdir(parents=True)
+    for path in (ROOT / 'scripts/tests').glob('test_*protocol.py'):
+        shutil.copy2(path, tests / path.name)
+    shutil.copytree(ROOT / 'prototype/tests', root / 'prototype/tests', ignore=shutil.ignore_patterns('__pycache__'))
+    return root
+
+
+def record_owner_guidance(helper):
+    code = ("import sys; from andrewbot.store import Store; from andrewbot.memory import validate_memory_text; "
+            "s=Store('/var/lib/andrew/control/controller.sqlite3'); text=validate_memory_text(sys.argv[1]); "
+            "record=s.get_state('owner_credit_guidance_record_id',''); "
+            "record=record or s.create_memory_record('experience',text,'owner'); "
+            "s.set_state('owner_credit_guidance_record_id',record); "
+            "s.set_state('owner_credit_guidance',text); "
+            "s.set_state('media_spontaneous_voice','1'); s.close(); print('Owner credit guidance saved to persistent memory.')")
+    print(helper.command('runuser', '-u', 'andrew-control', '--', 'env',
+                         'PYTHONPATH=/opt/andrew/prototype', '/usr/bin/python3', '-c', code, GUIDANCE), flush=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--apply', action='store_true')
+    args = parser.parse_args()
+    if os.geteuid() != 0:
+        raise SystemExit('Run with sudo in your server terminal.')
+    helper = load_helper()
+    idle()
+    readiness = helper.load_readiness()
+    original_proof = readiness.protected_read(readiness.PROOF)
+    before = readiness.bindings()
+    readiness.check_proof(json.loads(original_proof), before)
+    backup = Path(tempfile.mkdtemp(prefix='andrew-autonomy-media-', dir='/var/backups'))
+    print('Backup and acceptance evidence: ' + str(backup), flush=True)
+    originals, replacements = prepare(backup)
+    skills = {}
+    for name in SKILLS:
+        path = TARGET.parents[1] / 'skills' / name / 'SKILL.md'
+        skills[name] = path.read_bytes()
+        (backup / (name + '.md')).write_bytes(skills[name])
+    if DROPIN.is_symlink():
+        raise ValueError('Symlinked configuration override')
+    old_config = DROPIN.read_bytes() if DROPIN.exists() else None
+    (backup / 'runtime-proof.json').write_bytes(original_proof)
+    (backup / 'config-presence.json').write_text(json.dumps({'existed': old_config is not None}))
+    if old_config is not None:
+        (backup / 'zz-autonomy-media.conf').write_bytes(old_config)
+    candidate = snapshot(backup, replacements)
+    print('Verified merge preserves deployed changes and removes controller spending caps.', flush=True)
+    if not args.apply:
+        print('Preview only. Add --apply to run acceptance checks and install.')
+        return
+    helper.ROOT = candidate
+    helper.acceptance(backup, readiness)
+    print('Acceptance check: merged-code-core-tests', flush=True)
+    result = subprocess.run(['/usr/bin/python3', '-m', 'unittest', 'discover',
+                             '-s', str(candidate / 'prototype/tests'), '-q'],
+                            env={**os.environ, 'PYTHONPATH': str(candidate / 'prototype')},
+                            capture_output=True, text=True, timeout=180)
+    (backup / 'merged-code-core-tests.txt').write_text(result.stdout + result.stderr)
+    if result.returncode:
+        raise ValueError('Merged deployed code failed core tests; see backup evidence. No services changed')
+    if readiness.bindings() != before:
+        raise ValueError('Runtime changed during acceptance; no services changed')
+    gid = grp.getgrnam('andrew-control').gr_gid
+    stopped = modified = False
+    try:
+        helper.command('systemctl', 'stop', 'andrew-control.service')
+        stopped = True
+        idle()
+        helper.snapshot_store(backup)
+        for name, original in originals.items():
+            if (TARGET / name).read_bytes() != original:
+                raise ValueError('Deployed code changed during installation')
+        helper.command('systemctl', 'stop', 'andrew-letta.service')
+        modified = True
+        for name, data in replacements.items():
+            helper.replace(TARGET / name, data, gid)
+        for name in SKILLS:
+            helper.replace(TARGET.parents[1] / 'skills' / name / 'SKILL.md',
+                           (ROOT / 'skills' / name / 'SKILL.md').read_bytes(), gid)
+        helper.replace(DROPIN, CONFIG, 0, mode=0o644)
+        helper.command('systemctl', 'daemon-reload')
+        helper.renew_proof(readiness, json.loads(original_proof), before, backup)
+        record_owner_guidance(helper)
+        helper.command('systemctl', 'start', 'andrew-letta.service')
+        helper.wait_for_letta()
+        helper.command('systemctl', 'start', 'andrew-control.service')
+        helper.verify_controller_startup(backup)
+    except Exception:
+        if stopped:
+            helper.command('systemctl', 'stop', 'andrew-control.service')
+            helper.command('systemctl', 'stop', 'andrew-letta.service')
+            if modified:
+                for name, data in originals.items():
+                    helper.replace(TARGET / name, data, gid)
+                for name, data in skills.items():
+                    helper.replace(TARGET.parents[1] / 'skills' / name / 'SKILL.md', data, gid)
+                if old_config is None:
+                    DROPIN.unlink(missing_ok=True)
+                else:
+                    helper.replace(DROPIN, old_config, 0, mode=0o644)
+                helper.replace(readiness.PROOF, original_proof, 0, mode=0o644)
+                helper.command('systemctl', 'daemon-reload')
+                readiness.validate_runtime_proof()
+            helper.command('systemctl', 'start', 'andrew-letta.service')
+            helper.wait_for_letta()
+            helper.command('systemctl', 'start', 'andrew-control.service')
+            helper.verify_controller_startup(backup)
+            print('Original deployment restored; startup verified.', flush=True)
+        raise
+    print('Installed and startup verified: no controller spending caps; TTS and spontaneous voice/images enabled. '
+          'Owner guidance saved in persistent memory. Existing pause/sleep/error state and uncertain attempts are preserved. '
+          'Use /wake when ready; no wake or replay was requested by this installer.')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as error:
+        raise SystemExit('Installation stopped: ' + str(error)) from None

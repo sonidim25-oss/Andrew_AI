@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -121,22 +122,11 @@ class ControllerTests(unittest.TestCase):
         return {"message": {"from": {"id": 123456789},
                             "chat": {"id": 123456789, "type": "private"}, "text": text}}
 
-    def test_budget_blocked_chat_stays_queued_until_full_output_fits(self):
-        frozen = datetime(2026, 10, 31, 16, 0, tzinfo=timezone.utc)
-        # This balance fits the obsolete 512-token estimate but not the real cap.
-        remaining = (2 * 0.15 + ((512 + MAX_LETTA_OUTPUT_TOKENS) / 2) * 0.47) / 1_000_000
-        with patch("andrewbot.budget.datetime") as clock:
-            clock.now.return_value = frozen
-            self.store.record_usage("2026-10", "2026-10-31", 9 - remaining, 1, 1)
-            reply = self.controller.handle_update(self.owner_message("hi"))
-            self.assertIn("queued", reply)
-            self.assertEqual(self.model.calls, 0)
-            self.assertEqual([row['content'] for row in self.store.queued_messages(123456789)], ['hi'])
-            self.assertIsNone(self.controller.flush_queued())
-            self.assertEqual(self.model.calls, 0)
-            # The next month's budget makes the saved input eligible again.
-            clock.now.return_value = datetime(2026, 11, 1, 16, 0, tzinfo=timezone.utc)
-            self.assertEqual(self.controller.flush_queued(), "I remember our conversation.")
+    def test_owner_chat_is_not_blocked_by_legacy_monthly_spending(self):
+        month, day = self.controller._periods()
+        self.store.record_usage(month, day, 100, 1, 1)
+        reply = self.controller.handle_update(self.owner_message('hi'))
+        self.assertEqual(reply, 'I remember our conversation.')
         self.assertEqual(self.model.calls, 1)
         self.assertEqual(self.store.pending_message_count(123456789), 0)
 
@@ -218,7 +208,7 @@ class ControllerTests(unittest.TestCase):
         self.store = Store(path)
         self.assertEqual(self.store.recent_messages(123456789)[0]["content"], "founding memory")
 
-    def test_budget_gate_preserves_rollover_and_monthly_reserve(self):
+    def test_legacy_monthly_reserve_does_not_block_owner_work(self):
         frozen = datetime(2026, 10, 31, 16, 0, tzinfo=timezone.utc)
         with patch("andrewbot.budget.datetime") as clock:
             clock.now.return_value = frozen
@@ -228,8 +218,8 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(reason, "ok")
             self.store.record_usage("2026-10", "2026-10-30", 0.5, 1, 1)
             allowed, reason = self.controller.budget_allows(estimated_cost_usd=0.001)
-            self.assertFalse(allowed)
-            self.assertEqual(reason, "monthly_reserve")
+            self.assertTrue(allowed)
+            self.assertEqual(reason, "ok")
 
     def test_fallback_wakes_indefinite_sleep_in_configured_timezone(self):
         self.controller.timezone_name = "America/Toronto"
@@ -283,8 +273,8 @@ class ControllerTests(unittest.TestCase):
     def test_agent_budget_tool_reports_live_ledger(self):
         self.store.record_usage(*self.controller._periods(), 0.012, 20, 5)
         result = self.controller.execute_tool("check_budget", {})
-        self.assertIn("$0.0120", result)
-        self.assertIn("$10.00", result)
+        self.assertEqual(json.loads(result)["reasoning_usage"]["monthly_cost"], 0.012)
+        self.assertIsNone(json.loads(result)["reasoning_usage"]["monthly_limit"])
 
     def test_controller_does_not_double_count_gateway_accounted_usage(self):
         self.controller.model = GatewayAccountedModel()

@@ -59,10 +59,13 @@ def validate_png(data):
 class MediaPolicy:
     enabled: bool = False
     voice_enabled: bool = True
+    spontaneous_voice: bool = False
+    spontaneous_image: bool = False
     voice: str = 'george'
     tts_model: str = 'elevenlabs/eleven-v3'
     image_model: str = 'openai/gpt-image-1-mini'
-    monthly_usd: float = 3.0  # per capability, separate from reasoning
+    # Legacy amount fields remain configuration-compatible, never spending caps.
+    monthly_usd: float = 3.0
     daily_usd: float = .20
     voice_job_usd: float = .08
     image_job_usd: float = .10
@@ -86,7 +89,10 @@ def load_media_policy(environment):
     if enabled and environment.get('ANDREW_MEDIA_CAPABILITIES_VERIFIED', '0') != '1':
         raise ValueError('Media requires verified provider capabilities before enabling')
     try:
-        return MediaPolicy(enabled=enabled, voice_enabled=environment.get('ANDREW_MEDIA_VOICE_ENABLED', '1') == '1', voice=environment.get('ANDREW_TTS_VOICE', 'george'),
+        return MediaPolicy(enabled=enabled, voice_enabled=environment.get('ANDREW_MEDIA_VOICE_ENABLED', '1') == '1',
+                           spontaneous_voice=environment.get('ANDREW_MEDIA_SPONTANEOUS_VOICE', '0') == '1',
+                           spontaneous_image=environment.get('ANDREW_MEDIA_SPONTANEOUS_IMAGE', '0') == '1',
+                           voice=environment.get('ANDREW_TTS_VOICE', 'george'),
                            monthly_usd=float(environment.get('ANDREW_MEDIA_MONTHLY_PER_KIND_USD', '3')),
                            daily_usd=float(environment.get('ANDREW_MEDIA_DAILY_PER_KIND_USD', '.20')),
                            voice_job_usd=float(environment.get('ANDREW_MEDIA_VOICE_JOB_USD', '.08')),
@@ -131,13 +137,23 @@ class MediaService:
             FROM media_jobs WHERE kind=? AND created_at LIKE ?''', (kind, period + '%')).fetchone()
         return float(row[0])
 
+    def spontaneous_enabled(self, kind):
+        if not self.policy.enabled:
+            return False
+        if kind == 'voice':
+            return (self.policy.voice_enabled and self.policy.spontaneous_voice
+                    and self.store.get_state('media_spontaneous_voice', '1') == '1')
+        return kind == 'image' and self.policy.spontaneous_image
+
     def submit(self, kind, text, request_key, *, owner_requested=False, voice_id=None, reference_id=None):
         if self.store.get_state('restore_recovery_required', '0') == '1':
             raise ValueError('Restore requires billing and action reconciliation')
         if not self.policy.enabled or (kind == 'voice' and not self.policy.voice_enabled):
             raise ValueError('Media generation is disabled')
-        if kind not in {'voice', 'image'} or not owner_requested:
-            raise ValueError('An explicit owner media request is required')
+        if not owner_requested and (self.store.get_state('paused', '0') == '1' or self.store.get_state('sleeping', '0') == '1'):
+            raise ValueError('Spontaneous generation is paused or sleeping')
+        if kind not in {'voice', 'image'} or not (owner_requested or self.spontaneous_enabled(kind)):
+            raise ValueError('Media requires an owner request or standing permission')
         maximum = 1000 if kind == 'voice' else 2000
         if not isinstance(text, str) or not text.strip() or len(text) > maximum:
             raise ValueError('Media input is empty or too long')
@@ -151,12 +167,10 @@ class MediaService:
         # The controller never accepts arbitrary URLs, paths, recipients, or provider settings.
         payload = json.dumps({'text': text, 'voice': self.policy.voice,
                               'model': self.policy.tts_model if kind == 'voice' else self.policy.image_model,
-                              'reference_id': reference_id},
+                              'reference_id': reference_id, 'origin': 'owner' if owner_requested else 'agent'},
                              ensure_ascii=False, sort_keys=True)
         digest = hashlib.sha256((kind + payload).encode()).hexdigest()
         reserve = len(text) * self.policy.voice_character_usd if kind == 'voice' else self.policy.image_job_usd
-        if reserve > (self.policy.voice_job_usd if kind == 'voice' else self.policy.image_job_usd):
-            raise ValueError('Media request exceeds the per-job budget')
         now = self.now()
         with self.store._lock, self.store.connection:
             self.store.connection.execute('BEGIN IMMEDIATE')
@@ -172,12 +186,6 @@ class MediaService:
                 if original['kind'] != 'image' or original['delivery'] != 'delivered':
                     raise ValueError('Image edits require a delivered owner artifact')
                 self.artifact(original)
-            count = self.store.connection.execute("SELECT count(*) FROM media_jobs WHERE kind=? AND created_at LIKE ? AND state!='cancelled'", (kind, now[:10] + '%')).fetchone()[0]
-            if count >= (20 if kind == 'voice' else 2):
-                raise ValueError('Media daily job quota exhausted')
-            if (self._usage(kind, now[:7]) + reserve > self.policy.monthly_usd + 1e-9
-                    or self._usage(kind, now[:10]) + reserve > self.policy.daily_usd + 1e-9):
-                raise ValueError('Media budget exhausted')
             job = uuid.uuid4().hex
             self.store.connection.execute('''INSERT INTO media_jobs
                 (id,request_key,kind,payload,digest,state,reserved_usd,created_at,updated_at)
@@ -192,23 +200,31 @@ class MediaService:
         if name == 'media.get' and set(arguments) == {'job_id'} and isinstance(arguments['job_id'], str):
             row = self.job(arguments['job_id'])
             return {key: row[key] for key in ('id', 'kind', 'state', 'delivery', 'mime', 'actual_usd', 'error')}
-        if name in {'voice.generate', 'image.generate', 'image.edit'} and set(arguments) == {'text', 'owner_request_id'}:
+        if (name in {'voice.generate', 'image.generate', 'image.edit'}
+                and set(arguments) in ({'text', 'owner_request_id'}, {'text', 'request_id'})):
+            request_id = arguments.get('owner_request_id', arguments.get('request_id'))
+            if not isinstance(request_id, str) or not re.fullmatch(r'[A-Za-z0-9:_-]{1,80}', request_id):
+                raise ValueError('Invalid media request ID')
             authorization = MEDIA_AUTHORIZATION.get()
             if authorization is not None:
-                service, kind, request_id = authorization
-                if service is self and name == kind + '.generate' and arguments['owner_request_id'] == request_id:
+                service, kind, authorized_id = authorization
+                if service is self and name == kind + '.generate' and request_id == authorized_id:
                     job = self.submit(kind, arguments['text'], request_id, owner_requested=True)
                     return {'job_id': job, 'state': self.job(job)['state']}
                 raise ValueError('This owner request does not authorize that media action')
-            # The owner command creates the immutable, exact-content authorization.
-            # Calling this tool cannot create one, even during an autonomous turn.
             with self.store._lock:
-                row = self.store.connection.execute('SELECT * FROM media_jobs WHERE request_key=?', (arguments['owner_request_id'],)).fetchone()
-                if (not row or row['kind'] != ('voice' if name == 'voice.generate' else 'image')
-                        or json.loads(row['payload'])['text'] != arguments['text']
-                        or (name == 'image.edit' and not json.loads(row['payload']).get('reference_id'))):
-                    raise ValueError('An exact saved owner media request is required; ask the owner to use /voice or /image')
-                return {'job_id': row['id'], 'state': row['state'], 'delivery': row['delivery']}
+                row = self.store.connection.execute('SELECT * FROM media_jobs WHERE request_key=?', (request_id,)).fetchone()
+                if row:
+                    if (row['kind'] != ('voice' if name == 'voice.generate' else 'image')
+                            or json.loads(row['payload'])['text'] != arguments['text']
+                            or (name == 'image.edit' and not json.loads(row['payload']).get('reference_id'))):
+                        raise ValueError('Media request ID does not match the saved request')
+                    return {'job_id': row['id'], 'state': row['state'], 'delivery': row['delivery']}
+            kind = 'voice' if name == 'voice.generate' else 'image'
+            if name == 'image.edit' or not self.spontaneous_enabled(kind):
+                raise ValueError('No saved request or standing permission for this media action')
+            job = self.submit(kind, arguments['text'], 'agent:' + kind + ':' + request_id)
+            return {'job_id': job, 'state': self.job(job)['state'], 'delivery': self.job(job)['delivery']}
         raise ValueError('Invalid media tool arguments')
 
     def job(self, job_id):
@@ -221,7 +237,8 @@ class MediaService:
     def claim(self):
         if self.store.get_state('restore_recovery_required', '0') == '1':
             return None
-        if not self.policy.enabled:
+        if (not self.policy.enabled or self.store.get_state('paused', '0') == '1'
+                or self.store.get_state('sleeping', '0') == '1'):
             return None
         with self.store._lock, self.store.connection:
             self.store.connection.execute('BEGIN IMMEDIATE')
@@ -231,19 +248,12 @@ class MediaService:
                                               (self.owner_id, 'Unstarted media requests from an earlier UTC day expired without provider calls. Submit a fresh request if still wanted.', self.now()))
             row = self.store.connection.execute("SELECT * FROM media_jobs WHERE state='queued' ORDER BY created_at,id LIMIT 1").fetchone()
             if row:
-                # Reservations and policy checks share the write transaction with
-                # admission. Restarted queues cannot spend under an older policy.
+                # Recheck standing permission before a queued provider call.
                 now = self.now()
                 kind = row['kind']
                 payload = json.loads(row['payload'])
-                estimate = (len(payload['text']) * self.policy.voice_character_usd
-                            if kind == 'voice' else self.policy.image_job_usd)
-                cap = self.policy.voice_job_usd if kind == 'voice' else self.policy.image_job_usd
                 if ((kind == 'voice' and not self.policy.voice_enabled)
-                        or row['reserved_usd'] > cap + 1e-9
-                        or estimate > row['reserved_usd'] + 1e-9
-                        or self._usage(kind, now[:7]) > self.policy.monthly_usd + 1e-9
-                        or self._usage(kind, now[:10]) > self.policy.daily_usd + 1e-9):
+                        or (payload.get('origin') == 'agent' and not self.spontaneous_enabled(kind))):
                     self.store.connection.execute("UPDATE media_jobs SET state='cancelled',error='policy_changed',updated_at=? WHERE id=?", (now, row['id']))
                     self.store.connection.execute("INSERT INTO telegram_outbox(chat_id,text,created_at,lane) VALUES(?,?,?,'system')",
                                                   (self.owner_id, 'Queued media request cancelled because current permissions or budget no longer allow it. No provider call was made. Job: ' + row['id'], now))
@@ -315,7 +325,8 @@ class MediaService:
         return data
 
     def claim_delivery(self):
-        if self.store.get_state('restore_recovery_required', '0') == '1':
+        if (self.store.get_state('paused', '0') == '1'
+                or self.store.get_state('restore_recovery_required', '0') == '1'):
             return None
         with self.store._lock, self.store.connection:
             self.store.connection.execute('BEGIN IMMEDIATE')
@@ -410,12 +421,13 @@ class MediaService:
     def status(self):
         now = self.now()
         with self.store._lock:
-            result = {'enabled': self.policy.enabled, 'spontaneous_voice': False}
+            result = {'enabled': self.policy.enabled, 'spontaneous_voice': self.spontaneous_enabled('voice'),
+                      'spontaneous_image': self.spontaneous_enabled('image'), 'spending_policy': 'agent_managed_api_credits'}
             for kind in ('voice', 'image'):
                 reserved = self.store.connection.execute("SELECT coalesce(sum(reserved_usd),0) FROM media_jobs WHERE kind=? AND state IN ('queued','running','uncertain') AND created_at LIKE ?", (kind, now[:7] + '%')).fetchone()[0]
                 result[kind] = {'enabled': self.policy.enabled and (kind != 'voice' or self.policy.voice_enabled), 'monthly_usd': self._usage(kind, now[:7]), 'daily_usd': self._usage(kind, now[:10]),
-                                'reserved_usd': reserved, 'monthly_cap_usd': self.policy.monthly_usd,
-                                'daily_cap_usd': self.policy.daily_usd}
+                                'reserved_usd': reserved, 'monthly_cap_usd': None,
+                                'daily_cap_usd': None, 'per_job_cap_usd': None}
             result['counts'] = [dict(row) for row in self.store.connection.execute('SELECT kind,state,delivery,count(*) AS count FROM media_jobs GROUP BY kind,state,delivery')]
             result['avatars'] = [dict(row) for row in self.store.connection.execute('SELECT * FROM media_avatar_proposals ORDER BY created_at DESC LIMIT 10')]
             result['jobs'] = [dict(row) for row in self.store.connection.execute('SELECT id,kind,state,delivery,error,created_at,updated_at,(julianday(updated_at)-julianday(created_at))*86400 AS duration_seconds FROM media_jobs ORDER BY created_at DESC LIMIT 10')]
@@ -533,13 +545,13 @@ class MediaWorker:
 MEDIA_TOOLS = [
     {'name': 'profile.propose_avatar', 'description': 'Propose an already delivered image as avatar; the owner must approve with /avatar_approve before publishing.',
      'parameters': {'type': 'object', 'properties': {'job_id': {'type': 'string'}}, 'required': ['job_id'], 'additionalProperties': False}},
-    {'name': 'media.status', 'description': 'Read media budgets and job states. Media authorization comes only from owner /voice and /image commands.',
+    {'name': 'media.status', 'description': 'Read media budgets and job states. Reports standing voice/image permissions and uncapped spending totals.',
      'parameters': {'type': 'object', 'properties': {}, 'additionalProperties': False}},
     {'name': 'media.get', 'description': 'Read a generated media job by opaque ID. Does not expose paths or source prompts.',
      'parameters': {'type': 'object', 'properties': {'job_id': {'type': 'string'}}, 'required': ['job_id'], 'additionalProperties': False}},
-    *[{'name': kind + '.generate', 'description': 'Generate one response during an explicitly authorized /voice_reply or /image_reply owner turn using its owner_request_id. Otherwise return the exact saved /voice or /image job. Delivery runs in the background; arbitrary recipients and spontaneous spending are denied.',
-       'parameters': {'type': 'object', 'properties': {'text': {'type': 'string', 'maxLength': 2000}, 'owner_request_id': {'type': 'string'}},
-                      'required': ['text', 'owner_request_id'], 'additionalProperties': False}}
+    *[{'name': kind + '.generate', 'description': 'Generate and send a voice note or image to the owner when standing permission is enabled, including during autonomous work. Choose a stable request_id for each distinct job; reuse it to inspect the same job. For /voice_reply or /image_reply use the provided owner_request_id. Check media.status and check_budget; credits are finite. Never retry an uncertain job with a new ID.',
+       'parameters': {'type': 'object', 'properties': {'text': {'type': 'string', 'maxLength': 2000}, 'owner_request_id': {'type': 'string'}, 'request_id': {'type': 'string', 'maxLength': 80}},
+                      'required': ['text'], 'additionalProperties': False}}
       for kind in ('voice', 'image')]
     + [{'name': 'image.edit', 'description': 'Read the image edit job authorized by an exact owner /image_edit request. Cannot create new authorization.',
         'parameters': {'type': 'object', 'properties': {'text': {'type': 'string'}, 'owner_request_id': {'type': 'string'}},

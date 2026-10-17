@@ -7,6 +7,7 @@ BUTTON_ROWS = (
     (("☀️ Wake up", "/wake"), ("🌙 Sleep", "/sleep")),
     (("⏸ Pause", "/pause"), ("⏰ Set wake time", "/wake_at")),
     (("❓ Help", "/help"), ("👋 Start", "/start")),
+    (("🔊 TTS on", "/voice_on"), ("🔇 TTS off", "/voice_off")),
     (("📬 Gmail", "/gmail"),),
 )
 BUTTON_COMMANDS = {label: command for row in BUTTON_ROWS for label, command in row}
@@ -27,7 +28,7 @@ HELP_TEXT = (
     "Andrew · Your controls\n\n"
     "📊 /status — current state and next wake\n"
     "/health — local worker, queue and latency diagnostics\n"
-    "💰 /budget — spending and remaining allowance\n"
+    "💰 /budget — API credits and spending (Andrew decides)\n"
     "🌐 /history — recent browsing; /history example.com to search\n"
     "📖 /diary — latest entry; /diary YYYY-MM-DD for a date\n"
     "📋 /activity — recent actions\n\n"
@@ -40,6 +41,8 @@ HELP_TEXT = (
     "🔄 /replay — retry messages with uncertain delivery (may duplicate replies)\n\n"
     "History: /history delete <id> or /history delete all. Deleting all requires confirmation.\n"
     "Diary delivery: /diary retry YYYY-MM-DD (may duplicate delivery).\n"
+    "/voice_on · /voice_off — enable or disable spontaneous TTS\n"
+    "/media_status — voice/image permissions, spending, and delivery\n"
     "/cancel — cancel time entry\n"
     "/start or /menu — show controls · /help — this guide\n\n"
     "You can also type a normal message. If the buttons are hidden, tap the keyboard icon."
