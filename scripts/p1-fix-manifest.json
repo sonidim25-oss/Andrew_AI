@@ -427,5 +427,14 @@
         "70e06b6b73c9d42eaa79e0f6d4f9a283e2eaf27c"
       ]
     }
+  },
+  "browser_service.py": {
+    "original": "b9d5a3da33a79061f1e07b492d81d0fe1d6b9ab4070fe55bc58ce3c74fa3464e",
+    "tested": "8c619a017d12e8418445ad96ac56ea8589f870e01ebd302d479d822610f9e5af",
+    "reviewed": {
+      "b9d5a3da33a79061f1e07b492d81d0fe1d6b9ab4070fe55bc58ce3c74fa3464e": [
+        "cc580f402a1375adcbb24232916ebf7377744a92"
+      ]
+    }
   }
 }

@@ -22,10 +22,10 @@ Passing existing tests does not cover these missing scenarios. These are code-le
 | --- | --- | ---: |
 | P0 — Extra high | Immediate uncontrolled loss, unauthorized execution, or equivalent critical behavior | 0 confirmed |
 | P1 — High | Paid-request uncertainty, duplicate-delivery risk, or incorrect spending recovery | 0 |
-| P2 — Medium | Broken supported operations, deployment gaps, or reproducible runtime races | 1 |
+| P2 — Medium | Broken supported operations, deployment gaps, or reproducible runtime races | 0 |
 | P3 — Low | Avoidable inference cost or misleading capability handling | 1 |
 
-No P0 finding was established; the empty category is not a guarantee that none exists. 2 tasks remain open.
+No P0 finding was established; the empty category is not a guarantee that none exists. 1 tasks remain open.
 
 ## P0 — Extra high
 
@@ -109,7 +109,7 @@ No confirmed tasks at this priority.
 
 ### REVIEW-007 — Serialize browser reaping with request execution
 
-- [ ] **Name:** Prevent the browser reaper from racing a new session.
+- [x] **Name:** Prevent the browser reaper from racing a new session.
 - **Short description:** The reaper checks `handler.busy`, then schedules `process.close()` in another thread without reserving that busy state or locking the process. A request can start while cleanup is still running. Cleanup can then clear the newly created session's `name`, leaving a running browser process without its corresponding container-cleanup identity; other interleavings can close active streams.
 - **Location:** `prototype/andrewbot/browser_service.py:24–49` and `prototype/andrewbot/browser_service.py:115–119`.
 - **Short fix suggestion:** Use one lifecycle lock or serialized executor for `run()` and `close()`. Reserve admission before scheduling reaping, and clean up captured process/name pairs rather than clearing mutable fields that another request may have replaced.
@@ -117,6 +117,9 @@ No confirmed tasks at this priority.
 - **Acceptance check:** Block cleanup mid-flight and submit a new request concurrently. It waits or fails cleanly; after admission the active process and cleanup name still match. No active stream is closed by the idle reaper.
 
 ## P3 — Low
+
+- **Resolution:** Browser run, close and idle cleanup now share a reentrant lifecycle lock. Cleanup uses captured process/container identities, reaping rechecks the active deadline under the lock, and server admission is reserved before cleanup is scheduled. The runtime installer now includes browser_service.py in its reviewed replacement, rollback and digest prediction.
+- **Verification:** 388 core tests passed (2 optional skips); 88 pinned-fixture script tests passed. A controlled real-pipe subprocess interleaving verifies blocked cleanup prevents new admission and preserves the new session identity. Async reaper tests verify busy rejection and resumed admission; installer tests cover all four runtime dependencies. Source fixed and tested; production deployment is separate.
 
 ### REVIEW-008 — Reject disabled voice replies before invoking the model
 

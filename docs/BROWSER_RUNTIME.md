@@ -60,3 +60,16 @@ python3 scripts/test-socket-activation.py "$(python3 -c 'import json; print(json
 ```
 
 The runtime commands use temporary sockets and the invoking user's rootless engine. The socket-activation test creates temporary native user units for the runner, browser and proxy, exercises the actual runner entrypoint, and removes its units afterward. The `--full` option additionally runs the full 120-second kernel/resource proof. Activation variables belong to the launcher listener and are removed from Podman child environments. These checks cannot establish the production UID firewall or 10 GiB mount proof. The real Chromium fixture runs inside a networkless disposable container and creates only temporary test accounts; no third-party account was created as a test artifact.
+
+
+## Browser lifecycle serialization — REVIEW-007 source correction
+
+Request execution, explicit close and idle reaping share one reentrant lifecycle
+lock. Cleanup captures its process/container pair before clearing state, and a
+new session cannot be installed until that cleanup finishes. The idle reaper
+reserves server admission before scheduling its executor work and rechecks the
+current session deadline under the lifecycle lock. A fresh session is not closed
+by a stale idle decision. Busy requests fail cleanly without execution, then
+admission resumes after cleanup. The acceptance installer now includes the
+browser service module in its reviewed runtime-package digest and rollback set.
+This is a source correction; production deployment remains separate.

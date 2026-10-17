@@ -62,7 +62,7 @@ class IncidentFixTests(unittest.TestCase):
                        'tested': b'# runtime tested\n', 'expected_service_code': 'expected-service'} if runtime_patch else None
             if runtime_patch == 'all':
                 runtime['files'] = [{**runtime, 'backup': 'runtime-runner_service.py'}]
-                for dependency in ('process_limits.py', 'runner_client.py'):
+                for dependency in ('process_limits.py', 'runner_client.py', 'browser_service.py'):
                     dependency_path = root / dependency
                     dependency_path.write_bytes(b'# dependency original\n')
                     runtime['files'].append({'path': dependency_path, 'original': b'# dependency original\n',
@@ -90,7 +90,7 @@ class IncidentFixTests(unittest.TestCase):
             manifest = {}
             installed_data = (b'# unreviewed change\n' if unknown_installed else
                               b'# reviewed intermediate\n' if intermediate else b'# original\n')
-            names = (['appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'workers.py', 'model.py', 'runner_client.py', 'process_limits.py', 'media.py', 'media_provider.py', 'skills.py', 'gateway.py', 'memory_backup.py', 'memory_backup_cli.py']
+            names = (['appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'workers.py', 'model.py', 'runner_client.py', 'process_limits.py', 'media.py', 'media_provider.py', 'skills.py', 'gateway.py', 'memory_backup.py', 'memory_backup_cli.py', 'browser_service.py']
                      if p1 else ['appserver.py', 'configuration.py', 'gateway.py', 'sessions.py'])
             for name in names:
                 (source / name).write_bytes(b'# tested\n')
@@ -388,7 +388,7 @@ class IncidentFixTests(unittest.TestCase):
             source = root / 'prototype/andrewbot'
             source.mkdir(parents=True)
             manifest = {}
-            for name in ('runner_service.py', 'process_limits.py', 'runner_client.py'):
+            for name in ('runner_service.py', 'process_limits.py', 'runner_client.py', 'browser_service.py'):
                 (package/name).write_bytes(b'# old '+name.encode()+b'\n')
                 (source/name).write_bytes(b'# new '+name.encode()+b'\n')
                 manifest[name] = {'original':hashlib.sha256((package/name).read_bytes()).hexdigest(),
