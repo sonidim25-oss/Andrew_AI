@@ -73,6 +73,22 @@ class ModelGateway:
             return 400, {"error": {"message": "messages are required", "type": "invalid_request_error"}}
         outbound = dict(payload)
         outbound["messages"] = [dict(message) if isinstance(message, dict) else message for message in messages]
+        owner_reply = self.store.get_state('model_turn_origin', '') == 'owner'
+        reply_rounds = int(self.store.get_state('owner_reply_rounds', '0') or '0') if owner_reply else 0
+        if owner_reply:
+            answer_now = reply_rounds >= 3
+            instruction = (
+                'This is an owner reply, not an autonomous research turn. Answer the latest owner message directly. '
+                'Use tools only when needed to answer. Do not resume independent projects before replying. '
+                'If more work is needed, report what you know and what remains; independent work may resume after the conversation. '
+                + ('The owner has waited through three model/tool rounds. Now produce a text answer with the findings so far; do not call tools.'
+                   if answer_now else 'Return an answer promptly, even if it is a brief acknowledgement or partial result.')
+            )
+            outbound['messages'].insert(0, {'role': 'system', 'content': instruction})
+            if answer_now:
+                outbound['tool_choice'] = 'none'
+                if reply_rounds == 3:
+                    self.store.add_activity('Owner reply: requesting a text answer after tool work')
         now = datetime.now(timezone.utc)
         snapshot = budget_snapshot(
             self.store, now=now, monthly_limit_usd=self.monthly_limit_usd,
@@ -134,6 +150,9 @@ class ModelGateway:
         outbound.pop("max_tokens", None)
         outbound.pop("max_completion_tokens", None)
         outbound["stream"] = False
+        if owner_reply:
+            self.store.set_state('owner_reply_rounds', str(reply_rounds + 1))
+        self.store.set_state('model_turn_progress', json.dumps({'phase': 'waiting for the provider', 'at': datetime.now(timezone.utc).timestamp()}))
         try:
             result = self.provider.complete(outbound)
         except Exception as error:
@@ -150,6 +169,7 @@ class ModelGateway:
             # Keep the reservation: the request may have reached the provider
             # even though its response was lost.
             return self.uncertain_response()
+        self.store.set_state('model_turn_progress', json.dumps({'phase': 'processing the model response', 'at': datetime.now(timezone.utc).timestamp()}))
         if not isinstance(result, dict) or not isinstance(result.get('choices'), list) or not result['choices']:
             event = 'Letta model gateway received an invalid provider response; reservation retained'
             logging.warning('%s', event)

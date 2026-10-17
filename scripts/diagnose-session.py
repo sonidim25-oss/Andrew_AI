@@ -5,7 +5,7 @@ import json
 import re
 import sqlite3
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -82,6 +82,7 @@ def main():
     parser.add_argument("session", nargs="?", default="latest", help="Session ID, hexadecimal prefix, or latest (default)")
     parser.add_argument("--database", default="/var/lib/andrew/control/controller.sqlite3")
     parser.add_argument("--letta-metadata", action="store_true", help="Read saved Letta message structure; no content is printed")
+    parser.add_argument("--current", action="store_true", help="Inspect the latest cycle and current queues, even without a failure")
     args = parser.parse_args()
     if args.session != 'latest' and not re.fullmatch(r"[0-9a-f]{12,32}", args.session):
         parser.error("session must be 12 to 32 lowercase hexadecimal characters")
@@ -89,7 +90,7 @@ def main():
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA query_only=ON")
         if args.session == 'latest':
-            latest = db.execute("SELECT session_id FROM cycles WHERE status='failed' "
+            latest = db.execute("SELECT session_id FROM cycles " + ("" if args.current else "WHERE status='failed' ") +
                                 "ORDER BY started_at DESC LIMIT 1").fetchone()
             if latest is None:
                 parser.error('no failed autonomous cycle was found')
@@ -129,17 +130,23 @@ def main():
                 "FROM research_events GROUP BY session_id,cycle_id ORDER BY last_saved_at DESC LIMIT 15")
         report["lifecycle"] = rows("SELECT key,value FROM state WHERE key IN "
             "('sleeping','sleep_until','paused','active_session_status','active_session_id',"
-            "'session_start_requested','fallback_wake_day','autonomy_error') ORDER BY key")
+            "'session_start_requested','fallback_wake_day','autonomy_error','autonomous_owner_id',"
+            "'owner_control_revision','conversation_until','model_turn_origin','model_turn_progress',"
+            "'owner_reply_rounds') ORDER BY key")
         report["diary_metadata"] = rows("SELECT local_date,record_type,created_at,delivery_state "
             "FROM diary_entries WHERE session_id LIKE ?", (args.session + "%",))
         if cycles:
             start, end = cycles[0]["started_at"], cycles[-1]["ended_at"] or cycles[-1]["started_at"]
+            if args.current:
+                end = datetime.now(timezone.utc).isoformat()
             # Only controller-generated event families relevant to this incident.
             report["events"] = rows("SELECT id,created_at,event FROM activity "
                 "WHERE datetime(created_at) BETWEEN datetime(?, '-5 minutes') AND datetime(?, '+5 minutes') "
                 "AND (event LIKE 'Autonomous %' OR event LIKE 'Letta model gateway %' "
                 "OR event='Owner message outcome uncertain; held to avoid duplicate delivery' "
                 "OR event='Andrew replied to the owner' "
+                "OR event='Owner reply: requesting a text answer after tool work' "
+                "OR event='Owner message queued while automatic model calls are stopped' "
                 "OR event LIKE 'Session failed %' OR event LIKE 'Daily fallback %' OR event LIKE 'Scheduled wake %') ORDER BY id", (start, end))
             report["usage"] = rows("SELECT created_at,cost_usd,input_tokens,output_tokens FROM usage "
                 "WHERE datetime(created_at) BETWEEN datetime(?, '-5 minutes') AND datetime(?, '+5 minutes')", (start, end))

@@ -516,6 +516,8 @@ class LettaAgent:
         "from your interpretations, and do not alter the founding letter or safety constraints. "
         "After replying to the owner, stay available: the controller waits five quiet minutes without model calls, "
         "then lets you resume independent interests and projects. An answer does not end your session. "
+        "During an owner reply, answer their message before resuming independent research. Use only tools "
+        "needed for that answer. If longer work is needed, give the findings so far and say what remains. "
         "Owner messages have priority at the next safe stopping point. Choose sleep explicitly with a lifecycle tool "
         "when appropriate; the controller announces your expected wake. A failed turn is an error, never a choice to sleep. "
         "Use the controller's lifecycle tools to request bounded sleep or wake behavior. Before voluntarily sleeping "
@@ -699,12 +701,14 @@ class LettaAgent:
                     except OSError:
                         pass
 
-    def reply(self, messages, timeout=None):
+    def reply(self, messages, timeout=None, *, origin='owner'):
         # Owner replies can span multiple model/tool rounds just like autonomous
         # work. Bound network operations separately and retain explicit cancellation.
         text = next((row["content"] for row in reversed(messages) if row["role"] == "user"), None)
         if not isinstance(text, str) or not text:
             raise ValueError("a user message is required")
+        if origin not in {'owner', 'autonomous'}:
+            raise ValueError('invalid turn origin')
         with self._turn_lock:
             if self._turn_cancel is not None:
                 raise RuntimeError('A Letta turn is already active')
@@ -712,6 +716,9 @@ class LettaAgent:
             self._turn_cancel = cancelled
         client = None
         try:
+            self.store.set_state('model_turn_origin', origin)
+            self.store.set_state('owner_reply_rounds', '0')
+            self.store.set_state('model_turn_progress', json.dumps({'phase': 'starting conversation', 'at': time.time()}))
             if self.store.get_state('paused', '0') == '1':
                 raise LettaTurnCancelled('Owner paused this turn')
             client = AppServerClient(self.url)
@@ -739,9 +746,11 @@ class LettaAgent:
                     raise LettaTurnCancelled('Owner cancelled this turn')
                 token = TOOL_CANCELLATION.set(cancelled)
                 try:
+                    self.store.set_state('model_turn_progress', json.dumps({'phase': 'running a tool', 'at': time.time()}))
                     return self.tool_handler(name, arguments)
                 finally:
                     TOOL_CANCELLATION.reset(token)
+                    self.store.set_state('model_turn_progress', json.dumps({'phase': 'waiting for the next model step', 'at': time.time()}))
             reply = client.send_user_turn(runtime, text, tool_handler=tool_handler if self.tool_handler else None, timeout=timeout)
             if cancelled.is_set():
                 raise LettaTurnCancelled('Owner cancelled this turn')
@@ -764,8 +773,10 @@ class LettaAgent:
                 self._active_client = self._active_runtime = self._turn_cancel = None
             if client is not None:
                 client.close()
+            self.store.set_state('model_turn_origin', '')
+            self.store.set_state('model_turn_progress', '')
 
     def autonomous_turn(self, prompt, timeout=None):
         if not isinstance(prompt, str) or not prompt:
             raise ValueError("autonomous turn prompt must be non-empty")
-        return self.reply([{"role": "user", "content": prompt}], timeout=timeout)
+        return self.reply([{"role": "user", "content": prompt}], timeout=timeout, origin='autonomous')

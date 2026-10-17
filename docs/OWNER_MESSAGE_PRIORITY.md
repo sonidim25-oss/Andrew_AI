@@ -23,6 +23,24 @@ that no model call was made. The gateway also refuses new dispatches while the
 error is set. Existing uncertain inputs and provider reservations remain held;
 installation never authorizes their replay.
 
+The subsequent 17:07 owner turn kept making paid model requests and executing
+tools until the owner cancelled it at 17:25. It was not a silent provider timeout.
+Completed reply inputs were correctly marked processed; interrupted requests were
+held, and the old status counted these held requests as queued.
+
+Owner replies now have an explicit model mode distinct from autonomous research.
+After three provider rounds in an owner turn, the next request uses
+`tool_choice: none` and asks for a direct text answer with the findings so far.
+It does not truncate a response, interrupt an executing tool, or limit autonomous
+work. The count resets for each direct or queued owner reply. The pinned-protocol
+regression deliberately requests tools until text is required, then checks that
+the owner receives a reply and sleeping messages leave the pending queue.
+
+Status reports pending, processing and held inputs separately. It also shows the
+current reply phase and the age of its last update. These are local snapshots,
+not claims that an idle or interrupted model is thinking. Old held requests stay
+held; there is no evidence-based reason to mark them all answered or replay them.
+
 Agent model settings clear the former output-token setting. The gateway removes
 both `max_tokens` and `max_completion_tokens`, including values supplied by the
 runtime. The direct provider reply path also omits its old 512-token cap. Provider

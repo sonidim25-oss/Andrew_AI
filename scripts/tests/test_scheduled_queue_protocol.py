@@ -20,8 +20,14 @@ from andrewbot.store import Store
 
 @unittest.skipUnless(os.environ.get('ANDREW_LETTA_TEST_BINARY'), 'requires isolated pinned Letta harness')
 class ScheduledQueueProtocolTests(unittest.TestCase):
+    def test_scheduled_queue_completes_multiple_model_and_tool_rounds(self):
+        self.exercise(False)
+
+    def test_owner_tool_loop_returns_text_and_sleep_queue_clears_after_reply(self):
+        self.exercise(True)
+
     @patch('andrewbot.appserver.gmail_permissions', return_value={'enabled': False})
-    def test_scheduled_queue_completes_multiple_model_and_tool_rounds(self, _permissions):
+    def exercise(self, force_answer, _permissions):
         # Set to 43 for three real requests spanning the former 120-second limit.
         delay = float(os.environ.get('ANDREW_QUEUE_STEP_DELAY', '0'))
         with tempfile.TemporaryDirectory(prefix='andrew-queue-protocol-') as directory:
@@ -39,8 +45,8 @@ class ScheduledQueueProtocolTests(unittest.TestCase):
                 def complete(self, payload):
                     calls.append(payload)
                     time.sleep(delay)
-                    if len(calls) <= 2:
-                        name = ('check_budget', 'recent_activity')[len(calls) - 1]
+                    if (force_answer and payload.get('tool_choice') != 'none') or (not force_answer and len(calls) <= 2):
+                        name = ('check_budget', 'recent_activity')[(len(calls) - 1) % 2]
                         message = {'role': 'assistant', 'content': None, 'tool_calls': [
                             {'id': f'fixture-{len(calls)}', 'type': 'function',
                              'function': {'name': name, 'arguments': '{}'}}]}
@@ -100,12 +106,33 @@ class ScheduledQueueProtocolTests(unittest.TestCase):
                     worker.join(170)
                     self.assertFalse(worker.is_alive(), 'saved work did not finish within fixture watchdog')
                     self.assertEqual(replies, ['Saved work completed.'])
-                    self.assertEqual(tool_names, ['check_budget', 'recent_activity'])
-                    self.assertEqual(len(calls), 3)
+                    expected = 4 if force_answer else 3
+                    self.assertEqual(tool_names, ['check_budget', 'recent_activity', 'check_budget'] if force_answer else ['check_budget', 'recent_activity'])
+                    self.assertEqual(len(calls), expected)
                     self.assertGreaterEqual(time.monotonic() - started, 3 * delay)
                     self.assertEqual(store.get_state('autonomy_error', ''), '')
                     self.assertEqual(store.pending_message_count(17), 0)
-                    self.assertEqual(store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 3)
+                    self.assertEqual(store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], expected)
+                    self.assertEqual(store.get_state('model_turn_origin'), '')
+                    if force_answer:
+                        self.assertEqual(calls[-1]['tool_choice'], 'none')
+                        held = store.add_message(17, 'user', 'An older interrupted request', queued=True)
+                        store.claim_owner_message(17, held)
+                        store.hold_uncertain_queued_claim([held])
+                        controller._command('/sleep')
+                        for text in ('First sleeping message', 'Second sleeping message'):
+                            controller.handle_update({'message': {'from': {'id': 17},
+                                'chat': {'id': 17, 'type': 'private'}, 'text': text}})
+                        self.assertEqual(len(store.queued_messages(17)), 2)
+                        self.assertEqual(len(calls), expected)
+                        wake = controller._command('/wake')
+                        self.assertIn('Messages waiting: 2', wake)
+                        self.assertEqual(controller.flush_queued(), 'Saved work completed.')
+                        self.assertEqual(len(store.queued_messages(17)), 0)
+                        self.assertEqual(store.uncertain_message_count(17), 1)
+                        status = controller._command('/status')
+                        self.assertIn('Queued messages: 0', status)
+                        self.assertIn('held from interrupted attempts: 1', status)
                 finally:
                     if worker is not None and worker.is_alive():
                         agent.cancel_active_turn()

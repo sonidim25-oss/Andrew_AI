@@ -39,6 +39,8 @@ class SessionRunner:
 
     def recover(self):
         self.store.set_state('autonomous_owner_id', '')
+        self.store.set_state('model_turn_origin', '')
+        self.store.set_state('model_turn_progress', '')
         interrupted = self.store.interrupt_unfinished_cycles()
         previous = self.store.get_state("active_session_id", "")
         if previous:

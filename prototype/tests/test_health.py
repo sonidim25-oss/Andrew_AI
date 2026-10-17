@@ -16,6 +16,22 @@ def update(owner=17):
 
 
 class HealthTests(unittest.TestCase):
+    def test_status_separates_held_messages_from_waiting_and_shows_reply_progress(self):
+        import json
+        import time
+        held = self.store.add_message(17, 'user', 'Already interrupted', queued=True)
+        self.store.claim_owner_message(17, held)
+        self.store.hold_uncertain_queued_claim([held])
+        self.store.add_message(17, 'user', 'Waiting', queued=True)
+        self.store.set_state('model_turn_origin', 'owner')
+        self.store.set_state('model_turn_progress', json.dumps({'phase': 'waiting for the provider', 'at': time.time()}))
+        reply = self.controller._command('/status')
+        self.assertIn('preparing a reply to you', reply)
+        self.assertIn('Queued messages: 1', reply)
+        self.assertIn('held from interrupted attempts: 1', reply)
+        self.assertIn('waiting for the provider', reply)
+        self.assertNotIn('Already interrupted', reply)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

@@ -334,6 +334,20 @@ class ModelGatewayTests(unittest.TestCase):
         self.assertEqual(self.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 0)
         self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
 
+    def test_owner_reply_requests_text_after_three_rounds_but_autonomy_keeps_tools(self):
+        payload = {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'Question'}],
+                   'tool_choice': 'auto'}
+        self.store.set_state('model_turn_origin', 'owner')
+        self.store.set_state('owner_reply_rounds', '3')
+        self.assertEqual(self.gateway.complete('Bearer gateway-test-token', payload)[0], 200)
+        sent = self.provider.calls[-1]
+        self.assertEqual(sent['tool_choice'], 'none')
+        self.assertTrue(any('Now produce a text answer' in row.get('content', '') for row in sent['messages']))
+        self.assertNotIn('max_tokens', sent)
+        self.store.set_state('model_turn_origin', 'autonomous')
+        self.assertEqual(self.gateway.complete('Bearer gateway-test-token', payload)[0], 200)
+        self.assertEqual(self.provider.calls[-1]['tool_choice'], 'auto')
+
 
 if __name__ == "__main__":
     unittest.main()

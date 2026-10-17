@@ -429,6 +429,12 @@ class ConcurrentOwnerControlsTests(unittest.TestCase):
                     self.assertEqual(store.get_state('paused', '0'), '0' if expected == 'owner_wake' else '1')
                     if expected == 'owner_wake':
                         self.assertEqual(store.get_state('session_start_requested'), 'owner_wake')
+                    # dispatch.step only wakes the model worker. Its return does
+                    # not mean the separate cancelled turn has finished cleanup.
+                    deadline = time.monotonic() + 1
+                    while (store.connection.execute('SELECT status FROM cycles').fetchone()[0] == 'running'
+                           and time.monotonic() < deadline):
+                        time.sleep(0.005)
                     self.assertEqual(store.connection.execute('SELECT status FROM cycles').fetchone()[0], 'stopped')
                     self.assertEqual(store.pending_diary_deliveries(), [])
                 else:

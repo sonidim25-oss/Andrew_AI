@@ -496,6 +496,18 @@ class Controller:
                          f"failures={row['failures']}; last success age={duration(row['last_success_age_seconds'])}")
         return '\n'.join(lines)
 
+    def _reply_progress(self):
+        try:
+            progress = json.loads(self.store.get_state('model_turn_progress', '') or '{}')
+            phase = progress.get('phase')
+            if phase not in {'starting conversation', 'running a tool', 'waiting for the next model step',
+                             'waiting for the provider', 'processing the model response'}:
+                return ''
+            age = max(0, datetime.now(timezone.utc).timestamp() - float(progress['at']))
+            return f' Reply progress: {phase}; last change {age:.0f}s ago.'
+        except (ValueError, TypeError, KeyError):
+            return ''
+
     def _command(self, command, text="", update_id=None):
         if command in {'/media_status', '/media_budget', '/voice', '/image', '/image_edit', '/media_cancel', '/voice_on', '/voice_off', '/avatar_propose', '/avatar_approve'}:
             if self.media is None:
@@ -671,8 +683,9 @@ class Controller:
                  "active_session_status": "owner_wake"}, "Owner woke Andrew"
             )
             self._cancel_active_turn()
-            queued = self.store.pending_message_count(self.owner_id)
-            return f"I’m awake. I saved {queued} message(s) while sleeping."
+            queues = self.store.health_snapshot(self.owner_id)
+            return (f"I’m awake. Messages waiting: {queues['queued_messages']}. "
+                    f"Held from interrupted attempts: {queues['held_messages']}; these are not replayed automatically.")
         if command == "/pause":
             self.store.transition_owner_control(
                 {"paused": "1", "session_start_requested": "", "active_session_id": "",
@@ -710,7 +723,12 @@ class Controller:
             session = self.store.get_state("active_session_status", "idle")
             if self.store.get_state('autonomy_error', ''):
                 session = 'error (' + self.store.get_state('autonomy_error') + ')'
-            uncertain = self.store.uncertain_message_count(self.owner_id)
+            queues = self.store.health_snapshot(self.owner_id)
+            uncertain = queues['held_messages']
+            if (self.store.get_state('model_turn_origin', '') == 'owner'
+                    and self.store.get_state('sleeping', '0') != '1'
+                    and self.store.get_state('paused', '0') != '1'):
+                state = 'awake, preparing a reply to you'
             latest_diary = self.store.diary_entry()
             diary_state = (f"{latest_diary['local_date']} ({latest_diary['delivery_state']})"
                            if latest_diary else "none")
@@ -723,8 +741,9 @@ class Controller:
                 letter_status = f' Owner letter: {receipt}.'
             return (f"Andrew is {state}. Session: {session}. Autonomous schedule: {schedule}; fallback: {fallback}. "
                     f"Next self-scheduled wake: {wake_display}. "
-                    f"Autonomous cycles today: {cycles}. Queued messages: {self.store.pending_message_count(self.owner_id)} "
-                    f"({uncertain} with uncertain prior delivery). Latest diary: {diary_state}." + letter_status)
+                    f"Autonomous cycles today: {cycles}. Queued messages: {queues['queued_messages']}; "
+                    f"processing: {queues['active_messages']}; held from interrupted attempts: {uncertain}. "
+                    f"Latest diary: {diary_state}." + self._reply_progress() + letter_status)
         if command == "/budget":
             snapshot = budget_snapshot(
                 self.store,
