@@ -16,6 +16,28 @@ spec.loader.exec_module(installer)
 
 
 class AutonomyInstallerTests(unittest.TestCase):
+    def test_gateway_diagnostics_preserve_live_response_validator(self):
+        base = (b'import logging\n\nclass ModelGateway:\n'
+                b'    def complete(self, result):\n'
+                b"        if not isinstance(result, dict) or not isinstance(result.get('choices'), list) or not result['choices']:\n"
+                b"            self.store.add_activity('invalid response')\n"
+                b'            return self.uncertain_response()\n'
+                b'        return result\n')
+        helper = b'def usable_provider_choices(result):\n    return bool(result.get("choices"))\n\n'
+        live = base.replace(b'class ModelGateway:', helper + b'class ModelGateway:').replace(
+            b"not isinstance(result, dict) or not isinstance(result.get('choices'), list) or not result['choices']",
+            b'not usable_provider_choices(result)')
+        proposed = b'from .model import ProviderRequestError\n' + base.replace(
+            b"            self.store.add_activity('invalid response')",
+            b"            logging.warning('invalid response')\n            self.store.add_activity('invalid response')")
+        with tempfile.TemporaryDirectory() as directory:
+            merged = installer.merge_source(live, base, proposed, Path(directory), 'gateway.py')
+        self.assertIn(helper, merged)
+        self.assertIn(b'if not usable_provider_choices(result):', merged)
+        self.assertIn(b"logging.warning('invalid response')", merged)
+        self.assertEqual(merged.count(b'from .model import ProviderRequestError'), 1)
+        ast.parse(merged)
+
     def test_exact_previous_release_is_a_supported_upgrade_base(self):
         base = b'def complete():\n    return "inference"\n'
         previous = base + b'def credit_status():\n    return "inference-key"\n'

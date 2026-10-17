@@ -119,6 +119,52 @@ def merge_skill_catalogs(live, base, proposed):
     return tuple(normalized)
 
 
+def normalize_gateway_merge(live, base, proposed):
+    """Keep the deployed response validator while adding independent diagnostics."""
+    sources = (live, base, proposed)
+    trees = [ast.parse(source) for source in sources]
+    validator_test = ast.parse('not usable_provider_choices(result)', mode='eval').body
+    legacy_test = ast.parse("not isinstance(result, dict) or not isinstance(result.get('choices'), list) or not result['choices']",
+                            mode='eval').body
+    signature = lambda node: ast.dump(node, include_attributes=False)
+    preserve_validator = (any(isinstance(node, ast.FunctionDef) and node.name == 'usable_provider_choices'
+                              for node in trees[0].body)
+                          and any(isinstance(node, ast.If) and signature(node.test) == signature(validator_test)
+                                  for node in ast.walk(trees[0])))
+    normalized = []
+    for source, tree in zip(sources, trees):
+        lines = source.splitlines(keepends=True)
+        edits = []
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom) and node.module == '__future__':
+                raise ValueError('Unexpected future import in gateway; merge requires review')
+            if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module == 'model':
+                if any(alias.name == 'ProviderRequestError' for alias in node.names):
+                    if len(node.names) != 1:
+                        raise ValueError('Unexpected combined provider error import')
+                    edits.append((sum(map(len, lines[:node.lineno - 1])),
+                                  sum(map(len, lines[:node.end_lineno])), b''))
+        if preserve_validator:
+            legacy = [node.test for node in ast.walk(tree) if isinstance(node, ast.If)
+                      and signature(node.test) == signature(legacy_test)]
+            current = [node.test for node in ast.walk(tree) if isinstance(node, ast.If)
+                       and signature(node.test) == signature(validator_test)]
+            if len(legacy) + len(current) != 1:
+                raise ValueError('Unexpected gateway response validator; merge requires review')
+            for node in legacy:
+                edits.append((sum(map(len, lines[:node.lineno - 1])) + node.col_offset,
+                              sum(map(len, lines[:node.end_lineno - 1])) + node.end_col_offset,
+                              b'not usable_provider_choices(result)'))
+        for start, end, replacement in sorted(edits, reverse=True):
+            source = source[:start] + replacement + source[end:]
+        # Give all merge inputs the same import. This avoids treating the new
+        # import and a live helper added at the import/class boundary as overlap.
+        source = b'from .model import ProviderRequestError\n' + source
+        ast.parse(source)
+        normalized.append(source)
+    return tuple(normalized)
+
+
 def merge_source(live, base, proposed, directory, name):
     if live == proposed:
         return live
@@ -127,6 +173,8 @@ def merge_source(live, base, proposed, directory, name):
         return proposed
     if name == 'skills.py':
         live, base, proposed = merge_skill_catalogs(live, base, proposed)
+    if name == 'gateway.py':
+        live, base, proposed = normalize_gateway_merge(live, base, proposed)
     paths = [directory / (name + suffix) for suffix in ('.live', '.base', '.proposed')]
     for path, data in zip(paths, (live, base, proposed)):
         path.write_bytes(data)
