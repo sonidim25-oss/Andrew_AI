@@ -1,6 +1,6 @@
 # Andrew's optional skills
 
-Status: implemented in source; not deployed. Initial scope follows the owner's design: three skills, a compact index, and on-demand instruction loading. Capabilities and permissions remain in the controller; preferences, experiences, and decisions remain in memory.
+Status: deployed and verified from `b5d43fa`; image generation enabled, voice disabled. Initial scope follows the owner's design: three skills, a compact index, and on-demand instruction loading. Capabilities and permissions remain in the controller; preferences, experiences, and decisions remain in memory.
 
 ## Initial skills
 
@@ -56,3 +56,13 @@ The canonical Markdown is tracked in Git and the installer installs it under `/o
 Image enablement is a persistent administrator-owned systemd drop-in, versioned at `systemd/andrew-control.service.d/95-media.conf` and installed at the matching `/etc/systemd/system` path. Ordinary controller-code deployments do not remove it. It enables GPT Image 1 Mini while leaving voice disabled, with $3/month, $0.20/day, $0.10/job maximum reservations and two image jobs per UTC day. Owner `/image` and `/image_reply` requests remain required; autonomous generation is not enabled. No sample needs to be regenerated.
 
 Pre-deployment verification for the image-enablement follow-up: 373 core tests (2 skipped), 80 installer/protocol tests passed. Independent review found no important issues and independently passed all 49 media tests. The four new budget/enablement tests reproduced the old failures before the fix. Production enablement and restart verification are recorded separately after installation.
+
+## Deployment completed — 2026-10-17
+
+Source `b5d43fa` was committed, pushed to `origin/feature/andrew-multimodal`, and installed through the acceptance installer. Evidence and the stopped-controller SQLite snapshot are in `/var/backups/andrew-incident-rabvratm`. Server runtime, browser account, UID network isolation, and pinned isolated Letta protocol acceptance passed. The persistent image-only drop-in was then installed, systemd reloaded, and controller startup verified again.
+
+Post-deployment verification matched all 21 installed module hashes and validated the runtime proof and SQLite integrity. The controller user loaded all three exact skill versions from `/opt/andrew/skills`. A read-only Letta query confirmed the compact index in the existing agent's saved system instructions and its unchanged 6,000-token output allowance. Boot startup is enabled; all four services are active with zero automatic restarts. No server reboot was needed or performed.
+
+Every row in all 33 database tables matches the pre-install snapshot, including lifecycle and conversation IDs, messages, held deliveries, memory, research, and spending. Both existing sample media artifacts retain their original checksums and delivered message IDs. No wake, replay, paid request, avatar update, or repeated sample delivery occurred. Private verification summary: `media-deployment-verification.json` in the evidence directory.
+
+The running process confirms images enabled, voice disabled, and $3/month, $0.20/day, $0.10/job limits. The skill files and systemd setting reside on persistent server storage and remain part of the committed deployment source. Future updates must continue deploying the skill assets alongside their version-bound loader; they are not stored in Andrew's disposable execution container.

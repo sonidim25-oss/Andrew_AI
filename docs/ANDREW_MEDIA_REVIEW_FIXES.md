@@ -2,7 +2,7 @@
 
 Scope: code-review findings 2, 3, and 4, in that order. Preserve existing changes, messages, memory, spending records, and generated samples. No uncertain message replay, paid provider tests, deployment, or avatar publication is part of this repair work.
 
-Finding 1 (rechecking reduced budgets for queued jobs) remains outside this requested repair list and is still an enablement blocker.
+Finding 1 was outside the original repair list; it was subsequently fixed and deployed under the owner-authorized image enablement follow-up recorded below.
 
 ## 2. Stop media admission before waiting for workers
 
@@ -81,3 +81,5 @@ Source `81ee6be`, including repairs 2–4, was deployed and verified on 2026-10-
 ## Finding 1 — owner-authorized image enablement follow-up
 
 The owner subsequently requested image generation be enabled. Queued jobs now recheck current permission, daily/monthly aggregate spend including outstanding reservations, per-job caps, and estimated cost against the saved reservation in the claim transaction. A disallowed unstarted job is cancelled with a local owner notice and no provider call; uncertain attempts remain held/accounted. Four regression tests cover reductions, combined reservations, a voice-rate increase, and image-only enablement. The earlier enablement blocker is resolved in source, pending this rollout's production verification.
+
+Deployment verification: `b5d43fa` is installed; finding 1 is resolved and image generation enabled with voice disabled. All 33 database tables and both existing artifacts match the pre-install snapshot. Evidence: `/var/backups/andrew-incident-rabvratm/media-deployment-verification.json`. No paid request, wake, replay, or avatar publication was performed.

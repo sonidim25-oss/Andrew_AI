@@ -1,6 +1,6 @@
 # Andrew media implementation
 
-Status: source commit `81ee6be` deployed and verified; media remains disabled. Approved voice and image samples were delivered; finding 1 remains open. The existing Qwen model, token allowance, lifecycle policy, memory records, message replay policy, and reasoning spending ledger are unchanged.
+Status: source commit `b5d43fa` deployed and verified; image generation enabled, voice disabled. Approved voice and image samples remain delivered; queued-budget revalidation finding 1 is fixed. The existing Qwen model, token allowance, lifecycle policy, memory records, message replay policy, and reasoning spending ledger are unchanged.
 
 ## Owner commands
 
@@ -107,3 +107,7 @@ Deployed source commit `81ee6be` from `feature/andrew-multimodal`, with media di
 Controller, Letta, runner, and browser services are active with zero automatic restarts; controller boot startup is enabled. Comparison against the stopped-controller SQLite snapshot confirms all 33 existing tables have identical rows, including messages, memory, research, uncertainty records, reasoning/media spending, lifecycle, and sample delivery acknowledgements. Both generated sample files retain their original hashes. The 6000-token allowance, provider wait of 120 seconds, and removed autonomous/code execution deadlines remain verified.
 
 Evidence and backups: `/var/backups/andrew-incident-mlgyoqvh`, including `controller-before.sqlite3`, `deployment-verification.json`, `media-deployment-verification.json`, startup logs, and artifact hashes. No wake, uncertain-message replay, paid request, new media delivery, or avatar update was performed during deployment. Finding 1 remains unresolved; deployment does not enable media.
+
+## Image enablement verified — 2026-10-17
+
+The owner-authorized rollout installed `b5d43fa` and the persistent `95-media.conf` systemd drop-in. Running policy verifies images enabled, voice disabled, monthly $3, daily $0.20, per-image reservation $0.10; two image jobs/day remains enforced. Use `/image <prompt>` for a direct request or `/image_reply <request>` for an Andrew-composed prompt during an available model turn. Avatar changes still require separate approval. Verification preserved all 33 database tables and both existing sample artifacts; no paid request, wake, or replay occurred. Full evidence and skill-discovery details: `docs/ANDREW_SKILLS.md`, backup `/var/backups/andrew-incident-rabvratm`.
