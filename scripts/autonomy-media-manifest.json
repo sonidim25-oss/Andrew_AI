@@ -1,10 +1,10 @@
 {
   "base": "d325230",
   "modules": {
-    "appserver.py": "3be39e04d5c8d875435202bc63e3db0eda65adab8b4d25fe5617a105b4f9e31f",
+    "appserver.py": "2391531a16cb8b304af3416327939f1259c84972d29f66e1b174cb7427b4baa4",
     "budget.py": "07c164572f242358226d65eff0fb3088fd40f3b0124b73132f46420fd3e1cc56",
     "controller.py": "be9930c7000508f4eb34bacf0eb05883602fd081293cdf286270415af0da1050",
-    "gateway.py": "69010d9b8ab509967e1af337de0219d96a0d81d8606dd45272625a0ed3c2bbda",
+    "gateway.py": "9088181c7b47480e942299a11ef724ae35660df3b4fbb434842ef7e99d93bd37",
     "lifecycle_policy.py": "7eab2d34c1373e99460f0a2cd320ec9338cdad8be9665440d32054f98111df59",
     "main.py": "a3fecca948afc1f87019507cc885b3d5cf3ad9a857fefd631966f8776ac63603",
     "media.py": "055534ab06f6ae5a1a1090f86334bddb9d5c360d1402b7b433329009b8e13887",
@@ -22,10 +22,27 @@
   },
   "deployed_upgrade_bases": {
     "appserver.py": {
-      "9a47e29cc0b01758a6b3e7bcc9e4051033e772062b81af00147dee7ee2359899": "8f3dc4d"
+      "9a47e29cc0b01758a6b3e7bcc9e4051033e772062b81af00147dee7ee2359899": "8f3dc4d",
+      "c7370f1ac5fb66305fe94021eb331b96c1d879ba248483b04cb9edf286a36a87": "387162e"
     },
     "gateway.py": {
-      "1a600e9f06394d8e2c51b1750bea36b1830e50e7efe3bfcf7609f00d068c9a2c": "8f3dc4d"
+      "1a600e9f06394d8e2c51b1750bea36b1830e50e7efe3bfcf7609f00d068c9a2c": "8f3dc4d",
+      "6ab506e80cb88958c620720db7a1fc7965622fae6433c051897133cd5bd018f1": "387162e"
+    },
+    "controller.py": {
+      "78d1b50cbfc7b8b77f6644adff9e9ff980db4664cedc629babf0b6e57e126daa": "387162e"
+    },
+    "main.py": {
+      "ad2b5591d8c688f5da9b38787d5580db11912ef1e711f98648a3863309bfde55": "387162e"
+    },
+    "media.py": {
+      "2f3c39b07e43f5890dfab3fc820a950678b309072ef60d9c95285b651b1cdb2d": "387162e"
+    },
+    "skills.py": {
+      "956d219644893e5aa19597bd8c61f10f5e152368254e45a7b3c068aa1cf2b2ea": "387162e"
+    },
+    "telegram_menu.py": {
+      "cb0312af87a17f8f06ba0a94e679fbda28fc6e0e1f6fecdaf7b0ccfa1e7a0fa0": "387162e"
     }
   }
 }

@@ -37,6 +37,24 @@ class AppServerWebSocketTests(unittest.TestCase):
                 self.assertEqual(caught.exception.safe_stop_reason, 'error')
                 self.assertNotIn('private fixture text', str(caught.exception))
 
+    def test_context_failure_records_a_safe_specific_reason(self):
+        for message, reason in (
+            ('The system prompt and tool definitions need about 50000 tokens, context window too small', 'fixed_prompt_too_large'),
+            ('request too large: controller context window limit exceeded', 'controller_byte_limit'),
+            ('Context window exceeded', 'context_overflow'),
+            ('Local compaction failed', 'summary_failed'),
+        ):
+            client = AppServerClient.__new__(AppServerClient)
+            class Connection:
+                def send_json(self, _value):
+                    pass
+                def recv_json(self):
+                    return {'type': 'turn_finished', 'stop_reason': 'error', 'error': message}
+            client.connection = Connection()
+            with self.assertRaises(LettaTurnError) as caught:
+                client.send_user_turn({'agent_id': 'a', 'conversation_id': 'c'}, 'hello')
+            self.assertEqual(caught.exception.safe_context_reason, reason)
+
     def test_recovered_context_notice_does_not_fail_a_completed_reply(self):
         client = AppServerClient.__new__(AppServerClient)
         class Connection:

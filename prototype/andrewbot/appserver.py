@@ -38,8 +38,11 @@ class LettaCommandError(RuntimeError):
 class LettaTurnError(RuntimeError):
     CATEGORIES = frozenset({"output_token_limit", "turn_failed", "missing_assistant_text", "active_run_conflict", "provider_attempt_uncertain", "owner_reply_tools_disallowed", "context_compaction_failed"})
 
-    def __init__(self, category, source='unknown', stop_reason=None):
+    def __init__(self, category, source='unknown', stop_reason=None, context_reason='unavailable'):
         self.safe_category = category if category in self.CATEGORIES else "turn_failed"
+        self.safe_context_reason = context_reason if context_reason in {
+            'fixed_prompt_too_large', 'controller_byte_limit', 'context_overflow', 'summary_failed'
+        } else 'unavailable'
         self.safe_source = source if source in {'input_rejected', 'stream_error', 'turn_finished', 'protocol_error'} else 'unknown'
         self.safe_stop_reason = stop_reason if stop_reason in {
             'end_turn', 'error', 'error_retry_exhausted', 'max_steps', 'max_tokens_exceeded',
@@ -399,6 +402,7 @@ class AppServerClient:
         owner_pending = False
         tools_disallowed = False
         compaction_error = False
+        context_reason = 'unavailable'
         failure_source = 'unknown'
         final_stop_reason = None
         output_limit = False
@@ -407,11 +411,19 @@ class AppServerClient:
         abort_request_id = None
         input_accepted = not getattr(self, 'require_input_ack', False)
         def classify_error(value):
-            nonlocal provider_uncertain, owner_pending, tools_disallowed, compaction_error
+            nonlocal provider_uncertain, owner_pending, tools_disallowed, compaction_error, context_reason
             text = json.dumps(value).lower()
             provider_uncertain |= 'provider_attempt_uncertain' in text
             owner_pending |= 'owner_input_pending' in text
             tools_disallowed |= 'owner_reply_tools_disallowed' in text
+            if 'system prompt and tool definitions need' in text:
+                context_reason = 'fixed_prompt_too_large'
+            elif 'controller context window limit' in text:
+                context_reason = 'controller_byte_limit'
+            elif 'context window' in text or 'context_length_exceeded' in text:
+                context_reason = 'context_overflow'
+            elif 'compaction failed' in text or 'failed to compact' in text:
+                context_reason = 'summary_failed'
             compaction_error |= any(marker in text for marker in (
                 'context window', 'context_length_exceeded', 'compaction failed', 'failed to compact'))
         while deadline is None or time.monotonic() < deadline:
@@ -498,7 +510,7 @@ class AppServerClient:
         if tools_disallowed:
             raise LettaTurnError('owner_reply_tools_disallowed', failure_source, final_stop_reason)
         if compaction_error and failure and not provider_uncertain:
-            raise LettaTurnError('context_compaction_failed', failure_source, final_stop_reason)
+            raise LettaTurnError('context_compaction_failed', failure_source, final_stop_reason, context_reason)
         if output_limit:
             raise LettaTurnError("output_token_limit")
         if provider_uncertain:
@@ -782,7 +794,7 @@ class LettaAgent:
         except Exception as error:
             if isinstance(error, LettaTurnError):
                 event = (f'Letta turn failed (category={error.safe_category}, source={error.safe_source}, '
-                         f'stop_reason={error.safe_stop_reason})')
+                         f'stop_reason={error.safe_stop_reason}, context_reason={error.safe_context_reason})')
                 logging.warning('%s', event)
                 try:
                     self.store.add_activity(event)

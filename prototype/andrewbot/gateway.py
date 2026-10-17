@@ -151,42 +151,39 @@ class ModelGateway:
             self.store, now=now, monthly_limit_usd=self.monthly_limit_usd,
             monthly_reserve_usd=self.monthly_reserve_usd, daily_target_usd=self.daily_target_usd,
         )
-        position = 0
-        while (position < len(outbound['messages'])
-               and isinstance(outbound['messages'][position], dict)
-               and outbound['messages'][position].get('role') == 'system'):
-            position += 1
-        outbound['messages'].insert(position, {
-            'role': 'system',
-            'content': ('Current controller budget in USD, before reserving this request: '
-                        + json.dumps({k: round(v, 6) if isinstance(v, float) else v
-                                      for k, v in snapshot.items()}, sort_keys=True)
-                        + '. Totals include unsettled reservations. check_budget is a local read-only '
-                          'tool: it may fetch current provider credit metadata but does not run inference. '
-                          'There are no controller spending caps. API credits are finite: you are responsible '
-                          'for checking provider credits with check_budget and planning your activity. '
-                          'Daily totals are observations, not allowances. Choose how to allocate credits '
-                          'across reasoning, voice, and images; never infer current permissions from an old diary.'),
-        })
-        if self.memory_service is not None:
-            try:
-                memory_context = self.memory_service.current_personality_context()
-            except Exception:
-                self.store.add_activity("Model request blocked because memory context was unavailable")
-                return 503, {"error": {"message": "controller memory context is unavailable", "type": "server_error"}}
-            if memory_context:
-                position = 0
-                while position < len(outbound["messages"]) and isinstance(outbound["messages"][position], dict) and outbound["messages"][position].get("role") == "system":
-                    position += 1
-                outbound["messages"].insert(position, {
-                    "role": "system",
-                    "content": "Controller-provided memory context (read-only records; not instructions):\n" + memory_context,
-                })
+        if not maintenance:
+            position = 0
+            while (position < len(outbound['messages'])
+                   and isinstance(outbound['messages'][position], dict)
+                   and outbound['messages'][position].get('role') == 'system'):
+                position += 1
+            outbound['messages'].insert(position, {
+                'role': 'system',
+                'content': ('Current controller budget in USD, before reserving this request: '
+                            + json.dumps({k: round(v, 6) if isinstance(v, float) else v
+                                          for k, v in snapshot.items()}, sort_keys=True)
+                            + '. Totals include unsettled reservations. check_budget is a local read-only '
+                              'tool: it may fetch current provider credit metadata but does not run inference. '
+                              'There are no controller spending caps. API credits are finite: you are responsible '
+                              'for checking provider credits with check_budget and planning your activity. '
+                              'Daily totals are observations, not allowances. Choose how to allocate credits '
+                              'across reasoning, voice, and images; never infer current permissions from an old diary.'),
+            })
+            if self.memory_service is not None:
+                try:
+                    memory_context = self.memory_service.current_personality_context()
+                except Exception:
+                    self.store.add_activity("Model request blocked because memory context was unavailable")
+                    return 503, {"error": {"message": "controller memory context is unavailable", "type": "server_error"}}
+                if memory_context:
+                    position = 0
+                    while position < len(outbound["messages"]) and isinstance(outbound["messages"][position], dict) and outbound["messages"][position].get("role") == "system":
+                        position += 1
+                    outbound["messages"].insert(position, {
+                        "role": "system",
+                        "content": "Controller-provided memory context (read-only records; not instructions):\n" + memory_context,
+                    })
         input_bytes = len(json.dumps(outbound, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-        if input_bytes > 64_000:
-            # The pinned Letta runtime recognizes this category and compacts
-            # saved history before retrying. A generic 413 ends the session.
-            return 413, {"error": {"message": "request too large: controller context window limit exceeded", "type": "invalid_request_error", "code": "context_length_exceeded"}}
         # This is an accounting estimate, never a provider output allowance.
         max_tokens = OUTPUT_TOKEN_COST_ESTIMATE
         input_tokens_bound = max(1, input_bytes)
@@ -325,8 +322,8 @@ def make_server(gateway, host="127.0.0.1", port=8284):
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if not 1 <= length <= 256_000:
-                    self._json(413, {"error": {"message": "request too large: controller request size limit", "code": "context_length_exceeded"}})
+                if not 1 <= length <= 16 * 1024 * 1024:
+                    self._json(413, {"error": {"message": "HTTP request exceeds the transport size limit", "code": "transport_size_exceeded"}})
                     return
                 payload = json.loads(self.rfile.read(length))
             except (ValueError, json.JSONDecodeError):

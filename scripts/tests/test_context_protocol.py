@@ -19,7 +19,7 @@ from andrewbot.store import Store
 @unittest.skipUnless(os.environ.get('ANDREW_LETTA_TEST_BINARY'), 'requires isolated pinned Letta harness')
 class ContextProtocolTests(unittest.TestCase):
     @patch('andrewbot.appserver.gmail_permissions', return_value={'enabled': False})
-    def test_context_limit_recovers_without_relaxing_the_gateway_limit(self, _permissions):
+    def test_runtime_compacts_history_without_controller_byte_rejections(self, _permissions):
         with tempfile.TemporaryDirectory(prefix='andrew-context-protocol-') as directory:
             root = Path(directory)
             with socket.socket() as sock:
@@ -56,7 +56,8 @@ class ContextProtocolTests(unittest.TestCase):
                             content = 'The fixture observations are retained.' if summarizing else 'A retained fixture observation. ' * 250
                             return {'id': f'fixture-{len(calls)}', 'model': 'qwen/qwen3.8-flash',
                                 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': content}, 'finish_reason': 'stop'}],
-                                'usage': {'prompt_tokens': 20, 'completion_tokens': 20, 'cost': .000002}}
+                                'usage': {'prompt_tokens': max(20, len(json.dumps(payload['messages'])) // 4),
+                                          'completion_tokens': max(20, len(content) // 4), 'cost': .000002}}
 
                     class Gateway(ModelGateway):
                         def complete(self, auth, payload):
@@ -76,7 +77,7 @@ class ContextProtocolTests(unittest.TestCase):
                         'fields': {'apiKey': 'fixture-token', 'baseUrl': f'http://127.0.0.1:{gateway_thread.server.server_address[1]}/v1'}},
                         'connect_provider_response')
                     agent_id = client.create_agent({'name': 'Context fixture', 'system': 'Retain the fixture observations.',
-                        'model': 'openai-compatible/qwen/qwen3.8-flash', 'context_window_limit': 32768,
+                        'model': 'openai-compatible/qwen/qwen3.8-flash', 'context_window_limit': 8192,
                         'model_settings': {'provider_type': 'openai-compatible', 'max_tokens': 512},
                         'include_base_tools': False, 'memory_blocks': []})
                     client.close()
@@ -85,13 +86,11 @@ class ContextProtocolTests(unittest.TestCase):
                     for number in range(20):
                         reply, _ = agent.reply([{'role': 'user', 'content': f'Continue fixture observation {number}.'}])
                         self.assertTrue(reply)
-                    self.assertTrue(overflow, 'fixture must actually hit the gateway context limit')
+                    self.assertFalse(overflow, 'controller must not impose a byte-based context window')
                     self.assertTrue(summaries, 'fixture must actually compact the saved conversation')
                     for payload in summaries:
                         self.assertNotIn('tool_choice', payload)
                         self.assertFalse(any('This is an owner reply' in str(row.get('content', '')) for row in payload['messages']))
-                    for payload in calls:
-                        self.assertLessEqual(len(json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode()), 64000)
                 finally:
                     if gateway_thread:
                         gateway_thread.close()
