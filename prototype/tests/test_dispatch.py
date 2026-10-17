@@ -193,6 +193,21 @@ class DispatchTests(unittest.TestCase):
         self.controller.handle_update.assert_not_called()
         self.controller.flush_queued.assert_not_called()
 
+    def test_whitespace_controls_and_case_variant_buttons_cannot_starve_pause(self):
+        for number, prefix in enumerate(('\n', '\t', '\r\n', '\u2003'), 100):
+            with self.subTest(prefix=repr(prefix)):
+                self.controller.reset_mock()
+                self.store.enqueue_update(update(number, prefix + '/pause'))
+                self.dispatch.process_updates(controls_only=True)
+                self.controller.handle_update.assert_called_once()
+                self.assertEqual(self.controller.handle_update.call_args.args[0]['message']['text'], prefix + '/pause')
+        self.controller.reset_mock()
+        self.store.enqueue_update(update(200, '📊 status'))
+        self.store.enqueue_update(update(201, '/pause'))
+        self.dispatch.process_updates(controls_only=True)
+        self.assertEqual([call.args[0]['update_id'] for call in self.controller.handle_update.call_args_list], [201])
+        self.assertEqual([row[0] for row in self.store.pending_updates()], [200])
+
     def test_chat_backlog_cannot_starve_pause_or_scheduler(self):
         for number in range(1, 10):
             self.store.enqueue_update(update(number))

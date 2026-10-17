@@ -12,6 +12,32 @@ BUTTON_ROWS = (
 BUTTON_COMMANDS = {label: command for row in BUTTON_ROWS for label, command in row}
 
 
+def normalize_owner_text(text):
+    """Exact button labels and Python whitespace rules apply in every lane."""
+    if not isinstance(text, str):
+        return ''
+    text = text.strip()
+    return BUTTON_COMMANDS.get(text, text)
+
+
+def owner_control(update, owner_id, prompt_after=None):
+    if not isinstance(update, dict) or not isinstance(update.get('message'), dict):
+        return False
+    message = update['message']
+    if (not isinstance(message.get('text'), str)
+            or (message.get('from') or {}).get('id') != owner_id
+            or (message.get('chat') or {}).get('id') != owner_id
+            or (message.get('chat') or {}).get('type') != 'private'
+            or any(key in message for key in ('forward_origin', 'forward_from', 'forward_from_chat', 'forward_sender_name'))):
+        return False
+    parts = normalize_owner_text(message['text']).split(maxsplit=1)
+    command = parts[0].split('@', 1)[0].lower() if parts else ''
+    if command in {'/voice_reply', '/image_reply'}:
+        return False
+    return bool(command.startswith('/') or (prompt_after is not None
+        and isinstance(update.get('update_id'), int) and update['update_id'] > prompt_after))
+
+
 def command_keyboard():
     # A fresh value prevents callers from modifying future keyboards.
     return {

@@ -5,7 +5,7 @@ from .latency import record_failure
 from .budget import budget_snapshot
 from .configuration import MAX_LETTA_OUTPUT_TOKENS, ModelConfig, load_model_config
 from .diary import format_diary_entry, parse_diary_command, validate_diary_content
-from .telegram_menu import BUTTON_COMMANDS, HELP_TEXT
+from .telegram_menu import normalize_owner_text, HELP_TEXT
 from .appserver import AppServerClient, LettaTurnError, LettaTurnCancelled
 from .memory import ResearchJournal, validate_memory_text
 from .gmail_tools import GMAIL_TOOL_NAMES
@@ -108,8 +108,7 @@ class Controller:
             return None
         if not isinstance(text, str) or not text.strip():
             return None
-        text = text.strip()
-        text = BUTTON_COMMANDS.get(text, text)
+        text = normalize_owner_text(text)
         command = text.split(maxsplit=1)[0].split("@", 1)[0].lower()
         media_reply_kind = {'/voice_reply': 'voice', '/image_reply': 'image'}.get(command)
         if media_reply_kind:

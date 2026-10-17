@@ -22,10 +22,10 @@ Passing existing tests does not cover these missing scenarios. These are code-le
 | --- | --- | ---: |
 | P0 — Extra high | Immediate uncontrolled loss, unauthorized execution, or equivalent critical behavior | 0 confirmed |
 | P1 — High | Paid-request uncertainty, duplicate-delivery risk, or incorrect spending recovery | 0 |
-| P2 — Medium | Broken supported operations, deployment gaps, or reproducible runtime races | 5 |
+| P2 — Medium | Broken supported operations, deployment gaps, or reproducible runtime races | 4 |
 | P3 — Low | Avoidable inference cost or misleading capability handling | 1 |
 
-No P0 finding was established; the empty category is not a guarantee that none exists. 6 tasks remain open.
+No P0 finding was established; the empty category is not a guarantee that none exists. 5 tasks remain open.
 
 ## P0 — Extra high
 
@@ -61,12 +61,15 @@ No confirmed tasks at this priority.
 
 ### REVIEW-003 — Use one canonical definition of an owner control
 
-- [ ] **Name:** Fix SQL/Python disagreement in control-message routing.
+- [x] **Name:** Fix SQL/Python disagreement in control-message routing.
 - **Short description:** The SQL selector builds its slash/button predicates before normalizing tabs and newlines, while Python strips those characters. SQL also compares buttons case-insensitively, while Python uses an exact button lookup. A newline-prefixed `/pause` is therefore skipped by both processing lanes. A case-variant button can repeatedly occupy the first control candidate and prevent a later `/pause` from reaching its handler while the model worker is busy.
 - **Location:** `prototype/andrewbot/store.py:792–808`; `prototype/andrewbot/dispatch.py:142–170`.
 - **Short fix suggestion:** Share canonical whitespace, command, and button normalization between persistence selection and dispatch classification. Ensure a selected-but-rejected candidate cannot repeatedly block later controls.
 - **Evidence:** Temporary inbox fixture: `"\n/pause"` was classified as a control by Python, selected zero times by SQL, handled zero times, and remained pending. A second fixture with `"📊 status"` followed by `/pause` selected both IDs in SQL but handled neither during control processing.
 - **Acceptance check:** With the model worker blocked, whitespace-prefixed controls and case-variant buttons follow a consistent policy, and a valid later `/pause` executes promptly without draining ordinary chat first.
+
+- **Resolution:** One owner-control classifier and exact button/whitespace normalization now serve SQLite selection, dispatch and controller routing. SQL calls the same Python predicate, preserving owner/forwarding checks, model-command exclusions and time-entry ordering. Case-variant labels remain ordinary chat and cannot starve later controls. The pinned pause test now waits for the actual model worker cleanup rather than the dispatch-step thread.
+- **Verification:** 381 core tests passed (2 optional skips); 83 pinned-fixture script tests passed; 42 installer checks passed. Newline, tab, CRLF and Unicode-whitespace controls and a case-variant label before /pause are covered. Source fixed and tested; production deployment is separate.
 
 ### REVIEW-004 — Install skill assets through every supported deployment path
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from functools import wraps
 from zoneinfo import ZoneInfo
 from .latency import wall_age_seconds
+from .telegram_menu import owner_control
 
 
 def database_locked(method):
@@ -26,6 +27,9 @@ class Store:
         self.path.parent.chmod(0o700)
         self.connection = sqlite3.connect(self.path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
+        self.connection.create_function('andrew_owner_control', 3,
+            lambda payload, owner_id, after: int(owner_control(json.loads(payload), owner_id, after)),
+            deterministic=True)
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA synchronous=FULL")
         self.connection.execute("PRAGMA foreign_keys=ON")
@@ -795,35 +799,14 @@ class Store:
         return [(row["update_id"], json.loads(row["payload"])) for row in rows]
 
     @database_locked
-    def pending_owner_controls(self, owner_id, buttons=(), model_commands=()):
-        text = "lower(trim(COALESCE(json_extract(payload,'$.message.text'),'')))"
-        clauses, values = [f"{text} GLOB '/*'"], [owner_id, owner_id]
-        for button in buttons:
-            clauses.append(f'{text}=?')
-            values.append(button.lower())
-        if self.get_state('telegram_wake_prompt_until', ''):
-            clauses.append('update_id>?')
-            values.append(int(self.get_state('telegram_wake_prompt_after_update_id', '-1')))
-        exclusion = ''
-        if model_commands:
-            for whitespace in (9, 10, 11, 12, 13):
-                text = f"replace({text},char({whitespace}),' ')"
-            text = f'trim({text})'
-            command = f"substr({text},1,instr({text} || ' ',' ')-1)"
-            base_command = f"substr({command},1,instr({command} || '@','@')-1)"
-            exclusion = f"AND {base_command} NOT IN ({','.join('?' for _ in model_commands)}) "
-            values.extend(model_commands)
+    def pending_owner_controls(self, owner_id):
+        prompt_after = (int(self.get_state('telegram_wake_prompt_after_update_id', '-1'))
+                        if self.get_state('telegram_wake_prompt_until', '') else None)
         rows = self.connection.execute(
-            "SELECT update_id,payload FROM telegram_inbox WHERE "
-            "json_extract(payload,'$.message.from.id')=? AND json_extract(payload,'$.message.chat.id')=? "
-            "AND json_extract(payload,'$.message.chat.type')='private' "
-            "AND json_type(payload,'$.message.forward_origin') IS NULL "
-            "AND json_type(payload,'$.message.forward_from') IS NULL "
-            "AND json_type(payload,'$.message.forward_from_chat') IS NULL "
-            "AND json_type(payload,'$.message.forward_sender_name') IS NULL "
-            "AND json_type(payload,'$.message.text')='text' "
-            "AND update_id NOT IN (SELECT update_id FROM telegram_claims) AND (" + ' OR '.join(clauses) + ') ' +
-            exclusion + "ORDER BY update_id LIMIT 50", values).fetchall()
+            "SELECT update_id,payload FROM telegram_inbox "
+            "WHERE andrew_owner_control(payload,?,?) "
+            "AND update_id NOT IN (SELECT update_id FROM telegram_claims) "
+            "ORDER BY update_id LIMIT 50", (owner_id, prompt_after)).fetchall()
         return [(row['update_id'], json.loads(row['payload'])) for row in rows]
 
     @database_locked

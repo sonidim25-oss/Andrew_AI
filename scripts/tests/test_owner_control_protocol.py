@@ -113,7 +113,15 @@ class OwnerControlProtocolTests(unittest.TestCase):
                                                              'text': '/pause'}}])
                         self.assertTrue(notification.wait(2), 'owner pause waited for model completion')
                         worker.join(2)
-                        self.assertFalse(worker.is_alive(), 'cancel did not interrupt the WebSocket wait')
+                        self.assertFalse(worker.is_alive(), 'dispatch step did not return')
+                        # Model work now runs on its own worker. A delivered
+                        # pause reply is not acknowledgement of worker cleanup.
+                        cleanup_deadline = time.monotonic() + 2
+                        while (dispatch.health_snapshot()['model']['state'] == 'running'
+                               and time.monotonic() < cleanup_deadline):
+                            time.sleep(.01)
+                        self.assertNotEqual(dispatch.health_snapshot()['model']['state'], 'running',
+                                            'cancel did not interrupt the WebSocket wait')
                         self.assertFalse(release.is_set(), 'provider completed before pause was proved')
                         self.assertEqual(store.get_state('paused'), '1')
                         self.assertEqual(store.get_state('active_session_status'), 'paused')
