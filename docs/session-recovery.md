@@ -18,7 +18,7 @@ arguments, results, and exception text are not copied into this ledger.
 | Last durable phase | Restart behavior |
 | --- | --- |
 | `prepared` | Close the unstarted cycle as stopped and retain the active session. The next scheduler pass can continue without `/wake`. |
-| `model_started` | Hold the session as interrupted. The controller cannot prove what the model or tools completed. |
+| `model_started` | Recover only if the new bound protocol completion receipt below proves the whole turn ended; otherwise hold as interrupted. |
 | `model_confirmed` | Close the cycle as complete without executing its model turn or tools again. Continue the same session on the next permitted scheduler pass. |
 | No checkpoint, including legacy cycles | Hold the interrupted session. Migration does not invent a checkpoint. |
 
@@ -118,3 +118,49 @@ exit, SQLite reopen, confirmed-turn continuation, pending owner input, permissio
 revocation, grant changes, missing/ambiguous/mismatched evidence, malformed
 responses, receipt-storage failure, duplicate admission, and worker shutdown.
 No test sends real mail, calls a paid model, or modifies an existing mailbox.
+
+
+## Bound model-turn completion receipts
+
+The third P0 increment closes the gap between Letta finishing a turn and the
+controller saving `model_confirmed`. A final-history fetch, socket failure, or
+controller crash in this gap previously looked like unfinished inference.
+
+For new autonomous turns, the controller persists the cycle/session identity,
+owner revision, Letta agent/conversation IDs, input request ID, and client message
+ID **before** dispatch. The input supplies its request ID as Letta's
+`terminal_consumer_id`. Matching input acceptance is recorded separately.
+A completion receipt is committed immediately on a whole-turn `turn_finished`
+event with `end_turn`, the matching consumer, nonempty run/terminal IDs, and
+observed assistant message IDs. Stream errors, intermediate step stops,
+`requires_approval`, cancellation, output exhaustion, old terminal events, and
+unacknowledged inputs cannot establish completion. Receipts contain identities
+and states, not prompts, assistant text, hidden reasoning, or error bodies.
+When Letta supplies a durable terminal acknowledgement key, the controller
+acknowledges it only after committing the receipt.
+
+On restart, or after a failed final-text fetch in the same process, a valid
+receipt can advance `model_started` to `model_confirmed`. Recovery still checks
+session/conversation identity and owner revision, preserves pause/sleep/restore
+states and existing errors, and requires settled provider, tool, and delivery
+state before continuing. An uncertain Gmail action can enter the existing
+read-only reconciliation hold. Another unsettled effect remains held. The next
+turn uses the original saved Letta conversation and the controller recovery
+receipt; the previous input and its tools are not replayed.
+
+This covers a controller interruption **after proven model completion**. A
+model still running, an unreceived terminal event, a partial or compacted
+transcript, an idle listener, and legacy turns without these receipts remain
+insufficient evidence. This increment does not poll, resume, or abort unknown
+backend runs during recovery, and it does not release held owner messages or
+billing reservations. Recovery of genuinely unfinished model runs remains a
+separate P0 task.
+
+The pinned local Letta protocol fixture verifies real input acceptance and
+consumer-bound terminal events, injects failure into the final-history fetch,
+and checks that one subsequent turn preserves the original assistant message
+without repeating the completed input. Offline fixtures also cover abrupt
+process exit, reopened SQLite, false terminal evidence, owner overrides, missing
+receipts, uncertain provider/tools, priority owner input, and the Gmail hold.
+`diagnose-session.py --current --brief` now includes model receipt identities and
+states. None of these tests contact real providers or send external messages.

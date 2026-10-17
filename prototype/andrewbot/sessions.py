@@ -52,6 +52,7 @@ class SessionRunner:
                 except (TypeError, ValueError):
                     pass
                 else:
+                    self.store.promote_completed_model_turn(previous)
                     recovered = (self.store.action_hold_valid(previous)
                                  or self.store.hold_pending_session_actions(previous)
                                  or self.store.recover_confirmed_session(previous))
@@ -224,6 +225,13 @@ class SessionRunner:
                 self.active_session_id = ''
                 self.started_at = None
                 return False
+            try:
+                if cycle_started and stage == 'agent_turn' and self.store.promote_completed_model_turn(session_id):
+                    if (self.store.hold_confirmed_actions(session_id, cycle_id)
+                            or self.store.recover_confirmed_session(session_id)):
+                        return False
+            except Exception:
+                logging.warning('Completed-turn recovery could not be persisted; retaining failure handling')
             # Use fixed categories: exception messages can contain credentials,
             # provider payloads, or private conversation content.
             category = "unexpected_error"

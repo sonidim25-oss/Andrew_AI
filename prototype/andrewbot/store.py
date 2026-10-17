@@ -220,6 +220,21 @@ class Store:
                 activity_id INTEGER NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS model_turn_receipts (
+                cycle_id TEXT PRIMARY KEY REFERENCES cycles(cycle_id),
+                session_id TEXT NOT NULL,
+                owner_revision TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                request_id TEXT NOT NULL UNIQUE,
+                client_message_id TEXT NOT NULL,
+                state TEXT NOT NULL CHECK(state IN ('prepared','accepted','completed')),
+                run_id TEXT NOT NULL DEFAULT '',
+                terminal_id TEXT NOT NULL DEFAULT '',
+                assistant_ids TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS cycle_tool_attempts (
                 attempt_id TEXT PRIMARY KEY,
                 cycle_id TEXT NOT NULL REFERENCES cycles(cycle_id),
@@ -928,6 +943,72 @@ class Store:
             )
             if cursor.rowcount != 1:
                 raise ValueError('cycle checkpoint is missing or out of order')
+
+    @database_locked
+    def record_model_turn_receipt(self, session_id, cycle_id, runtime, event):
+        """Only the protocol bridge supplies these events; never store input text."""
+        with self.connection:
+            if event['kind'] == 'prepared':
+                checkpoint = self.connection.execute(
+                    'SELECT k.owner_revision FROM cycle_recovery_checkpoints k JOIN cycles c ON c.cycle_id=k.cycle_id '
+                    "WHERE c.cycle_id=? AND c.session_id=? AND c.status='running' AND k.phase='model_started'",
+                    (cycle_id, session_id)).fetchone()
+                if (checkpoint is None or self.get_state('active_session_id', '') != session_id
+                        or self.get_state('active_cycle_id', '') != cycle_id
+                        or checkpoint['owner_revision'] != self.get_state('owner_control_revision', '0')):
+                    raise ValueError('Model input has no current cycle admission')
+                self.connection.execute(
+                    "INSERT INTO model_turn_receipts(cycle_id,session_id,owner_revision,agent_id,conversation_id,request_id,client_message_id,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'prepared',?,?)",
+                    (cycle_id, session_id, checkpoint['owner_revision'], runtime['agent_id'], runtime['conversation_id'],
+                     event['request_id'], event['client_message_id'], self.now(), self.now()))
+                return True
+            row = self.connection.execute('SELECT * FROM model_turn_receipts WHERE cycle_id=? AND session_id=? AND request_id=?',
+                (cycle_id, session_id, event['request_id'])).fetchone()
+            if (row is None or row['agent_id'] != runtime['agent_id'] or row['conversation_id'] != runtime['conversation_id']):
+                raise ValueError('Model receipt identity does not match admission')
+            if event['kind'] == 'accepted' and row['state'] == 'prepared':
+                self.connection.execute("UPDATE model_turn_receipts SET state='accepted',updated_at=? WHERE cycle_id=?", (self.now(), cycle_id))
+                return True
+            if event['kind'] == 'completed' and row['state'] == 'accepted':
+                terminal = event['terminal']
+                valid_id = lambda value: isinstance(value, str) and 0 < len(value) <= 256 and all(c.isascii() and (c.isalnum() or c in '._~:%-') for c in value)
+                consumers = terminal.get('terminal_consumer_ids')
+                if (terminal.get('type') != 'turn_finished' or terminal.get('stop_reason') != 'end_turn'
+                        or terminal.get('error') or not valid_id(terminal.get('run_id')) or not valid_id(terminal.get('turn_id'))
+                        or not isinstance(consumers, list) or row['request_id'] not in consumers):
+                    return False
+                ids = event.get('assistant_ids', [])
+                if not isinstance(ids, list) or not ids or len(ids) > 256 or not all(valid_id(value) for value in ids):
+                    return False
+                self.connection.execute("UPDATE model_turn_receipts SET state='completed',run_id=?,terminal_id=?,assistant_ids=?,updated_at=? WHERE cycle_id=?",
+                    (terminal['run_id'], terminal['turn_id'], json.dumps(ids), self.now(), cycle_id))
+                return True
+            return False
+
+    @database_locked
+    def promote_completed_model_turn(self, session_id):
+        """Bridge the crash gap after a bound terminal receipt, without inference."""
+        with self.connection:
+            cycle_id = self.get_state('active_cycle_id', '')
+            row = self.connection.execute(
+                'SELECT r.*,k.phase,k.owner_revision AS checkpoint_revision FROM model_turn_receipts r '
+                'JOIN cycle_recovery_checkpoints k ON k.cycle_id=r.cycle_id JOIN cycles c ON c.cycle_id=r.cycle_id '
+                "WHERE r.cycle_id=? AND r.session_id=? AND r.state='completed' AND c.session_id=? AND c.status='running'",
+                (cycle_id, session_id, session_id)).fetchone()
+            if (row is None or row['phase'] != 'model_started'
+                    or not session_id or self.get_state('active_session_id', '') != session_id
+                    or self.get_state('active_session_status', '') != 'running'
+                    or self.get_state('autonomy_error', '')
+                    or row['owner_revision'] != self.get_state('owner_control_revision', '0')
+                    or row['checkpoint_revision'] != row['owner_revision']
+                    or row['agent_id'] != self.get_state('letta_agent_id', '')
+                    or row['conversation_id'] != self.get_state('letta_conversation_id', '')
+                    or any(self.get_state(key, '0') == '1' for key in ('paused','sleeping','restore_recovery_required'))):
+                return False
+            self.checkpoint_cycle_turn(cycle_id, 'model_confirmed')
+            self.connection.execute('INSERT INTO activity(event,created_at) VALUES(?,?)',
+                ('Model turn completion recovered from bound protocol receipt; no input or tool replayed', self.now()))
+            return True
 
     @database_locked
     def begin_cycle_tool(self, context, name):

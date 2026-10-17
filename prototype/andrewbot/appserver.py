@@ -406,11 +406,16 @@ class AppServerClient:
     def send_user_turn(self, runtime, text, tool_handler=None, timeout=120):
         history_sink = getattr(self, 'history_sink', None)
         input_request_id = uuid.uuid4().hex
+        client_message_id = uuid.uuid4().hex
+        receipt_sink = getattr(self, 'turn_receipt_sink', None)
+        if receipt_sink:
+            receipt_sink({'kind': 'prepared', 'request_id': input_request_id, 'client_message_id': client_message_id})
         self.connection.send_json({
             "type": "input", "request_id": input_request_id, "runtime": runtime,
+            **({"terminal_consumer_id": input_request_id} if receipt_sink else {}),
             "payload": {
                 "kind": "create_message",
-                "messages": [{"role": "user", "content": text, "client_message_id": uuid.uuid4().hex}],
+                "messages": [{"role": "user", "content": text, "client_message_id": client_message_id}],
                 # Letta applies this allowlist to external controller tools too.
                 "client_tool_allowlist": sorted(self.tool_names) if tool_handler else [],
                 "client_toolset": {"base": "none", "include": []},
@@ -456,6 +461,8 @@ class AppServerClient:
             if event.get('type') == 'input_accepted' and event.get('request_id') == input_request_id:
                 if not event.get('accepted'):
                     raise LettaTurnError('turn_failed', source='input_rejected')
+                if receipt_sink and event.get('accepted') is True:
+                    receipt_sink({'kind': 'accepted', 'request_id': input_request_id})
                 input_accepted = True
                 continue
             if not input_accepted:
@@ -484,6 +491,9 @@ class AppServerClient:
                 # A model-step stop (including requires_approval) precedes
                 # controller callbacks. Only turn_finished ends the whole turn.
             if event.get("type") == "turn_finished":
+                consumers = event.get('terminal_consumer_ids')
+                if isinstance(consumers, list) and input_request_id not in consumers:
+                    continue
                 final_stop_reason = event.get('stop_reason')
                 if event.get("stop_reason") == "max_tokens_exceeded":
                     output_limit = True
@@ -498,6 +508,13 @@ class AppServerClient:
                     # was queued. Owner cancellation interrupts our socket;
                     # an unrelated cancellation is not this input's answer.
                     continue
+                if (receipt_sink and not (failure or provider_uncertain or owner_pending or tools_disallowed or output_limit)
+                        and event.get('stop_reason') == 'end_turn'):
+                    persisted = receipt_sink({'kind': 'completed', 'request_id': input_request_id,
+                        'terminal': event, 'assistant_ids': sorted(assistant_message_ids)})
+                    if persisted and isinstance(event.get('idempotency_key'), str) and event['idempotency_key']:
+                        self.connection.send_json({'type': 'turn_finished_ack', 'runtime': runtime,
+                            'idempotency_key': event['idempotency_key'], 'consumer_id': input_request_id})
                 break
             if event.get("type") == "external_tool_call_request":
                 if tool_handler is None:
@@ -816,6 +833,10 @@ class LettaAgent:
                 raise LettaTurnCancelled('Owner cancelled this turn')
             self.conversation_id = runtime["conversation_id"]
             self.store.set_state("letta_conversation_id", self.conversation_id)
+            if origin == 'autonomous' and self.store.get_state('active_cycle_id', ''):
+                receipt_session = self.store.get_state('active_session_id', '')
+                receipt_cycle = self.store.get_state('active_cycle_id', '')
+                client.turn_receipt_sink = lambda event: self.store.record_model_turn_receipt(receipt_session, receipt_cycle, runtime, event)
             if type(self.owner_id) is int:
                 client.history_sink = SessionHistory(
                     self.store, self.owner_id, session_id=self.store.get_state('active_session_id', ''),
