@@ -17,6 +17,27 @@ from andrewbot.store import Store
 
 
 class AppServerWebSocketTests(unittest.TestCase):
+    def test_owner_reply_has_no_total_deadline_and_explicit_deadline_is_preserved(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / 'state.db')
+            self.addCleanup(store.close)
+            for kwargs, expected_timeout in (({}, None), ({'timeout': 3}, 3)):
+                with self.subTest(kwargs=kwargs):
+                    client = Mock()
+                    runtime = {'agent_id': 'a', 'conversation_id': 'c'}
+                    client.start_runtime.return_value = runtime
+                    client.send_user_turn.return_value = 'Completed after tool rounds.'
+                    agent = LettaAgent(store, 'fixture-token')
+                    agent.agent_id = 'a'
+                    with patch('andrewbot.appserver.AppServerClient', return_value=client), \
+                         patch('andrewbot.appserver.gmail_permissions', return_value={'enabled': False}):
+                        reply, _ = agent.reply([{'role': 'user', 'content': 'fixture input'}], **kwargs)
+                    self.assertEqual(reply, 'Completed after tool rounds.')
+                    client.send_user_turn.assert_called_once_with(
+                        runtime, 'fixture input', tool_handler=None, timeout=expected_timeout)
+                    self.assertIsNone(agent._turn_cancel)
+
     def test_active_backend_run_has_a_safe_explicit_category(self):
         from unittest.mock import Mock
         client = AppServerClient.__new__(AppServerClient)
