@@ -254,6 +254,15 @@ twice, verifies no runtime attachment/input/abort/tool response and no extra
 provider request, preserves owner controls and queued inputs, and then lets only
 the original run complete. All provider responses are local fixtures.
 
+A follow-up [local backend investigation](letta-unfinished-recovery-investigation.md)
+confirmed a further constraint in that pinned bundle: the interrupted-work writer
+and recorded-turn recovery loop require `conn-` listener identities, while the
+local App Server uses `app-server` identities. A real isolated backend-kill probe
+preserved a bound `started` input and saved tool-call identity without producing
+an interrupted-work journal. Local run/ownership support is therefore a backend
+prerequisite; more metadata alone does not authorize resume. The proposed backend
+contract remains unimplemented. No production input was replayed.
+
 ## Read-only administrator journal metadata
 
 The optional diagnostic reads local recovery files directly, without importing
@@ -300,3 +309,34 @@ If the selected session has no controller input receipts, the diagnostic returns
 open the Letta home. An empty record list in that case cannot establish that SDK
 journals are empty. This includes legacy sessions: installing new receipt code
 does not manufacture proof for earlier inputs.
+
+## Confirmed image and voice deliveries
+
+The media recovery update adds `media_delivery_receipts`. Before an
+upload, the job records a fresh delivery attempt and the intended owner chat.
+After Telegram returns a valid positive message ID, the worker separately
+commits a receipt binding that attempt, job, recipient, media kind/MIME, artifact
+hash and job digest. The receipt stores a hash of Telegram's file identity,
+without the prompt, media bytes or reusable Telegram file ID.
+
+Startup reconciles matching receipts before session recovery evaluates unsettled
+media. A crash after the receipt commit but before local acknowledgement can
+therefore finish delivery without uploading or generating again. Reconciliation
+does not call Telegram or the provider. During ordinary operation it handles
+held deliveries only; it leaves active senders alone. The restore-reconciliation
+flag blocks it, and existing owner pause/sleep controls remain in force.
+
+Responses with a different chat or missing/wrong media, stale attempts, changed
+content and mismatched receipt bindings cannot confirm delivery. Legacy sends,
+timeouts without a saved positive response and receipt-storage failures remain
+uncertain without retry. This does not recover unknown generation charges,
+provider outcomes or avatar publication. A confirmed delivery also does not
+establish completion of an unfinished model turn.
+
+The explicitly approved sample script uses the same receipt contract.
+`diagnose-session.py --current --brief` includes recent media receipt metadata
+without reading media files or dispatching an action. Offline tests cover SQLite
+reopen, abrupt process exit between receipt commit and acknowledgement, stale
+identity/content/recipient rejection, restore holds and suppression of repeated
+generation/uploads. The owner confirmed deployment on 2026-10-18; this records
+that confirmation, not a fresh live-service inspection.
