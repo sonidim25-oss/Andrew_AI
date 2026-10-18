@@ -1,3 +1,4 @@
+from telegram_fixture import sent_media
 from dataclasses import replace
 import json
 from unittest.mock import Mock, patch
@@ -23,7 +24,7 @@ class AutonomousMediaTests(MediaCase):
         png = (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0))
                + chunk(b'IDAT', zlib.compress(b'\0\xff\0\0')) + chunk(b'IEND', b''))
         provider, telegram = Mock(), Mock()
-        telegram.send_media.return_value = {'message_id': 7}
+        telegram.send_media.side_effect = lambda chat, data, mime: sent_media(chat, mime, 7)
         worker = MediaWorker(self.media, provider, telegram)
         for kind, data, mime in (('voice', b'ID3' + bytes(40), 'audio/mpeg'), ('image', png, 'image/png')):
             args = {'text': 'Something I chose to share', 'request_id': kind + '-choice-1'}

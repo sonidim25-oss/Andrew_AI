@@ -242,6 +242,7 @@ def run(validate_only=False):
         store, memory_backup_key, root / "backups", validate_only=False
     )
     sessions = SessionRunner(store, controller, agent, enabled=autonomous_enabled)
+    media.reconcile_deliveries(startup=True)
     store.reconcile_telegram_receipts(owner_id, startup=True)
     sessions.recover()
     interrupted_messages = store.recover_queued_claims()

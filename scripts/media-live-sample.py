@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import uuid
 from urllib.request import urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'prototype'))
@@ -74,12 +75,19 @@ def main():
             row = media.job(job)
             if row['state'] == 'succeeded' and row['delivery'] == 'pending':
                 with store._lock, store.connection:
-                    claimed = store.connection.execute("UPDATE media_jobs SET delivery='sending' WHERE id=? AND delivery='pending'", (job,)).rowcount
+                    store.connection.execute('BEGIN IMMEDIATE')
+                    claimed = store.connection.execute("""UPDATE media_jobs
+                        SET delivery='sending',delivery_attempt=?,delivery_chat_id=?
+                        WHERE id=? AND delivery='pending' AND NOT EXISTS
+                        (SELECT 1 FROM media_delivery_receipts WHERE job_id=media_jobs.id)""",
+                        (uuid.uuid4().hex, owner_id, job)).rowcount
+                    row = media.job(job)
                 if claimed:
                     try:
                         caption = 'Approved sample: ' + ('Eleven v3 / George' if kind == 'voice' else 'GPT Image 1 Mini / low quality')
                         result = telegram.send_media(owner_id, media.artifact(row), row['mime'], caption=caption)
-                        media.acknowledge(job, result['message_id'])
+                        message_id = media.save_delivery_receipt(row, result)
+                        media.acknowledge(job, message_id)
                     except Exception as error:
                         media.hold_delivery(job, error)
             row = media.job(job)

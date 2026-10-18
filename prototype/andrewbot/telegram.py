@@ -47,6 +47,26 @@ def validate_sent_text(result, chat_id, text):
     return result['message_id']
 
 
+def validate_sent_media(result, chat_id, mime):
+    if (not isinstance(result, dict) or type(result.get('message_id')) is not int
+            or result['message_id'] <= 0 or not isinstance(result.get('chat'), dict)
+            or type(result['chat'].get('id')) is not int or result['chat']['id'] != chat_id):
+        raise TelegramMediaError('invalid_response')
+    if mime == 'audio/mpeg':
+        files = [result.get('voice')]
+    elif mime in {'image/png', 'image/jpeg'}:
+        files = result.get('photo')
+    else:
+        raise TelegramMediaError('invalid_response')
+    if not isinstance(files, list) or not 1 <= len(files) <= 32:
+        raise TelegramMediaError('invalid_response')
+    for file in files:
+        if not isinstance(file, dict) or any(not isinstance(file.get(key), str)
+                or not 1 <= len(file[key]) <= 1024 for key in ('file_id', 'file_unique_id')):
+            raise TelegramMediaError('invalid_response')
+    return result['message_id'], files[-1]['file_unique_id']
+
+
 def deliver_saved_message(telegram, store, kind, record_id, chat_id, text,
                           previously_attempted=False, should_stop=lambda: False):
     progress = store.prepare_telegram_delivery(kind, record_id, text, previously_attempted)
@@ -115,9 +135,11 @@ class TelegramAPI:
         if mime not in {'audio/mpeg', 'image/png', 'image/jpeg'} or not isinstance(data, bytes) or not 0 < len(data) <= 8 * 1024 * 1024:
             raise ValueError('Invalid Telegram media')
         voice = mime == 'audio/mpeg'
-        return self._upload('sendVoice' if voice else 'sendPhoto',
+        result = self._upload('sendVoice' if voice else 'sendPhoto',
                             {'chat_id': str(chat_id), **({'caption': caption[:1000]} if caption else {})},
                             'voice' if voice else 'photo', data, mime)
+        validate_sent_media(result, chat_id, mime)
+        return result
 
     def set_profile_photo(self, jpeg):
         if not isinstance(jpeg, bytes) or not jpeg.startswith(b'\xff\xd8') or len(jpeg) > 2 * 1024 * 1024:

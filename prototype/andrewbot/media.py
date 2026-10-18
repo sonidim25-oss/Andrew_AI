@@ -12,7 +12,7 @@ from contextvars import ContextVar
 MEDIA_AUTHORIZATION = ContextVar("media_owner_authorization", default=None)
 from datetime import datetime, timezone
 from pathlib import Path
-from .telegram import TelegramMediaError
+from .telegram import TelegramMediaError, validate_sent_media
 
 
 def validate_png(data):
@@ -124,7 +124,18 @@ class MediaService:
                     id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES media_jobs(id),
                     state TEXT NOT NULL DEFAULT 'proposed', created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS media_delivery_receipts (
+                    attempt_id TEXT PRIMARY KEY, job_id TEXT UNIQUE NOT NULL REFERENCES media_jobs(id),
+                    chat_id INTEGER NOT NULL, kind TEXT NOT NULL, mime TEXT NOT NULL,
+                    artifact_sha TEXT NOT NULL, job_digest TEXT NOT NULL,
+                    message_id INTEGER NOT NULL, file_identity_sha TEXT NOT NULL, confirmed_at TEXT NOT NULL
+                );
             ''')
+            store.connection.execute('BEGIN IMMEDIATE')
+            columns = {row[1] for row in store.connection.execute('PRAGMA table_info(media_jobs)')}
+            for name, definition in (('delivery_attempt', "TEXT NOT NULL DEFAULT ''"), ('delivery_chat_id', 'INTEGER')):
+                if name not in columns:
+                    store.connection.execute('ALTER TABLE media_jobs ADD COLUMN ' + name + ' ' + definition)
 
     @staticmethod
     def now():
@@ -263,6 +274,7 @@ class MediaService:
 
     def recover(self):
         with self.store._lock, self.store.connection:
+            self._reconcile_deliveries_locked(startup=True)
             self.store.connection.execute("UPDATE media_jobs SET state='uncertain',error='interrupted' WHERE state='running'")
             sending = self.store.connection.execute("SELECT id FROM media_jobs WHERE state='succeeded' AND delivery='sending'").fetchall()
             for row in sending:
@@ -330,16 +342,62 @@ class MediaService:
             return None
         with self.store._lock, self.store.connection:
             self.store.connection.execute('BEGIN IMMEDIATE')
-            row = self.store.connection.execute("SELECT * FROM media_jobs WHERE state='succeeded' AND delivery='pending' ORDER BY created_at,id LIMIT 1").fetchone()
+            row = self.store.connection.execute("""SELECT * FROM media_jobs WHERE state='succeeded' AND delivery='pending'
+                AND NOT EXISTS (SELECT 1 FROM media_delivery_receipts r WHERE r.job_id=media_jobs.id)
+                ORDER BY created_at,id LIMIT 1""").fetchone()
             if row:
-                self.store.connection.execute("UPDATE media_jobs SET delivery='sending' WHERE id=?", (row['id'],))
+                self.store.connection.execute("UPDATE media_jobs SET delivery='sending',delivery_attempt=?,delivery_chat_id=? WHERE id=?",
+                                              (uuid.uuid4().hex, self.owner_id, row['id']))
+                row = self.store.connection.execute('SELECT * FROM media_jobs WHERE id=?', (row['id'],)).fetchone()
             return dict(row) if row else None
+
+    def save_delivery_receipt(self, row, result):
+        message_id, file_identity = validate_sent_media(result, self.owner_id, row['mime'])
+        if not row.get('delivery_attempt') or row.get('delivery_chat_id') != self.owner_id:
+            raise ValueError('Media delivery admission is missing')
+        with self.store._lock, self.store.connection:
+            current = self.store.connection.execute('SELECT * FROM media_jobs WHERE id=?', (row['id'],)).fetchone()
+            if (current is None or current['state'] != 'succeeded' or current['delivery'] != 'sending'
+                    or any(current[key] != row[key] for key in
+                           ('delivery_attempt', 'delivery_chat_id', 'kind', 'mime', 'artifact_sha', 'digest'))):
+                raise ValueError('Media delivery admission changed')
+            self.store.connection.execute('''INSERT INTO media_delivery_receipts
+                (attempt_id,job_id,chat_id,kind,mime,artifact_sha,job_digest,message_id,file_identity_sha,confirmed_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?)''', (row['delivery_attempt'], row['id'], self.owner_id, row['kind'],
+                row['mime'], row['artifact_sha'], row['digest'], message_id,
+                hashlib.sha256(file_identity.encode()).hexdigest(), self.now()))
+        return message_id
+
+    def _reconcile_deliveries_locked(self, *, startup=False):
+        if self.store.get_state('restore_recovery_required', '0') == '1':
+            return 0
+        states = "('sending','uncertain')" if startup else "('uncertain')"
+        return self.store.connection.execute('''UPDATE media_jobs SET delivery='delivered',
+            telegram_message_id=(SELECT r.message_id FROM media_delivery_receipts r WHERE r.job_id=media_jobs.id),
+            error=CASE WHEN error LIKE 'delivery_%' THEN NULL ELSE error END, updated_at=?
+            WHERE state='succeeded' AND delivery IN ''' + states + ''' AND EXISTS (
+                SELECT 1 FROM media_delivery_receipts r WHERE r.job_id=media_jobs.id
+                AND r.attempt_id=media_jobs.delivery_attempt AND r.chat_id=media_jobs.delivery_chat_id
+                AND r.chat_id=? AND r.kind=media_jobs.kind AND r.mime=media_jobs.mime
+                AND r.artifact_sha=media_jobs.artifact_sha AND r.job_digest=media_jobs.digest
+                AND r.message_id>0)''', (self.now(), self.owner_id)).rowcount
+
+    def reconcile_deliveries(self, *, startup=False):
+        with self.store._lock, self.store.connection:
+            return self._reconcile_deliveries_locked(startup=startup)
 
     def acknowledge(self, job_id, message_id):
         with self.store._lock, self.store.connection:
-            self.store.connection.execute("UPDATE media_jobs SET delivery='delivered',telegram_message_id=?,updated_at=? WHERE id=? AND delivery='sending'", (message_id, self.now(), job_id))
+            proof = self.store.connection.execute('SELECT message_id FROM media_delivery_receipts WHERE job_id=?', (job_id,)).fetchone()
+            if proof is None or type(message_id) is not int or proof['message_id'] != message_id:
+                raise ValueError('Media delivery confirmation is missing')
+            self._reconcile_deliveries_locked(startup=True)
+            row = self.store.connection.execute('SELECT delivery,telegram_message_id FROM media_jobs WHERE id=?', (job_id,)).fetchone()
+            if row is None or row['delivery'] != 'delivered' or row['telegram_message_id'] != message_id:
+                raise ValueError('Media delivery confirmation no longer matches')
 
     def _hold_delivery_locked(self, job_id, category, http_status=None):
+        self._reconcile_deliveries_locked(startup=True)
         allowed = TelegramMediaError.CATEGORIES | {'interrupted'}
         category = category if category in allowed else 'unexpected_error'
         status = http_status if type(http_status) is int and 100 <= http_status <= 599 else None
@@ -466,7 +524,7 @@ class MediaWorker:
             return False
         statements = {
             'generation': "UPDATE media_jobs SET state='queued' WHERE id=? AND state='running'",
-            'delivery': "UPDATE media_jobs SET delivery='pending' WHERE id=? AND delivery='sending'",
+            'delivery': "UPDATE media_jobs SET delivery='pending',delivery_attempt='',delivery_chat_id=NULL WHERE id=? AND delivery='sending'",
             'avatar': "UPDATE media_avatar_proposals SET state='approved' WHERE id=? AND state='applying'",
         }
         with self.service.store._lock, self.service.store.connection:
@@ -510,7 +568,8 @@ class MediaWorker:
                 if self._stop_before_attempt(row['id'], 'delivery'):
                     return
                 result = self.telegram.send_media(self.service.owner_id, data, row['mime'])
-                self.service.acknowledge(row['id'], result['message_id'])
+                message_id = self.service.save_delivery_receipt(row, result)
+                self.service.acknowledge(row['id'], message_id)
             except Exception as error:
                 self.service.hold_delivery(row['id'], error)
 

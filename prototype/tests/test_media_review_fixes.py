@@ -1,3 +1,4 @@
+from telegram_fixture import sent_media
 """Regressions for the owner's selected media review repairs (2, 3, 4)."""
 import json
 from pathlib import Path
@@ -31,14 +32,15 @@ class MediaReviewCase(unittest.TestCase):
         self.provider = Mock()
         self.provider.generate.return_value = (b'ID3' + bytes(40), 'audio/mpeg', .001)
         self.telegram = Mock()
-        self.telegram.send_media.return_value = {'message_id': 10}
+        self.telegram.send_media.side_effect = lambda chat, data, mime: sent_media(chat, mime, 10)
         self.worker = MediaWorker(self.media, self.provider, self.telegram)
 
     def saved_image(self, key='image'):
         job = self.media.submit('image', 'a cat', key, owner_requested=True)
         self.media.claim()
         self.media.complete(job, png_fixture(), 'image/png', .001)
-        self.media.claim_delivery()
+        delivery = self.media.claim_delivery()
+        self.media.save_delivery_receipt(delivery, sent_media(42, delivery['mime'], 9))
         self.media.acknowledge(job, 9)
         return job
 

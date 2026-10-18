@@ -15,7 +15,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = 'd325230'
-UPGRADE_BASES = ('2faba07', 'c68e128', '0afe2f9', '3ffd87e', '045f7f8', '747ec6b', 'e3af2cd', '387162e', '8f3dc4d', '6d91b06', '0959c63', '5127ce2', '45ab856', 'eb80f5f', '1f60d34', '9e5d3df', 'b0a3439', '40418d9')
+UPGRADE_BASES = ('d02477b', '2faba07', 'c68e128', '0afe2f9', '3ffd87e', '045f7f8', '747ec6b', 'e3af2cd', '387162e', '8f3dc4d', '6d91b06', '0959c63', '5127ce2', '45ab856', 'eb80f5f', '1f60d34', '9e5d3df', 'b0a3439', '40418d9')
 TARGET = Path('/opt/andrew/prototype/andrewbot')
 DROPIN = Path('/etc/systemd/system/andrew-control.service.d/zz-autonomy-media.conf')
 MODULES = ('configuration.py', 'appserver.py', 'budget.py', 'controller.py', 'gateway.py', 'lifecycle_policy.py',

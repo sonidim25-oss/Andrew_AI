@@ -316,6 +316,8 @@ class Controller:
                 for key in ('paused', 'sleeping', 'restore_recovery_required')):
             return
         self.store.reconcile_telegram_receipts(self.owner_id)
+        if self.media is not None:
+            self.media.reconcile_deliveries()
         if self.gmail_tools is not None:
             self.gmail_tools.reconcile_pending()
 

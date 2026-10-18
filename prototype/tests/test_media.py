@@ -1,3 +1,4 @@
+from telegram_fixture import sent_media
 import tempfile
 import unittest
 from pathlib import Path
@@ -87,7 +88,7 @@ class ProviderTests(unittest.TestCase):
         class Response:
             def __enter__(self): return self
             def __exit__(self, *args): pass
-            def read(self, *args): return json.dumps({'ok': True, 'result': {'message_id': 7}}).encode()
+            def read(self, *args): return json.dumps({'ok': True, 'result': sent_media(42, 'audio/mpeg', 7)}).encode()
         def opener(request, timeout):
             calls.append(request)
             return Response()
@@ -119,7 +120,7 @@ class ControllerMediaTests(MediaCase):
             def __init__(self): self.calls = 0
             def send_media(self, *args):
                 self.calls += 1
-                return {'message_id': 19}
+                return sent_media(42, 'audio/mpeg', 19)
         telegram = Telegram()
         worker = MediaWorker(self.media, Provider(), telegram)
         self.media.submit('voice', 'hello', 'a', owner_requested=True)
@@ -141,7 +142,8 @@ class AvatarTests(MediaCase):
         self.media.complete(job, image, 'image/png', .01)
         with self.assertRaises(ValueError):
             self.media.propose_avatar(job)
-        self.media.claim_delivery()
+        delivery = self.media.claim_delivery()
+        self.media.save_delivery_receipt(delivery, sent_media(42, delivery['mime'], 9))
         self.media.acknowledge(job, 9)
         proposal = self.media.propose_avatar(job)
         self.assertIsNone(self.media.claim_avatar())

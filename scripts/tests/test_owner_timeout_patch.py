@@ -16,8 +16,18 @@ spec.loader.exec_module(patcher)
 class OwnerTimeoutPatchTests(unittest.TestCase):
     def source(self, timeout):
         source = (ROOT / 'prototype/andrewbot/appserver.py').read_text()
-        return source.replace('def reply(self, messages, timeout=None):',
-                              f'def reply(self, messages, timeout={timeout}):').encode()
+        tree = ast.parse(source)
+        reply = next(node for cls in tree.body if isinstance(cls, ast.ClassDef)
+                     and cls.name == 'LettaAgent' for node in cls.body
+                     if isinstance(node, ast.FunctionDef) and node.name == 'reply')
+        defaults = dict(zip([arg.arg for arg in reply.args.args][-len(reply.args.defaults):],
+                            reply.args.defaults))
+        default = defaults['timeout']
+        lines = source.splitlines(keepends=True)
+        line = lines[default.lineno - 1].encode()
+        lines[default.lineno - 1] = (line[:default.col_offset] + str(timeout).encode()
+                                    + line[default.end_col_offset:]).decode()
+        return ''.join(lines).encode()
 
     def test_changes_only_owner_default_for_deployed_timeout_values(self):
         for timeout in (120, 600):
@@ -26,8 +36,8 @@ class OwnerTimeoutPatchTests(unittest.TestCase):
                 patched, previous = patcher.patch_source(original)
                 self.assertEqual(previous, timeout)
                 self.assertEqual(patched, original.replace(
-                    f'def reply(self, messages, timeout={timeout}):'.encode(),
-                    b'def reply(self, messages, timeout=None):'))
+                    f'def reply(self, messages, timeout={timeout}'.encode(),
+                    b'def reply(self, messages, timeout=None'))
                 self.assertIn(b'def send_user_turn(self, runtime, text, tool_handler=None, timeout=120):', patched)
                 ast.parse(patched)
 

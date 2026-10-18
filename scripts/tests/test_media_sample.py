@@ -22,7 +22,10 @@ class MediaSampleTests(unittest.TestCase):
         provider = Mock()
         provider.generate.side_effect = [(b'ID3' + bytes(40), 'audio/mpeg', .0001), (png, 'image/png', .001)]
         telegram = Mock()
-        telegram.send_media.side_effect = [{'message_id': 1}, TimeoutError('uncertain')]
+        telegram.send_media.side_effect = [
+            {'message_id': 1, 'chat': {'id': 42},
+             'voice': {'file_id': 'sample-file', 'file_unique_id': 'sample-unique'}},
+            TimeoutError('uncertain')]
         def catalog(url, timeout):
             return io.BytesIO(json.dumps({'data': [
                 {'id': 'elevenlabs/eleven-v3', 'supported_voices': ['george']},

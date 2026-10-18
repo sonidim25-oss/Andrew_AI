@@ -142,6 +142,10 @@ def main():
             report['telegram_receipts'] = rows(
                 'SELECT delivery_id,kind,record_id,chunk,chat_id,message_id,confirmed_at '
                 'FROM telegram_chunk_receipts ORDER BY confirmed_at DESC LIMIT 20')
+        if 'media_delivery_receipts' in tables:
+            report['media_delivery_receipts'] = rows(
+                'SELECT job_id,kind,chat_id,message_id,confirmed_at FROM media_delivery_receipts '
+                'ORDER BY confirmed_at DESC LIMIT 20')
         if 'model_turn_receipts' in tables:
             report['model_turn_receipts'] = rows(
                 'SELECT cycle_id,session_id,agent_id,conversation_id,state,run_id,terminal_id,created_at,updated_at '
@@ -208,7 +212,7 @@ def main():
         if args.brief:
             usage = report.get('usage', [])
             report = {key: report[key] for key in ('integrity', 'lifecycle', 'letta_metadata', 'letta_recovery_metadata', 'recovery_checkpoints',
-                                                  'recovery_tool_attempts', 'action_recovery', 'model_turn_receipts', 'telegram_receipts') if key in report} | {
+                                                  'recovery_tool_attempts', 'action_recovery', 'model_turn_receipts', 'telegram_receipts', 'media_delivery_receipts') if key in report} | {
                 'recent_owner_messages': report['recent_owner_messages'][:3],
                 'events': report.get('events', [])[-12:],
                 'usage_summary': {'settled_requests': len(usage), 'last_request': usage[-1] if usage else None},

@@ -95,10 +95,10 @@ validation in the records/bridge boundary instead of repeating ad hoc coercions.
 
 **Interfaces:** consumes existing `patch_source(data)`; produces an honest passing fixture for the current `LettaAgent.reply` signature and a named baseline commit. No runtime timeout change.
 
-- [ ] **Step 1:** Run `PYTHONPATH=prototype:. python3 -m unittest discover -s prototype/tests -q` and `python3 -m unittest discover -s scripts/tests -q`. Record actual totals. Reproduce the known timeout fixture's 1 failure/5 errors before changing it; investigate any new failure.
-- [ ] **Step 2:** Repair `OwnerTimeoutPatchTests.source(timeout)` to substitute the timeout default by AST byte span while preserving `origin`; change its expected patched source comparison to replace only that default span. Keep tests for 120, 600, `None`, missing unlimited socket support, acceptance failure and rollback. The existing failing patcher tests are the red evidence.
-- [ ] **Step 3:** Run `python3 -m unittest discover -s scripts/tests -p test_owner_timeout_patch.py -q`; expect seven tests OK. Run the complete scripts suite; protocol skips without the pinned binary must be reported as skips.
-- [ ] **Step 4:** Verify media manifest hashes against the exact source, run `git diff --check`, review the deployed media diff and commit those files plus the fixture repair. Record the SHA in this plan. Do not commit unrelated files or change services.
+- [x] **Step 1:** Run `PYTHONPATH=prototype:. python3 -m unittest discover -s prototype/tests -q` and `python3 -m unittest discover -s scripts/tests -q`. Record actual totals. Reproduce the known timeout fixture's 1 failure/5 errors before changing it; investigate any new failure.
+- [x] **Step 2:** Repair `OwnerTimeoutPatchTests.source(timeout)` to substitute the timeout default by AST byte span while preserving `origin`; change its expected patched source comparison to replace only that default span. Keep tests for 120, 600, `None`, missing unlimited socket support, acceptance failure and rollback. The existing failing patcher tests are the red evidence.
+- [x] **Step 3:** Run `python3 -m unittest discover -s scripts/tests -p test_owner_timeout_patch.py -q`; expect seven tests OK. Run the complete scripts suite; protocol skips without the pinned binary must be reported as skips.
+- [x] **Step 4:** Verify media manifest hashes against the exact source, run `git diff --check`, review the deployed media diff and commit those files plus the fixture repair. Record the SHA in this plan. Do not commit unrelated files or change services.
 
 ## Task 1: Pin and build an inactive recovery artifact
 
