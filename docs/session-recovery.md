@@ -208,3 +208,48 @@ malformed confirmations, explicit diary retries, active sender ownership, and
 receipt-storage failures. Simulated network timeouts stay held with no second
 send. Test senders return realistic Message confirmations; tests do not contact
 Telegram or a paid model.
+
+## Startup does not resume backend work
+
+Startup validation now uses `conversation_retrieve` for an existing saved
+conversation. Only an installation without a conversation ID uses
+`conversation_create`. Both responses must identify the expected agent and
+conversation; an unavailable or mismatched saved conversation fails validation
+without silently creating a replacement. These management commands do not
+attach a runtime, submit input, recover approvals, or acknowledge tool work.
+Normal runtime attachment remains in the controller's admitted turn path.
+Validation still registers the provider and updates agent configuration, as
+before; it is not a completely read-only setup operation.
+
+Previously `LettaAgent.initialize()` called `runtime_start` with
+`recover_approvals: true` before `SessionRunner.recover()`. That was unsuitable
+for examining unfinished work: attachment itself can start recovery or pump
+already queued inputs, even without a new controller input. Disabling only
+`recover_approvals` would not disable every queue/continuation path. The change
+also applies to validation-only installer checks and preserves pause, sleep,
+errors, held inputs and billing reservations.
+
+The investigation used the pinned local `@letta-ai/letta-code` **0.34.13**
+bundle (`letta.js` SHA-256
+`eab90b26ded2647769a00ae29ec95fea1881173da53e2d54f620fc6df085b2fe`):
+
+- `HeadlessBackend` stores runs, active run identities and replay chunks in
+  in-process maps. Its `retrieveRun` cannot recover that state after backend
+  process loss.
+- `readMessageStatus` requires Cloud environment routing; it is not a local
+  per-input completion lookup.
+- `buildLoopStatus` may expose `WAITING_ON_INPUT` with empty active run IDs for
+  an interrupted cache. Idle is therefore not proof of completion.
+- `handleRuntimeStartProtocolCommand` and `replaySyncStateForRuntime` contain
+  recovery/queue execution paths. Neither is used as a diagnostic read here.
+- The SDK has durable interrupted-input and terminal journals, but they have
+  ownership, consumer and authority-revision rules. This change does not treat
+  a loose journal file, assistant transcript or missing run as completion proof.
+
+Genuinely unfinished turns remain held unless a separate, reviewed recovery
+adapter can establish their outcome. This is a startup execution fix, not a
+claim that P0 unfinished-run recovery is complete. The pinned protocol regression
+keeps a real provider run unfinished while initializing a replacement controller
+twice, verifies no runtime attachment/input/abort/tool response and no extra
+provider request, preserves owner controls and queued inputs, and then lets only
+the original run complete. All provider responses are local fixtures.

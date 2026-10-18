@@ -115,7 +115,7 @@ class FoundingLetterTests(unittest.TestCase):
                 if command['type'] == 'conversation_messages_list':
                     return {'messages': []}
                 return {}
-            def start_runtime(self, agent_id, conversation_id):
+            def prepare_conversation(self, agent_id, conversation_id):
                 return {'agent_id': agent_id, 'conversation_id': 'fixture-conversation'}
             def close(self):
                 pass

@@ -375,6 +375,23 @@ class AppServerClient:
             raise RuntimeError("Letta did not return a persistent agent ID")
         return agent["id"]
 
+    def prepare_conversation(self, agent_id, conversation_id=None):
+        # runtime_start is not a read: the pinned listener may recover approvals
+        # or pump queued inputs while attaching. Startup validation must not do
+        # that before controller recovery and owner lifecycle checks.
+        if conversation_id:
+            response = self.request({"type": "conversation_retrieve", "conversation_id": conversation_id},
+                                    "conversation_retrieve_response")
+        else:
+            response = self.request({"type": "conversation_create", "body": {"agent_id": agent_id}},
+                                    "conversation_create_response")
+        conversation = response.get("conversation")
+        if (not isinstance(conversation, dict) or not isinstance(conversation.get("id"), str)
+                or not conversation["id"] or conversation.get("agent_id") != agent_id
+                or (conversation_id and conversation["id"] != conversation_id)):
+            raise RuntimeError("Letta returned an invalid conversation scope")
+        return {"agent_id": agent_id, "conversation_id": conversation["id"]}
+
     def start_runtime(self, agent_id, conversation_id=None, controller_tools=True):
         command = {
             "type": "runtime_start", "agent_id": agent_id, "mode": "strict",
@@ -729,7 +746,7 @@ class LettaAgent:
                  "model_settings": {"provider_type": "openai-compatible", "temperature": 0.7,
                                     "max_tokens": None, "parallel_tool_calls": False}}},
                 "agent_update_response")
-            runtime = self._startup_check("Letta runtime startup", client.start_runtime, self.agent_id, self.conversation_id or None)
+            runtime = self._startup_check("Letta conversation validation", client.prepare_conversation, self.agent_id, self.conversation_id or None)
             self.conversation_id = runtime["conversation_id"]
             self._startup_check("Letta conversation ID persistence", self.store.set_state, "letta_conversation_id", self.conversation_id)
             if self.owner_id is not None:

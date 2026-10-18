@@ -17,6 +17,37 @@ from andrewbot.store import Store
 
 
 class AppServerWebSocketTests(unittest.TestCase):
+    def test_startup_conversation_lookup_never_attaches_or_substitutes_a_conversation(self):
+        from unittest.mock import Mock
+        client = AppServerClient.__new__(AppServerClient)
+        client.request = Mock(return_value={'conversation': {'id': 'saved', 'agent_id': 'andrew'}})
+        self.assertEqual(client.prepare_conversation('andrew', 'saved'),
+                         {'agent_id': 'andrew', 'conversation_id': 'saved'})
+        client.request.assert_called_once_with(
+            {'type': 'conversation_retrieve', 'conversation_id': 'saved'}, 'conversation_retrieve_response')
+        for conversation in (None, {}, {'id': 'saved', 'agent_id': 'other'},
+                             {'id': 'different', 'agent_id': 'andrew'}, {'id': 123, 'agent_id': 'andrew'}):
+            with self.subTest(conversation=conversation):
+                client.request.reset_mock()
+                client.request.return_value = {'conversation': conversation}
+                with self.assertRaisesRegex(RuntimeError, 'invalid conversation scope'):
+                    client.prepare_conversation('andrew', 'saved')
+                self.assertEqual(client.request.call_count, 1, 'invalid history must not create a replacement')
+        client.request.reset_mock()
+        client.request.side_effect = ConnectionError('unavailable')
+        with self.assertRaises(ConnectionError):
+            client.prepare_conversation('andrew', 'saved')
+        self.assertEqual(client.request.call_count, 1)
+
+    def test_first_start_creates_a_conversation_without_starting_a_runtime(self):
+        from unittest.mock import Mock
+        client = AppServerClient.__new__(AppServerClient)
+        client.request = Mock(return_value={'conversation': {'id': 'new', 'agent_id': 'andrew'}})
+        self.assertEqual(client.prepare_conversation('andrew'),
+                         {'agent_id': 'andrew', 'conversation_id': 'new'})
+        client.request.assert_called_once_with(
+            {'type': 'conversation_create', 'body': {'agent_id': 'andrew'}}, 'conversation_create_response')
+
     def test_terminal_error_keeps_safe_category_source_and_stop_reason(self):
         for error, category in (
                 ('context window exceeded: private fixture text', 'context_compaction_failed'),
@@ -252,7 +283,7 @@ class AppServerWebSocketTests(unittest.TestCase):
                 def update_agent_model(self, agent_id, model_config):
                     self.updated_model = (agent_id, model_config.model_id)
 
-                def start_runtime(self, agent_id, conversation_id=None):
+                def prepare_conversation(self, agent_id, conversation_id=None):
                     return {"agent_id": agent_id, "conversation_id": conversation_id or "conversation-existing"}
 
                 def close(self):
@@ -300,7 +331,7 @@ class AppServerWebSocketTests(unittest.TestCase):
                 def update_agent_model(self, agent_id, config):
                     self.updated.append((agent_id, config.model_id))
 
-                def start_runtime(self, agent_id, conversation_id=None):
+                def prepare_conversation(self, agent_id, conversation_id=None):
                     return {"agent_id": agent_id, "conversation_id": conversation_id}
 
                 def close(self):
