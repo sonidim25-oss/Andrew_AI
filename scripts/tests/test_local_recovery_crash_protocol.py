@@ -1,0 +1,179 @@
+"""Kill actual backend/controller processes at durable boundaries; no paid destinations."""
+import json
+import os
+from pathlib import Path
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import unittest
+from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+ROOT=Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(ROOT/'prototype'))
+from andrewbot.appserver import AppServerClient
+
+PRELOAD=r'''
+import fs from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
+const root=process.env.ANDREW_TEST_FAULT_ROOT;
+const fault=JSON.parse(fs.readFileSync(root+'/backend-fault-config.json','utf8'));
+const rename=fs.renameSync;let armed=true;
+fs.renameSync=function(from,to){
+ let snapshot=null,hit=false;
+ if(armed&&String(to).includes('local-recovery-v1/conversations/')&&/\/[a-f0-9]{64}\.json$/.test(String(to))){
+  snapshot=JSON.parse(fs.readFileSync(from,'utf8'));hit=snapshot.phase===fault.phase;
+  if(fault.phase==='input_committed')hit=hit&&snapshot.fence===0;
+ }
+ if(armed&&fault.phase==='projection'&&String(to).endsWith('.jsonl'))hit=fs.readFileSync(from,'utf8').includes('"operation_id":"tool:');
+ function kill(){armed=false;fs.writeFileSync(root+'/backend-fault.json',JSON.stringify({phase:fault.phase,moment:fault.moment,client_message_id:snapshot?.binding.client_message_id??null}));process.kill(process.pid,'SIGKILL');}
+ if(hit&&fault.moment==='before')kill();
+ const result=rename.apply(this,arguments);
+ if(hit&&fault.moment==='after')kill();
+ return result;
+};syncBuiltinESMExports();
+'''
+
+
+def available_port():
+    with socket.socket() as listener:listener.bind(('127.0.0.1',0));return listener.getsockname()[1]
+
+
+class Harness:
+    def __init__(self,test,*,phase=None,moment=None,controller_fault=None,compaction=False):
+        self.test=test;self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
+        self.provider_calls=[];self.effects=[];fixture=self;self.compaction=compaction
+        class Provider(BaseHTTPRequestHandler):
+            def log_message(self,*args):pass
+            def do_POST(self):
+                payload=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                if self.path=='/provider':
+                    fixture.provider_calls.append(payload)
+                    if compaction and len(fixture.provider_calls)==1:
+                        message={'role':'assistant','content':'Historical fixture text. '*150000};reason='stop'
+                    elif compaction and payload['messages'][0]['content'].startswith('Your task is to create a detailed summary'):
+                        message={'role':'assistant','content':'Exact confirmed compaction summary.'};reason='stop'
+                    elif len(fixture.provider_calls)==(3 if compaction else 1):
+                        message={'role':'assistant','content':None,'tool_calls':[{'id':'crash-call','type':'function','function':{'name':'recent_activity','arguments':'{}'}}]};reason='tool_calls'
+                    else:message={'role':'assistant','content':'Exact final fixture answer.'};reason='stop'
+                    result={'id':'fixture-'+str(len(fixture.provider_calls)),'choices':[{'index':0,'message':message,'finish_reason':reason}],
+                        'usage':{'prompt_tokens':20,'completion_tokens':5,'cost':.000001}}
+                elif self.path=='/effect':fixture.effects.append(payload);result={'entries':['exact durable fixture event']}
+                else:raise AssertionError('Unknown fixture destination')
+                encoded=json.dumps(result).encode();self.send_response(200);self.send_header('Content-Length',str(len(encoded)));self.end_headers();self.wfile.write(encoded)
+        self.provider=ThreadingHTTPServer(('127.0.0.1',0),Provider)
+        self.thread=threading.Thread(target=self.provider.serve_forever,daemon=True);self.thread.start()
+        self.port=available_port();self.url=f'ws://127.0.0.1:{self.port}/ws';self.backend=None;self.controller=None
+        self.environment={**os.environ,'HOME':str(self.root/'backend-home'),'LETTA_HOME':str(self.root/'settings'),
+            'LETTA_LOCAL_BACKEND_DIR':str(self.root/'backend-home/backend'),'DO_NOT_TRACK':'1','ANDREW_LOCAL_RECOVERY_ARTIFACT':'1'}
+        (self.root/'backend-home').mkdir()
+        if phase:
+            (self.root/'fault.mjs').write_text(PRELOAD)
+            (self.root/'backend-fault-config.json').write_text(json.dumps({'phase':phase,'moment':moment}))
+            self.environment['NODE_OPTIONS']='--import='+str(self.root/'fault.mjs');self.environment['ANDREW_TEST_FAULT_ROOT']=str(self.root)
+        test.addCleanup(self.close)
+        self.start_backend();self.start_controller('start',controller_fault)
+
+    def start_backend(self):
+        log=(self.root/'backend.log').open('a')
+        self.backend=subprocess.Popen(['node',str(Path(os.environ['ANDREW_LOCAL_RECOVERY_TEST_RELEASE'])/'letta.js'),
+            'server','--backend','local','--listen',f'ws://127.0.0.1:{self.port}','--openai-api'],env=self.environment,cwd=self.root,stdout=log,stderr=log)
+        log.close();deadline=time.monotonic()+20
+        while True:
+            self.test.assertIsNone(self.backend.poll(),(self.root/'backend.log').read_text()[-1500:])
+            try:client=AppServerClient(self.url,timeout=2);client.close();return
+            except ConnectionRefusedError:
+                self.test.assertLess(time.monotonic(),deadline);time.sleep(.02)
+
+    def start_controller(self,mode,fault=None):
+        for name in ('controller-ready.json','controller-done.json'):(self.root/name).unlink(missing_ok=True)
+        command=[sys.executable,str(ROOT/'scripts/tests/recovery_controller_fixture.py'),'--root',str(self.root),
+            '--backend-url',self.url,'--provider-url',f'http://127.0.0.1:{self.provider.server_port}','--mode',mode]
+        if fault:command+=['--fault',fault]
+        if self.compaction:command+=['--compaction']
+        log=(self.root/'controller.log').open('a')
+        environment={**os.environ,'PYTHONPATH':str(ROOT/'prototype')}
+        self.controller=subprocess.Popen(command,cwd=self.root,env=environment,stdout=log,stderr=log);log.close()
+
+    def wait_file(self,name,timeout=20):
+        deadline=time.monotonic()+timeout;path=self.root/name
+        while not path.exists():
+            self.test.assertLess(time.monotonic(),deadline,(self.root/'controller.log').read_text()[-2200:]+'\n'+(self.root/'backend.log').read_text()[-800:])
+            time.sleep(.02)
+        return json.loads(path.read_text())
+
+    def original_input(self):
+        import sqlite3
+        with sqlite3.connect(self.root/'controller.sqlite3') as db:
+            return db.execute('SELECT client_message_id FROM model_turn_receipts').fetchone()[0]
+
+    def recover(self,*,restart_backend=True):
+        if self.controller and self.controller.poll() is None:self.controller.kill();self.controller.wait(5)
+        if restart_backend:
+            if self.backend and self.backend.poll() is None:self.backend.kill();self.backend.wait(5)
+            self.environment.pop('NODE_OPTIONS',None);self.environment.pop('ANDREW_TEST_FAULT_ROOT',None);self.start_backend()
+        self.start_controller('recover')
+        return self.wait_file('controller-done.json')
+
+    def close(self):
+        if getattr(self,'closed',False):return
+        self.closed=True
+        for process in (self.controller,self.backend):
+            if process and process.poll() is None:process.kill();process.wait(5)
+        self.provider.shutdown();self.provider.server_close();self.thread.join(2);self.temp.cleanup()
+
+
+@unittest.skipUnless(os.environ.get('ANDREW_LOCAL_RECOVERY_TEST_RELEASE'),'requires verified isolated recovery release')
+class LocalRecoveryCrashProtocolTests(unittest.TestCase):
+    def test_backend_process_loss_matrix(self):
+        for phase in ('input_committed','provider_admitted','provider_confirmed','tool_prepared','tool_admitted',
+                      'tool_confirmed','continuation_ready','terminal_committed','projection'):
+            for moment in ('before','after'):
+                with self.subTest(phase=phase,moment=moment):
+                    fixture=Harness(self,phase=phase,moment=moment)
+                    boundary=fixture.wait_file('backend-fault.json')
+                    self.assertEqual(boundary,{'phase':phase,'moment':moment,'client_message_id':boundary['client_message_id']})
+                    fixture.backend.wait(5);self.assertEqual(fixture.backend.returncode,-signal.SIGKILL)
+                    fixture.wait_file('controller-done.json')
+                    original=fixture.original_input();result=fixture.recover()
+                    held=(phase=='input_committed' and moment=='before') or (phase in ('provider_admitted','tool_admitted') and moment=='after')
+                    self.assertEqual(result['completed'],not held,result)
+                    self.assertEqual(result['receipts'][0]['client_message_id'],original)
+                    self.assertEqual(result['held_messages'],1)
+                    expected=(0 if phase in ('input_committed','provider_admitted') else 1,0) if held else (2,1)
+                    self.assertEqual((len(fixture.provider_calls),len(fixture.effects)),expected)
+                    print(f'\nverified backend {phase} {moment}: provider={expected[0]} tool={expected[1]} held={held}',file=sys.stderr,flush=True)
+                    fixture.close()
+
+    def test_controller_and_combined_loss_after_exact_settlement(self):
+        for fault in ('provider_before','provider_after','tool_before','tool_after'):
+            for both in (False,True):
+                with self.subTest(fault=fault,both=both):
+                    fixture=Harness(self,controller_fault=fault)
+                    self.assertEqual(fixture.wait_file('controller-fault.json')['boundary'],fault)
+                    fixture.controller.wait(5);self.assertEqual(fixture.controller.returncode,-signal.SIGKILL)
+                    original=fixture.original_input()
+                    result=fixture.recover(restart_backend=both)
+                    positive=fault.endswith('after')
+                    self.assertEqual(result['completed'],positive,result)
+                    self.assertEqual(result['receipts'][0]['client_message_id'],original)
+                    self.assertEqual(result['held_messages'],1)
+                    expected=(2,1) if positive else (1,1 if fault.startswith('tool') else 0)
+                    self.assertEqual((len(fixture.provider_calls),len(fixture.effects)),expected)
+                    self.assertEqual(result['reservations'],1 if fault=='provider_before' else 0)
+                    print(f'\nverified controller {fault} both={both}: provider={expected[0]} tool={expected[1]}',file=sys.stderr,flush=True)
+                    fixture.close()
+
+    def test_confirmed_compaction_survives_full_process_loss_without_another_summary_call(self):
+        fixture=Harness(self,controller_fault='provider_after',compaction=True)
+        fixture.wait_file('controller-fault.json',timeout=40)
+        fixture.controller.wait(5);self.assertEqual(fixture.controller.returncode,-signal.SIGKILL)
+        self.assertEqual(len(fixture.provider_calls),2)
+        result=fixture.recover()
+        self.assertTrue(result['completed'],result)
+        self.assertEqual((len(fixture.provider_calls),len(fixture.effects)),(4,1))
+        summaries=[call for call in fixture.provider_calls if call['messages'][0]['content'].startswith('Your task is to create a detailed summary')]
+        self.assertEqual(len(summaries),1)
+        self.assertIn('Exact confirmed compaction summary.',json.dumps(fixture.provider_calls[-1]['messages']))

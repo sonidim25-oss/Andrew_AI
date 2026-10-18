@@ -134,6 +134,13 @@ def main():
                 if table == "telegram_outbox" else
                 f"SELECT update_id,received_at FROM {table} ORDER BY update_id DESC LIMIT 15")
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'recovery_attempts' in tables:
+            columns={row[1] for row in db.execute('PRAGMA table_info(recovery_attempts)')}
+            reason=',hold_reason' if 'hold_reason' in columns else ''
+            report['local_recovery_attempts']=rows('SELECT admission_id,state,backend_attempt_id,backend_revision,created_at'+reason+' FROM recovery_attempts ORDER BY rowid DESC LIMIT 20')
+            report['local_recovery_effects']=rows('SELECT kind,state,count(*) AS count FROM recovery_effects GROUP BY kind,state')
+            # A database snapshot cannot establish the running service's flag.
+            report['local_recovery_automatic_resume']=None
         if 'external_action_receipts' in tables:
             report['action_recovery'] = rows(
                 'SELECT action_id,adapter,operation,state,session_id,cycle_id,created_at,checked_at '
@@ -212,7 +219,8 @@ def main():
         if args.brief:
             usage = report.get('usage', [])
             report = {key: report[key] for key in ('integrity', 'lifecycle', 'letta_metadata', 'letta_recovery_metadata', 'recovery_checkpoints',
-                                                  'recovery_tool_attempts', 'action_recovery', 'model_turn_receipts', 'telegram_receipts', 'media_delivery_receipts') if key in report} | {
+                                                  'recovery_tool_attempts', 'action_recovery', 'model_turn_receipts', 'telegram_receipts', 'media_delivery_receipts',
+                                                  'local_recovery_attempts','local_recovery_effects','local_recovery_automatic_resume') if key in report} | {
                 'recent_owner_messages': report['recent_owner_messages'][:3],
                 'events': report.get('events', [])[-12:],
                 'usage_summary': {'settled_requests': len(usage), 'last_request': usage[-1] if usage else None},

@@ -218,7 +218,7 @@ def main():
     if os.geteuid() != 0:
         raise SystemExit('Run this installer with sudo in your server terminal.')
     manifest = json.loads((ROOT / 'scripts/p1-fix-manifest.json').read_text())
-    if set(manifest) != {'appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'workers.py', 'model.py', 'runner_client.py', 'process_limits.py', 'media.py', 'media_provider.py', 'skills.py', 'gateway.py', 'memory_backup.py', 'memory_backup_cli.py'}:
+    if set(manifest) != {'appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'workers.py', 'model.py', 'runner_client.py', 'process_limits.py', 'media.py', 'media_provider.py', 'skills.py', 'gateway.py', 'memory_backup.py', 'memory_backup_cli.py','recovery.py','recovery_records.py','recovery_dispatch.py'}:
         raise SystemExit('Unexpected module manifest; installation refused.')
     replacements = {}
     originals = {}
@@ -232,7 +232,7 @@ def main():
             raise SystemExit('Symlink in installed module; installation refused: ' + name)
         original = path.read_bytes() if path.exists() else None
         installed_hash = hashlib.sha256(original).hexdigest() if original is not None else None
-        if installed_hash is None and (name not in {'latency.py', 'workers.py', 'media.py', 'media_provider.py', 'skills.py'} or hashes['original'] is not None):
+        if installed_hash is None and (name not in {'latency.py', 'workers.py', 'media.py', 'media_provider.py', 'skills.py','recovery.py','recovery_records.py','recovery_dispatch.py'} or hashes['original'] is not None):
             raise SystemExit('Required installed module missing; installation refused: ' + name)
         reviewed_hashes = {hashes['original'], hashes['tested'], *hashes.get('reviewed', {}).keys()}
         if installed_hash not in reviewed_hashes:

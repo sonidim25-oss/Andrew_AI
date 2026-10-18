@@ -15,11 +15,12 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = 'd325230'
-UPGRADE_BASES = ('d02477b', '2faba07', 'c68e128', '0afe2f9', '3ffd87e', '045f7f8', '747ec6b', 'e3af2cd', '387162e', '8f3dc4d', '6d91b06', '0959c63', '5127ce2', '45ab856', 'eb80f5f', '1f60d34', '9e5d3df', 'b0a3439', '40418d9')
+UPGRADE_BASES = ('f7418d2', 'd02477b', '2faba07', 'c68e128', '0afe2f9', '3ffd87e', '045f7f8', '747ec6b', 'e3af2cd', '387162e', '8f3dc4d', '6d91b06', '0959c63', '5127ce2', '45ab856', 'eb80f5f', '1f60d34', '9e5d3df', 'b0a3439', '40418d9')
 TARGET = Path('/opt/andrew/prototype/andrewbot')
 DROPIN = Path('/etc/systemd/system/andrew-control.service.d/zz-autonomy-media.conf')
 MODULES = ('configuration.py', 'appserver.py', 'budget.py', 'controller.py', 'gateway.py', 'lifecycle_policy.py',
-           'dispatch.py', 'gmail_api.py', 'gmail_tools.py', 'main.py', 'media.py', 'memory.py', 'model.py', 'sessions.py', 'skills.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'vault_cli.py')
+           'dispatch.py', 'gmail_api.py', 'gmail_tools.py', 'main.py', 'media.py', 'memory.py', 'model.py', 'sessions.py', 'skills.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'vault_cli.py','memory_backup.py','recovery.py','recovery_records.py','recovery_dispatch.py')
+NEW_MODULES=frozenset({'recovery.py','recovery_records.py','recovery_dispatch.py'})
 SKILLS = ('voice-communication', 'image-creation')
 GUIDANCE = ('The owner has limited API credits in general and authorizes me to decide how to use them. '
             'The owner removed all controller daily, monthly, and per-job spending caps and daily media quotas. '
@@ -202,6 +203,14 @@ def prepare(backup):
         path = TARGET / name
         if path.is_symlink():
             raise ValueError('Symlink in deployed module: ' + name)
+        if name in NEW_MODULES:
+            proposed=(ROOT/'prototype/andrewbot'/name).read_bytes()
+            if hashlib.sha256(proposed).hexdigest()!=tested['modules'][name]:raise ValueError('Proposed source changed since testing: '+name)
+            live=path.read_bytes() if path.exists() else None
+            if live is not None and live!=proposed:raise ValueError('Unreviewed recovery module: '+name)
+            originals[name]=live;replacements[name]=proposed
+            if live is not None:(backup/name).write_bytes(live)
+            continue
         live = path.read_bytes()
         base = subprocess.check_output(['git', '-C', str(ROOT), 'show', BASE + ':prototype/andrewbot/' + name])
         reviewed = tested.get('deployed_upgrade_bases', {}).get(name, {}).get(hashlib.sha256(live).hexdigest())
@@ -234,6 +243,7 @@ def snapshot(backup, replacements):
         if path.is_symlink():
             raise ValueError('Symlink in deployed code')
         (package / path.name).write_bytes(replacements.get(path.name, path.read_bytes()))
+    for name,data in replacements.items():(package/name).write_bytes(data)
     shutil.copytree(TARGET.parents[1] / 'skills', root / 'skills')
     tested = json.loads((ROOT / 'scripts/autonomy-media-manifest.json').read_text())
     for name in SKILLS:
@@ -245,6 +255,7 @@ def snapshot(backup, replacements):
     tests.mkdir(parents=True)
     for path in (ROOT / 'scripts/tests').glob('test_*protocol.py'):
         shutil.copy2(path, tests / path.name)
+    shutil.copytree(ROOT/'letta_recovery',root/'letta_recovery',ignore=shutil.ignore_patterns('__pycache__'))
     shutil.copy2(ROOT / 'scripts/letta_recovery_metadata.py', root / 'scripts/letta_recovery_metadata.py')
     shutil.copytree(ROOT / 'prototype/tests', root / 'prototype/tests', ignore=shutil.ignore_patterns('__pycache__'))
     # Unit tests import the worker support package from the project root. The
@@ -321,7 +332,8 @@ def main():
         idle()
         helper.snapshot_store(backup)
         for name, original in originals.items():
-            if (TARGET / name).read_bytes() != original:
+            current=(TARGET/name).read_bytes() if (TARGET/name).exists() else None
+            if current != original:
                 raise ValueError('Deployed code changed during installation')
         helper.command('systemctl', 'stop', 'andrew-letta.service')
         modified = True
@@ -344,7 +356,8 @@ def main():
             helper.command('systemctl', 'stop', 'andrew-letta.service')
             if modified:
                 for name, data in originals.items():
-                    helper.replace(TARGET / name, data, gid)
+                    if data is None:(TARGET/name).unlink(missing_ok=True)
+                    else:helper.replace(TARGET/name,data,gid)
                 for name, data in skills.items():
                     helper.replace(TARGET.parents[1] / 'skills' / name / 'SKILL.md', data, gid)
                 if old_config is None:

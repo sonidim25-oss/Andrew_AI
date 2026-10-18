@@ -90,7 +90,7 @@ class IncidentFixTests(unittest.TestCase):
             manifest = {}
             installed_data = (b'# unreviewed change\n' if unknown_installed else
                               b'# reviewed intermediate\n' if intermediate else b'# original\n')
-            names = (['appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'workers.py', 'model.py', 'runner_client.py', 'process_limits.py', 'media.py', 'media_provider.py', 'skills.py', 'gateway.py', 'memory_backup.py', 'memory_backup_cli.py']
+            names = (['appserver.py', 'browser_history.py', 'configuration.py', 'controller.py', 'diary.py', 'dispatch.py', 'latency.py', 'main.py', 'memory.py', 'runner_service.py', 'sessions.py', 'store.py', 'telegram.py', 'telegram_menu.py', 'workers.py', 'model.py', 'runner_client.py', 'process_limits.py', 'media.py', 'media_provider.py', 'skills.py', 'gateway.py', 'memory_backup.py', 'memory_backup_cli.py','recovery.py','recovery_records.py','recovery_dispatch.py']
                      if p1 else ['appserver.py', 'configuration.py', 'gateway.py', 'sessions.py'])
             for name in names:
                 (source / name).write_bytes(b'# tested\n')
