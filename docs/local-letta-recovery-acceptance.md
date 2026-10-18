@@ -206,3 +206,12 @@ The full scripts run passed 160 tests without skips (251.111 seconds); the two
 additional retirement guard/owner tests also passed in the focused retirement8 run.
 This release is
 not yet reported deployed; P0 remains open until a successful live turn.
+
+Fresh-context independent review found a real service-user permission blocker:
+the backend retirement child imported controller code protected by the separate
+`andrew-control` group. Imports now occur only in parent/controller functions.
+An actual subprocess test blocks every `andrewbot` import while running the
+backend phase successfully; the focused retirement suite now passes nine tests.
+The backend release is unchanged. No other demonstrated first-wake blocker was
+found. An interrupted retirement still requires manual reconciliation: its
+archive/checkpoint guards intentionally refuse a blind retry after partial work.

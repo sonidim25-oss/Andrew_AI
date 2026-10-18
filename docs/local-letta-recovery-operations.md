@@ -191,6 +191,11 @@ held messages, raw transcript bytes and original receipts are retained. Each
 writer runs as its existing service user. Failure leaves both services stopped;
 private phase evidence is beside the paired snapshot.
 
+An interruption after backend archival or between the two store updates is not
+automatically resumable. The guards refuse existing archive/missing checkpoint
+states; inspect the retained paired snapshot and phase evidence before manual
+reconciliation. Do not use `--resume-apply` to bypass retirement checks.
+
 This update takes a fresh candidate through the usual acceptance checks. After
 successful installation, use `--enable` with its newly printed candidate path.
 Owner pause remains in effect; request a fresh wake after enable succeeds.

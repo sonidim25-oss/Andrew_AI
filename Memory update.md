@@ -1,5 +1,11 @@
 # Memory update
 
+## Свежая независимая проверка перед deployment
+
+По просьбе владельца выполнена независимая read-only проверка с чистым контекстом. Найден и исправлен реальный permission blocker: backend retirement от `andrew-letta` импортировал controller package, но `/opt/andrew/prototype` имеет mode 0750 и группу `andrew-control`, в которую `andrew-letta` не входит. Импорт перенесён в parent/controller-only функции; backend-child теперь использует только stdlib. Новая subprocess-проверка явно запрещает импорт `andrewbot` и успешно выполняет backend phase; retirement9 прошли. Backend artifact не менялся.
+
+Других доказанных блокеров первого wake проверка не нашла. Осталось ограничение interrupted-install: если retirement прервётся после архивации или между backend/controller фазами, сервисы останутся остановленными, а повтор текущей команды откажется; потребуется ручная сверка сохранённого snapshot и phase evidence. Это ограничение восстановления прерванной установки, не разрешение автоматического replay. Успех production wake по-прежнему не подтверждён.
+
 ## Подтверждена причина projection_conflict; исправление подготовлено
 
 Повторный структурный отчёт production: 929 message entries, 114 compaction entries, 7 active IDs, 6 найденных active messages, 1 отсутствующий ID нового ввода, recovery entries=0. Writer сравнивал весь сохранённый transcript с коротким активным контекстом. Теперь активный baseline связан с точными bytes transcript до синхронной записи; исходная история сохраняется byte-for-byte, добавляются только новые recovery-строки, изменение baseline или диска по-прежнему блокирует запись.

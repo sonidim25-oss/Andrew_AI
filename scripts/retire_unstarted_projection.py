@@ -11,7 +11,6 @@ import tempfile
 
 ROOT=Path(__file__).resolve().parents[1] if '__file__' in globals() else Path('/opt/andrew')
 sys.path.insert(0,str(ROOT/'prototype'))
-from andrewbot.recovery_records import digest,validate_binding
 
 
 def read(path):
@@ -23,6 +22,7 @@ def read(path):
 
 
 def _controller_guard(db,admission):
+    from andrewbot.recovery_records import digest,validate_binding
     db.row_factory=sqlite3.Row
     state=dict(db.execute('SELECT key,value FROM state'))
     if state.get('paused')!='1' or state.get('active_session_id') or state.get('session_start_requested'):
@@ -39,6 +39,7 @@ def _controller_guard(db,admission):
 
 
 def plan(database,home,admission):
+    from andrewbot.recovery_records import digest
     database=Path(database)
     with closing(sqlite3.connect(database.resolve().as_uri()+'?mode=ro',uri=True)) as db:
         binding=_controller_guard(db,admission)

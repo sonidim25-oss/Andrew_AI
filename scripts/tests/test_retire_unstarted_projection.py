@@ -2,6 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -89,6 +90,21 @@ class ProjectionRetirementTests(unittest.TestCase):
         Path(value['archive']).parent.symlink_to(outside,target_is_directory=True)
         with self.assertRaisesRegex(ValueError,'Unsafe'):repair.retire_backend(value)
         self.assertTrue(self.checkpoint.exists());self.assertEqual(list(outside.iterdir()),[])
+
+    def test_backend_child_does_not_import_inaccessible_controller_package(self):
+        value=repair.plan(self.database,self.home,'scope')
+        guard="""import builtins
+original_import=builtins.__import__
+def restricted_import(name,*args,**kwargs):
+    if name=='andrewbot' or name.startswith('andrewbot.'):
+        raise ImportError('Backend service cannot access controller code')
+    return original_import(name,*args,**kwargs)
+builtins.__import__=restricted_import
+"""
+        result=subprocess.run([sys.executable,'-c',guard+Path(repair.__file__).read_text(),'backend'],
+                              input=json.dumps(value),capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertFalse(self.checkpoint.exists());self.assertTrue(Path(value['archive']).is_file())
 
     def test_each_phase_runs_as_store_owner_after_paired_snapshot_verification(self):
         from andrewbot.memory_backup import create_paired_recovery_snapshot
