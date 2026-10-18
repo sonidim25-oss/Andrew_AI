@@ -294,3 +294,9 @@ recorded there while the separate terminal journal is empty. Offline tests also
 verify private-data redaction, identity mismatches, malformed records,
 symlink/FIFO handling, scan/file limits and an unchanged controller database.
 No service reinstall is needed to run this administrator script from the checkout.
+
+If the selected session has no controller input receipts, the diagnostic returns
+`no_controller_receipts`, marks every journal scan `not_attempted`, and does not
+open the Letta home. An empty record list in that case cannot establish that SDK
+journals are empty. This includes legacy sessions: installing new receipt code
+does not manufacture proof for earlier inputs.

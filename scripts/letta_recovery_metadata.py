@@ -174,6 +174,10 @@ def collect_recovery_metadata(home, receipts):
     report = {'format': 'letta-code-0.34.13', 'evidence_only': True, 'automatic_resume': False,
               'authority_verified': False, 'snapshot_atomic': False,
               'controller_receipt_count': min(len(receipts), MAX_RECEIPTS), 'records': []}
+    if not receipts:
+        return report | {'status': 'no_controller_receipts', 'receipt_limit': False,
+                         'interrupted_scan': 'not_attempted', 'terminal_scan': 'not_attempted',
+                         'input_scan': 'not_attempted'}
     try:
         home_fd = _open_directory(home)
     except OSError:

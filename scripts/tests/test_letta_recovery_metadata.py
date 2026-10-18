@@ -119,7 +119,17 @@ class RecoveryMetadataTests(unittest.TestCase):
     def test_missing_journal_is_not_a_successful_turn(self):
         self.assertEqual(self.collect()['records'], [])
         self.assertFalse(self.collect()['automatic_resume'])
-        self.assertEqual(metadata.collect_recovery_metadata(self.home / 'missing', [])['status'], 'home_unavailable')
+        self.assertEqual(metadata.collect_recovery_metadata(self.home / 'missing', [self.receipt])['status'], 'home_unavailable')
+
+    def test_legacy_session_without_receipts_does_not_claim_journals_were_inspected(self):
+        with patch.object(metadata, '_open_directory', side_effect=AssertionError('no bound inputs to inspect')):
+            report = metadata.collect_recovery_metadata(self.home, [])
+        self.assertEqual(report['status'], 'no_controller_receipts')
+        self.assertEqual(report['controller_receipt_count'], 0)
+        self.assertEqual(report['records'], [])
+        self.assertFalse(report['automatic_resume'])
+        for kind in ('interrupted', 'terminal', 'input'):
+            self.assertEqual(report[kind + '_scan'], 'not_attempted')
 
     def test_input_disposition_binds_client_identity_and_never_certifies_replay_markers(self):
         folder = self.home / '.letta/state/namespace'
