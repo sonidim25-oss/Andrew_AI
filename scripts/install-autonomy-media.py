@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install uncapped self-managed credits and owner-authorized autonomous media."""
 import argparse
+from contextlib import closing
 import ast
 import grp
 import hashlib
@@ -49,7 +50,7 @@ def load_helper():
 
 
 def idle():
-    with sqlite3.connect('file:/var/lib/andrew/control/controller.sqlite3?mode=ro', uri=True, timeout=5) as db:
+    with closing(sqlite3.connect('file:/var/lib/andrew/control/controller.sqlite3?mode=ro', uri=True, timeout=5)) as db:
         state = dict(db.execute("SELECT key,value FROM state WHERE key IN "
                                 "('paused','sleeping','autonomy_error','active_session_id','session_start_requested')"))
         if not (state.get('paused') == '1' or state.get('sleeping') == '1' or state.get('autonomy_error')):

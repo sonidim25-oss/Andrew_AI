@@ -26,6 +26,19 @@ ROLLBACK_DROPIN=BACKEND_DROPIN.with_name('zzz-local-recovery-rollback.conf')
 MANIFEST=ROOT/'scripts/letta-recovery-manifest.json'
 NEW_MODULES={'recovery.py','recovery_dispatch.py','recovery_records.py'}
 CONTRACT='local_durable_recovery_v1'
+CHECKPOINT_PROGRAM='''import json,sqlite3,sys
+db=sqlite3.connect(sys.argv[1],timeout=5)
+try:
+    db.execute('PRAGMA synchronous=FULL')
+    if db.execute('PRAGMA quick_check').fetchone()[0]!='ok':
+        raise SystemExit('Controller database integrity check failed')
+    result=db.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
+    if result not in ((0,0,0),(0,-1,-1)):
+        raise SystemExit('Controller WAL checkpoint is busy')
+    print(json.dumps(result))
+finally:
+    db.close()
+'''
 sys.path.insert(0,str(ROOT/'prototype'))
 from andrewbot.memory_backup import create_paired_recovery_snapshot,verify_paired_recovery_snapshot,_recovery_tree
 
@@ -197,6 +210,29 @@ def _service(action,unit):
     return h.command('systemctl',action,*([unit] if unit else []))
 
 
+def checkpoint_controller_wal(database):
+    database=Path(database)
+    if database.is_symlink() or not database.is_file():raise ValueError('Controller database unavailable')
+    try:
+        result=helper('install-p1-fixes').command('runuser','-u','andrew-control','--',
+            '/usr/bin/python3','-c',CHECKPOINT_PROGRAM,str(database))
+        if json.loads(result) not in ([0,0,0],[0,-1,-1]):raise ValueError()
+    except (subprocess.CalledProcessError,ValueError,TypeError):
+        raise ValueError('Controller WAL checkpoint did not finish; services remain stopped') from None
+
+
+def load_accepted_candidate(directory):
+    directory=Path(directory)
+    info=directory.lstat()
+    if directory.is_symlink() or not directory.is_dir() or info.st_uid!=os.geteuid() or info.st_mode&0o022:
+        raise ValueError('Accepted candidate directory must be private and owned by the installer user')
+    directory=directory.resolve();candidate=json.loads((directory/'candidate.json').read_text())
+    if candidate.get('directory')!=str(directory) or candidate.get('source')!=str(directory/'source'):
+        raise ValueError('Accepted candidate path changed')
+    verify_candidate(candidate,require_acceptance=True)
+    return candidate
+
+
 def activate(candidate,enable_resume=False,*,service=_service):
     if enable_resume:raise ValueError('Initial activation must keep automatic resume disabled')
     verify_candidate(candidate,require_acceptance=True)
@@ -212,6 +248,7 @@ def activate(candidate,enable_resume=False,*,service=_service):
     service('stop','andrew-control.service');service('stop','andrew-letta.service')
     try:
         for unit in ('andrew-control.service','andrew-letta.service'):service('assert-stopped',unit)
+        checkpoint_controller_wal(DATABASE)
         create_paired_recovery_snapshot(DATABASE,BACKEND_HOME,directory/'paired-before',workers_quiescent=True)
         if tree_hashes(TARGET,ignore_bytecode=True)!=candidate['deployed_files']:raise ValueError('Deployed package changed during activation; services remain stopped')
         for name,expected in candidate['originals'].items():
@@ -306,26 +343,34 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--backend-release',type=Path)
     parser.add_argument('--apply',action='store_true')
+    parser.add_argument('--resume-apply',type=Path,help='Retry activation of an unchanged accepted candidate after a pre-snapshot failure')
     parser.add_argument('--rollback',type=Path,help='Candidate directory from the installation')
     parser.add_argument('--enable',type=Path,help='Verified candidate directory after initial disabled activation')
     args=parser.parse_args()
+    if args.resume_apply and (args.backend_release or args.enable or args.rollback):parser.error('--resume-apply cannot be combined with another action')
     if os.geteuid()!=0:raise SystemExit('Run with sudo in your server terminal; no services changed.')
     if args.enable:
         candidate=json.loads((args.enable/'candidate.json').read_text());print(json.dumps(enable(candidate)));return
     if args.rollback:
         candidate=json.loads((args.rollback/'candidate.json').read_text());print(json.dumps(rollback(candidate)));return
-    if not args.backend_release:parser.error('--backend-release is required')
+    if not args.backend_release and not args.resume_apply:parser.error('--backend-release or --resume-apply is required')
     h=helper('install-p1-fixes');readiness=h.load_readiness()
     proof=readiness.protected_read(readiness.PROOF);before=readiness.bindings();readiness.check_proof(json.loads(proof),before)
     helper('install-autonomy-media').idle()
-    directory=Path('/var/backups')/('andrew-local-recovery-'+uuid.uuid4().hex)
-    candidate=build_candidate(args.backend_release,TARGET,directory)
-    (directory/'runtime-proof-before.json').write_bytes(proof)
-    print('Candidate and evidence: '+str(directory),flush=True)
-    pristine=Path('/var/lib/andrew/letta-app/node_modules/@letta-ai/letta-code/letta.js')
-    run_acceptance(candidate,pristine)
+    if args.resume_apply:
+        candidate=load_accepted_candidate(args.resume_apply);directory=Path(candidate['directory'])
+        if (directory/'paired-before').exists() or (directory/'activated.json').exists():raise ValueError('Candidate has already reached the snapshot stage; create a fresh candidate')
+        if (directory/'runtime-proof-before.json').read_bytes()!=proof:raise ValueError('Runtime proof changed; create a fresh candidate')
+        print('Resuming accepted candidate: '+str(directory),flush=True)
+    else:
+        directory=Path('/var/backups')/('andrew-local-recovery-'+uuid.uuid4().hex)
+        candidate=build_candidate(args.backend_release,TARGET,directory)
+        (directory/'runtime-proof-before.json').write_bytes(proof)
+        print('Candidate and evidence: '+str(directory),flush=True)
+        pristine=Path('/var/lib/andrew/letta-app/node_modules/@letta-ai/letta-code/letta.js')
+        run_acceptance(candidate,pristine)
     if readiness.bindings()!=before:raise ValueError('Runtime changed during candidate verification; no services changed')
-    if not args.apply:
+    if not args.apply and not args.resume_apply:
         print('Candidate verified; preview only, no services changed.');return
     result=activate(candidate)
     try:

@@ -134,3 +134,31 @@ cycle. This does not replay held input or settle old reservations. Apply using
 The old ten cost reservations remain counted. Fresh turns can now proceed around
 recognized unlinked legacy costs; interrupted-turn recovery still requires global
 reconciliation of uncertain costs.
+
+## Retrying the pre-snapshot WAL failure
+
+If installation stopped with `Controller WAL is not quiescent`, keep both
+services stopped. The installer now closes its idle-check reader and performs
+SQLite's checkpoint as `andrew-control` after confirming both services stopped.
+Committed records are retained; never delete WAL/SHM files manually. A busy
+checkpoint refuses activation and leaves services stopped.
+
+For the owner's already accepted, pre-snapshot candidate:
+
+```bash
+sudo python3 scripts/install-letta-recovery.py \
+  --resume-apply /var/backups/andrew-local-recovery-27babacc943743e3aacacf3c049930e0
+```
+
+Resume requires unchanged candidate acceptance, source, deployed files and saved
+runtime proof, with no existing paired snapshot or activation marker. It reuses
+the bound runtime test results and runs the normal activation/startup checks.
+After successful installation, enable using this same candidate directory:
+
+```bash
+sudo python3 scripts/install-letta-recovery.py \
+  --enable /var/backups/andrew-local-recovery-27babacc943743e3aacacf3c049930e0
+```
+
+Owner pause remains in effect. A successful install/enable is required before
+requesting a new wake.

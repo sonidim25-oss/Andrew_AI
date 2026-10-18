@@ -158,3 +158,13 @@ reported pause. A normal paused controller restart safely retires the blocked
 unadmitted cycle before installer idle checks; a separate isolated check retained
 all ten reservations and fifteen held inputs without any transport call. Root
 apply must use the new release, then enable using the newly printed backup path.
+
+The owner's root apply produced candidate
+`/var/backups/andrew-local-recovery-27babacc943743e3aacacf3c049930e0`
+and then refused the pre-snapshot WAL check. The installer correction closes
+its own idle-check reader and checkpoints SQLite after both services stop.
+Focused tests exercise committed WAL preservation into the paired snapshot,
+refusal with an active reader, closed idle connections, failure before any
+replacement/start, and reuse of exact accepted candidates with unchanged proof.
+The controller/backend runtime and release manifest remain unchanged by this
+installer correction. Root retry and successful first live turn remain pending.
