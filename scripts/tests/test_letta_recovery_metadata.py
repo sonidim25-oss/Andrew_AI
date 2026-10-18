@@ -175,6 +175,7 @@ class RecoveryMetadataTests(unittest.TestCase):
         with store.connection:
             store.connection.execute("INSERT INTO cycles(cycle_id,session_id,local_day,status,started_at) VALUES('cycle','0123456789abcdef','2026-10-18','failed','2026-10-18T00:00:00+00:00')")
             store.connection.execute("INSERT INTO model_turn_receipts(cycle_id,session_id,owner_revision,agent_id,conversation_id,request_id,client_message_id,state,created_at,updated_at) VALUES('cycle','0123456789abcdef','1','agent-a','conv-a','request-a','input-a','accepted','2026-10-18T00:00:00+00:00','2026-10-18T00:00:00+00:00')")
+            store.connection.execute("INSERT INTO budget_reservations VALUES('old-reservation','2026-09','2026-09-01',0.01,'2026-09-01T00:00:00+00:00')")
         store.set_state('paused', '1')
         store.close()
         self.write()
@@ -184,5 +185,8 @@ class RecoveryMetadataTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
         self.assertEqual(report['letta_recovery_metadata']['status'], 'metadata_only')
+        self.assertEqual(report['unsettled_reservations'],1)
+        self.assertEqual(report['global_reservation_count'],1)
+        self.assertEqual(report['global_reservations'][0]['reservation_id'],'old-reservation')
         self.assertNotIn('PRIVATE', result.stdout + result.stderr)
         self.assertEqual(db_path.read_bytes(), before)

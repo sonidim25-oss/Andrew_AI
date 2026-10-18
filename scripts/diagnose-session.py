@@ -134,6 +134,10 @@ def main():
                 if table == "telegram_outbox" else
                 f"SELECT update_id,received_at FROM {table} ORDER BY update_id DESC LIMIT 15")
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        # Recovery admission checks reservations across all dates, including
+        # attempts older than the selected session's diagnostic window.
+        report['global_reservation_count']=db.execute('SELECT count(*) FROM budget_reservations').fetchone()[0]
+        report['global_reservations']=rows('SELECT reservation_id,month,day,cost_usd,created_at FROM budget_reservations ORDER BY created_at DESC LIMIT 20')
         if 'recovery_attempts' in tables:
             columns={row[1] for row in db.execute('PRAGMA table_info(recovery_attempts)')}
             reason=',hold_reason' if 'hold_reason' in columns else ''
@@ -221,11 +225,12 @@ def main():
             usage = report.get('usage', [])
             report = {key: report[key] for key in ('integrity', 'lifecycle', 'letta_metadata', 'letta_recovery_metadata', 'recovery_checkpoints',
                                                   'recovery_tool_attempts', 'action_recovery', 'model_turn_receipts', 'telegram_receipts', 'media_delivery_receipts',
-                                                  'local_recovery_attempts','local_recovery_effects','local_recovery_automatic_resume') if key in report} | {
+                                                  'local_recovery_attempts','local_recovery_effects','local_recovery_automatic_resume',
+                                                  'global_reservation_count','global_reservations') if key in report} | {
                 'recent_owner_messages': report['recent_owner_messages'][:3],
                 'events': report.get('events', [])[-12:],
                 'usage_summary': {'settled_requests': len(usage), 'last_request': usage[-1] if usage else None},
-                'unsettled_reservations': len(report.get('reservations', [])),
+                'unsettled_reservations': report['global_reservation_count'],
             }
         print(json.dumps(report, indent=2))
 
