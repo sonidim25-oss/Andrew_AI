@@ -1,5 +1,11 @@
 # Memory update
 
+## Последний live wake после обновления: P0 открыт
+
+Владелец подтвердил успешный resume-install кандидата `27babacc943743e3aacacf3c049930e0` с backend manifest `c7e99ddcccbf822213ebe67760ca3baa5a79f44fe352b4ec8c47d2523f814068`. Следующий wake 2026-10-18 14:47:56 UTC снова остановился. Свежий отчёт: input принят, backend revision 2; исходное событие `projection_conflict`, позднее controller hold `provider_uncertain`; recovery_effects пуст, новых settled requests нет. Старые 10 резервов и held сообщения сохранены. Сейчас owner pause=1.
+
+Локально воспроизведён `projection_conflict` при законном transcript с несколькими сохранёнными версиями одного сообщения: writer ошибочно сопоставляет все исторические строки с актуальным набором. Это гипотеза причины конкретного live сбоя до получения структурной проверки production transcript, а не подтверждённое исправление. Добавлена read-only диагностика counts/active IDs/полей различий без текста сообщений; 4 новых и 10 прежних metadata-тестов прошли. Успешный live ход и закрытие P0 ещё ожидаются.
+
 ## Последний этап deployment: WAL, 2026-10-18
 
 Владелец сообщил: кандидат `/var/backups/andrew-local-recovery-27babacc943743e3aacacf3c049930e0` остановился с `Controller WAL is not quiescent`. Это отказ перед парным snapshot и заменой runtime; оба сервиса оставлены остановленными. Успешное обновление и новый рабочий ход пока не подтверждены.

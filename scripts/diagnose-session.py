@@ -167,6 +167,8 @@ def main():
                             'FROM model_turn_receipts WHERE session_id LIKE ? ORDER BY created_at DESC LIMIT 6',
                             (args.session + '%',)) if 'model_turn_receipts' in tables else []
             report['letta_recovery_metadata'] = collect_recovery_metadata(args.letta_home, receipts)
+            from recovery_projection_metadata import collect_projection_metadata
+            report['journaled_projection_metadata'] = collect_projection_metadata(args.letta_home, receipts)
         if 'cycle_recovery_checkpoints' in tables:
             report['recovery_checkpoints'] = rows(
                 'SELECT k.*,c.session_id,c.status AS cycle_status FROM cycle_recovery_checkpoints k '
@@ -224,7 +226,7 @@ def main():
         if args.brief:
             usage = report.get('usage', [])
             report = {key: report[key] for key in ('integrity', 'lifecycle', 'letta_metadata', 'letta_recovery_metadata', 'recovery_checkpoints',
-                                                  'recovery_tool_attempts', 'action_recovery', 'model_turn_receipts', 'telegram_receipts', 'media_delivery_receipts',
+                                                  'journaled_projection_metadata', 'recovery_tool_attempts', 'action_recovery', 'model_turn_receipts', 'telegram_receipts', 'media_delivery_receipts',
                                                   'local_recovery_attempts','local_recovery_effects','local_recovery_automatic_resume',
                                                   'global_reservation_count','global_reservations') if key in report} | {
                 'recent_owner_messages': report['recent_owner_messages'][:3],
