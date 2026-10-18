@@ -80,10 +80,13 @@ class ModelGateway:
                 if set(payload) != {'binding','claim','effect','scope_token'}:
                     raise ValueError('Invalid recovery command')
                 return 200, dispatch.authorize(payload['binding'],payload['claim'],payload['effect'],payload['scope_token'])
-            if path in {'/v1/recovery/result','/v1/recovery/check_scope'}:
+            if path == '/v1/recovery/settlement':
+                if set(payload)!={'binding','claim','scope_token','terminal_id'}:raise ValueError('Invalid recovery command')
+                return 200, dispatch.records.settlement(payload['binding'],payload['claim'],payload['scope_token'],payload['terminal_id'])
+            if path in {'/v1/recovery/result','/v1/recovery/check_scope','/v1/recovery/check_evidence'}:
                 with self.store._lock:
                     dispatch.records._scope(payload['binding'],payload['claim'],payload['scope_token'],dispatch=path.endswith('check_scope'))
-                    if path.endswith('check_scope'):
+                    if path.endswith(('check_scope','check_evidence')):
                         return 200, {'state':'active'}
                     row = self.store.connection.execute('SELECT binding_sha FROM recovery_effects WHERE admission_id=?',(payload['admission_id'],)).fetchone()
                     if row is None or row['binding_sha'] != digest(payload['binding']):
@@ -143,7 +146,7 @@ class ModelGateway:
                     return 200, proof['result']
             except (ValueError, KeyError, TypeError):
                 return 423, {'error': {'message': 'Recovery dispatch blocked', 'type': 'recovery_blocked'}}
-        if self.store.get_state('restore_recovery_required', '0') == '1':
+        if any(self.store.get_state(key,'0')=='1' for key in ('restore_recovery_required','local_recovery_restore_required')):
             return 423, {'error': {'message': 'Restore requires billing and action reconciliation', 'type': 'recovery_blocked'}}
         if self.store.get_state('autonomy_error', '') and not (recovery is not None and self.store.get_state('autonomy_error') == 'local_recovery_interrupted'):
             return self.uncertain_response()
@@ -375,7 +378,7 @@ def make_server(gateway, host="127.0.0.1", port=8284):
             self._json(200, {"object": "list", "data": [{"id": gateway.model_id, "object": "model", "owned_by": "andrew-controller"}]})
 
         def do_POST(self):
-            if self.path not in {"/v1/chat/completions", "/v1/recovery/authorize", "/v1/recovery/result", "/v1/recovery/check_scope", "/v1/recovery/tool"}:
+            if self.path not in {"/v1/chat/completions", "/v1/recovery/authorize", "/v1/recovery/result", "/v1/recovery/check_scope", "/v1/recovery/check_evidence", "/v1/recovery/settlement", "/v1/recovery/tool"}:
                 self._json(404, {"error": {"message": "not found"}})
                 return
             if not hmac.compare_digest(self.headers.get("Authorization", ""), f"Bearer {gateway.gateway_token}"):

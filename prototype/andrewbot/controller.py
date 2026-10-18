@@ -6,6 +6,7 @@ from .budget import budget_snapshot
 from .configuration import OUTPUT_TOKEN_COST_ESTIMATE, ModelConfig, load_model_config
 from .diary import format_diary_entry, parse_diary_command, validate_diary_content
 from .telegram_menu import BUTTON_COMMANDS, HELP_TEXT
+from .runner_client import TOOL_CANCELLATION
 from .appserver import AppServerClient, LettaTurnError, LettaTurnCancelled
 from .memory import ResearchJournal, SessionHistory, validate_memory_text, note_untrusted_memory_source
 from .gmail_tools import GMAIL_TOOL_NAMES, GMAIL_ACTION_CONTEXT
@@ -324,8 +325,12 @@ class Controller:
     def execute_tool(self, name, arguments, *, recovery=None):
         if recovery is not None:
             from .recovery_dispatch import RecoveryDispatch
-            return RecoveryDispatch(self.store).run_tool(
-                recovery, name, arguments, lambda: self.execute_tool(name, arguments))
+            coordinator=getattr(self,'local_recovery',None)
+            token=TOOL_CANCELLATION.set(coordinator._active_cancel if coordinator is not None else None)
+            try:
+                return RecoveryDispatch(self.store).run_tool(
+                    recovery, name, arguments, lambda: self.execute_tool(name, arguments))
+            finally:TOOL_CANCELLATION.reset(token)
         if name in (AppServerClient.EXTERNAL_TOOL_NAMES | {'gmail.read', 'research.list', 'research.get'}):
             note_untrusted_memory_source()
         known = (AppServerClient.SAFE_CONTROLLER_TOOL_NAMES | AppServerClient.EXTERNAL_TOOL_NAMES

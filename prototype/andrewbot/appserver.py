@@ -64,6 +64,9 @@ class LettaTurnYielded(RuntimeError):
 
 def _safe_error_category(response):
     """Reduce an untrusted Letta error payload to a fixed, safe category."""
+    recovery_categories={'legacy_unproven','binding_mismatch','unsupported_contract','provider_uncertain','tool_uncertain',
+        'authority_lost','state_corrupt','storage_limit','owner_blocked','configuration_changed','restore_required','projection_conflict','revision_conflict','recovery_held'}
+    if response.get('error_category') in recovery_categories:return response['error_category']
     parts = []
 
     def collect(value):
@@ -749,6 +752,11 @@ class LettaAgent:
             runtime = self._startup_check("Letta conversation validation", client.prepare_conversation, self.agent_id, self.conversation_id or None)
             self.conversation_id = runtime["conversation_id"]
             self._startup_check("Letta conversation ID persistence", self.store.set_state, "letta_conversation_id", self.conversation_id)
+            recovery=getattr(self,'local_recovery',None)
+            if recovery is not None and recovery.enabled:
+                from .recovery import LocalRecoveryClient
+                LocalRecoveryClient(client).capabilities()
+                self.store.set_state('local_recovery_config_sha',recovery.configuration_digest(client))
             if self.owner_id is not None:
                 letter = self._startup_check('Founding letter archive', self.store.ensure_founding_letter, self.founding_letter)
                 if not self._startup_check('Founding letter receipt', self._verify_founding_letter, client, letter):
@@ -793,6 +801,8 @@ class LettaAgent:
             query = {**query, 'before': before}
 
     def cancel_active_turn(self):
+        recovery=getattr(self,'local_recovery',None)
+        if recovery is not None and recovery.enabled:recovery.cancel_active()
         with self._turn_lock:
             if self._turn_cancel is None:
                 return
@@ -842,6 +852,15 @@ class LettaAgent:
                 self.agent_id = self.store.get_state("letta_agent_id", "")
             if not self.agent_id:
                 raise RuntimeError("Andrew's persistent Letta agent has not been initialized")
+            recovery=getattr(self,'local_recovery',None)
+            if recovery is not None and recovery.enabled:
+                runtime=client.prepare_conversation(self.agent_id,self.conversation_id or None)
+                self.conversation_id=runtime['conversation_id']
+                self.store.set_state('letta_conversation_id',self.conversation_id)
+                reply=recovery.run_turn(client,runtime,text,origin=origin,cancelled=cancelled)
+                if cancelled.is_set():raise LettaTurnCancelled('Owner cancelled this turn')
+                self._verify_founding_letter(client)
+                return reply, {'accounted_by_gateway':True}
             runtime = client.start_runtime(self.agent_id, self.conversation_id or None)
             with self._turn_lock:
                 self._active_runtime = runtime

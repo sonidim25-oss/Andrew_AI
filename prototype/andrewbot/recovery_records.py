@@ -64,29 +64,49 @@ def initialize_schema(store):
             admission_id TEXT PRIMARY KEY REFERENCES recovery_effects(admission_id),
             result_sha TEXT NOT NULL,result_json TEXT NOT NULL,usage_json TEXT,created_at TEXT NOT NULL);
     ''')
+    columns={row[1] for row in store.connection.execute('PRAGMA table_info(recovery_attempts)')}
+    for name,declaration in (('origin', "TEXT NOT NULL DEFAULT 'autonomous'"),('terminal_json','TEXT'),('untrusted','INTEGER NOT NULL DEFAULT 0'),('hold_reason','TEXT')):
+        if name not in columns:store.connection.execute('ALTER TABLE recovery_attempts ADD COLUMN '+name+' '+declaration)
 
 
 class RecoveryRecords:
     def __init__(self,store):self.store=store
 
-    def _guard(self,binding):
+    def _guard(self,binding,origin='autonomous'):
         validate_binding(binding)
-        if any(self.store.get_state(key,'0')=='1' for key in ('paused','sleeping','restore_recovery_required')):raise ValueError('Recovery owner_blocked')
+        if origin=='owner':
+            if (self.store.get_state('model_turn_origin','')!='owner'
+                    or self.store.get_state('owner_control_revision','0')!=binding['owner_revision']
+                    or self.store.get_state('letta_agent_id','')!=binding['agent_id']
+                    or self.store.get_state('letta_conversation_id','')!=binding['conversation_id']
+                    or self.store.get_state('local_recovery_config_sha','')!=binding['config_sha']
+                    or any(self.store.get_state(key,'0')=='1' for key in ('paused','restore_recovery_required','local_recovery_restore_required'))):raise ValueError('Recovery owner_blocked')
+            return
+        if origin!='autonomous':raise ValueError('Recovery unsupported_contract')
+        if any(self.store.get_state(key,'0')=='1' for key in ('paused','sleeping','restore_recovery_required','local_recovery_restore_required')):raise ValueError('Recovery owner_blocked')
         if (self.store.get_state('owner_control_revision','0')!=binding['owner_revision']
                 or self.store.get_state('active_session_id','')!=binding['session_id']
                 or self.store.get_state('active_cycle_id','')!=binding['cycle_id']
                 or self.store.get_state('local_recovery_config_sha','')!=binding['config_sha']):raise ValueError('Recovery binding_mismatch')
         receipt=self.store.connection.execute('SELECT * FROM model_turn_receipts WHERE cycle_id=? AND session_id=?',(binding['cycle_id'],binding['session_id'])).fetchone()
         if receipt is None or any(receipt[key]!=binding[key] for key in ('agent_id','conversation_id','client_message_id','owner_revision')) or receipt['request_id']!=binding['consumer_id']:raise ValueError('Recovery binding_mismatch')
-        if self.store.pending_owner_input(int(self.store.get_state('autonomous_owner_id','0') or '0')):raise ValueError('Recovery owner_blocked')
+        if self.store.pending_owner_input(int(self.store.get_state('local_recovery_owner_id','') or self.store.get_state('autonomous_owner_id','0') or '0')):raise ValueError('Recovery owner_blocked')
         if self.store.get_state('autonomy_error','') not in ('','local_recovery_interrupted'):raise ValueError('Recovery owner_blocked')
 
-    def admit_scope(self,binding):
+    def admit_scope(self,binding,*,origin='autonomous',evidence_only=False):
         with self.store._lock,self.store.connection:
-            self._guard(binding)
+            if evidence_only:
+                validate_binding(binding)
+                old=self.store.connection.execute('SELECT origin FROM recovery_attempts WHERE binding_sha=? ORDER BY rowid DESC LIMIT 1',(digest(binding),)).fetchone()
+                if old is None or old['origin']!=origin:raise ValueError('Recovery legacy_unproven')
+            else:self._guard(binding,origin)
+            previous_attempt=self.store.connection.execute('SELECT backend_attempt_id FROM recovery_attempts WHERE binding_sha=? ORDER BY rowid DESC LIMIT 1',(digest(binding),)).fetchone()
+            tainted=self.store.connection.execute('SELECT coalesce(max(untrusted),0) FROM recovery_attempts WHERE binding_sha=?',(digest(binding),)).fetchone()[0]
             token=secrets.token_hex(32);scope_id=uuid.uuid4().hex;binding_sha=digest(binding)
             self.store.connection.execute("UPDATE recovery_attempts SET state='revoked' WHERE binding_sha=? AND state NOT IN ('complete','revoked')",(binding_sha,))
-            self.store.connection.execute("INSERT INTO recovery_attempts(admission_id,binding_sha,binding_json,token_sha,state,created_at) VALUES(?,?,?,?,'active',?)",(scope_id,binding_sha,canonical(binding),hashlib.sha256(token.encode()).hexdigest(),self.store.now()))
+            self.store.connection.execute("INSERT INTO recovery_attempts(admission_id,binding_sha,binding_json,token_sha,state,created_at,origin) VALUES(?,?,?,?,'active',?,?)",(scope_id,binding_sha,canonical(binding),hashlib.sha256(token.encode()).hexdigest(),self.store.now(),origin))
+            self.store.connection.execute('UPDATE recovery_attempts SET untrusted=?,backend_attempt_id=? WHERE admission_id=?',(tainted,previous_attempt[0] if previous_attempt else None,scope_id))
+            if evidence_only:self.store.connection.execute("UPDATE recovery_attempts SET state='evidence' WHERE admission_id=?",(scope_id,))
             return {'admission_id':scope_id,'scope_token':token}
 
     def _scope(self,binding,claim,token,*,dispatch=True):
@@ -100,7 +120,7 @@ class RecoveryRecords:
             if (type(expiry) not in (int,float) or not math.isfinite(expiry)
                     or expiry<=time.monotonic()*1000 or expiry>time.monotonic()*1000+15500
                     or claim.get('boot_id')!=boot):raise ValueError('Recovery authority_lost')
-            self._guard(binding)
+            self._guard(binding,row['origin'])
             if row['state']!='active' or claim['fence']<row['fence']:raise ValueError('Recovery authority_lost')
         return row
 
@@ -114,7 +134,11 @@ class RecoveryRecords:
             if old:
                 if old['request_sha']!=effect['request_sha']:raise ValueError('Recovery binding_mismatch')
                 if old['state']=='confirmed':return {'admission_id':effect_id,'state':'confirmed','token':None}
-                if old['scope_id']!=scope['admission_id'] or old['fence']!=claim['fence']:return {'admission_id':effect_id,'state':'uncertain','token':None}
+                if old['scope_id']!=scope['admission_id'] or old['fence']!=claim['fence']:
+                    if old['state']=='prepared' and old['reservation_id'] is None and claim['fence']>old['fence']:
+                        self.store.connection.execute("UPDATE recovery_effects SET scope_id=?,fence=?,token_sha=? WHERE admission_id=? AND state='prepared'",
+                            (scope['admission_id'],claim['fence'],hashlib.sha256(token.encode()).hexdigest(),effect_id))
+                    else:return {'admission_id':effect_id,'state':'uncertain','token':None}
             else:
                 self.store.connection.execute("INSERT INTO recovery_effects(admission_id,scope_id,binding_sha,kind,effect_id,request_sha,token_sha,fence,state,created_at) VALUES(?,?,?,?,?,?,?,?,'prepared',?)",(effect_id,scope['admission_id'],digest(binding),effect['kind'],effect['effect_id'],effect['request_sha'],hashlib.sha256(token.encode()).hexdigest(),claim['fence'],self.store.now()))
             self.store.connection.execute('UPDATE recovery_attempts SET fence=? WHERE admission_id=?',(claim['fence'],scope['admission_id']))
@@ -165,19 +189,56 @@ class RecoveryRecords:
         self.store.connection.execute('INSERT INTO recovery_results VALUES(?,?,?,?,?)',(admission_id,hashlib.sha256(encoded.encode()).hexdigest(),encoded,canonical(usage) if usage is not None else None,self.store.now()))
         self.store.connection.execute("UPDATE recovery_effects SET state='confirmed' WHERE admission_id=?",(admission_id,))
 
-    def confirm_tool(self,admission_id,result):
+    def confirm_tool(self,admission_id,result,*,terminal_stop=None):
         encoded=canonical(result)
         if len(encoded.encode())>MAX_PAYLOAD:raise ValueError('Recovery storage_limit')
         with self.store._lock,self.store.connection:
             row=self.store.connection.execute('SELECT state FROM recovery_effects WHERE admission_id=?',(admission_id,)).fetchone()
             if row is None or row['state']!='admitted':raise ValueError('Recovery tool_uncertain')
-            self._confirm(admission_id,encoded,None)
+            self._confirm(admission_id,encoded,{'terminal_stop':terminal_stop} if terminal_stop in {'sleep','wake_at'} else None)
 
     def effect_result(self,admission_id):
         with self.store._lock:
             row=self.store.connection.execute('SELECT r.* FROM recovery_results r JOIN recovery_effects e ON e.admission_id=r.admission_id WHERE r.admission_id=? AND e.state=\'confirmed\'',(admission_id,)).fetchone()
             if row is None:return {'state':'uncertain','admission_id':admission_id}
-            return {'state':'confirmed','admission_id':admission_id,'result_sha':row['result_sha'],'result':json.loads(row['result_json']),'usage':json.loads(row['usage_json']) if row['usage_json'] else None}
+            usage=json.loads(row['usage_json']) if row['usage_json'] else None
+            return {'state':'confirmed','admission_id':admission_id,'result_sha':row['result_sha'],'result':json.loads(row['result_json']),'usage':usage,
+                **({'terminal_stop':usage['terminal_stop']} if isinstance(usage,dict) and usage.get('terminal_stop') in {'sleep','wake_at'} else {})}
+
+    def complete_scope(self,admission_id,binding,terminal):
+        validate_binding(binding)
+        if (not isinstance(terminal,dict) or not valid_id(terminal.get('id')) or not valid_id(terminal.get('run_id'))
+                or set(terminal)-{'id','run_id','consumer_id','stop_reason','assistant_ids','result_admission_id','lifecycle_stop','acknowledged','settled'}
+                or ('lifecycle_stop' in terminal and terminal['lifecycle_stop'] not in {'sleep','wake_at'})
+                or any(key in terminal and type(terminal[key]) is not bool for key in ('acknowledged','settled'))
+                or terminal.get('consumer_id')!=binding['consumer_id'] or terminal.get('stop_reason')!='end_turn'
+                or not isinstance(terminal.get('assistant_ids'),list) or not terminal['assistant_ids']
+                or len(terminal['assistant_ids'])>256 or not all(valid_id(item) for item in terminal['assistant_ids'])
+                or not valid_id(terminal.get('result_admission_id'))):raise ValueError('Recovery binding_mismatch')
+        terminal={key:value for key,value in terminal.items() if key not in {'acknowledged','settled'}}
+        encoded=canonical(terminal)
+        with self.store._lock,self.store.connection:
+            row=self.store.connection.execute('SELECT * FROM recovery_attempts WHERE admission_id=?',(admission_id,)).fetchone()
+            if row is None or row['binding_sha']!=digest(binding):raise ValueError('Recovery binding_mismatch')
+            if row['terminal_json'] is not None:
+                if row['terminal_json']!=encoded:raise ValueError('Recovery binding_mismatch')
+                return
+            effects=self.store.connection.execute('SELECT * FROM recovery_effects WHERE binding_sha=?',(digest(binding),)).fetchall()
+            if (not effects or any(effect['state']!='confirmed' for effect in effects)
+                    or terminal['result_admission_id'] not in {effect['admission_id'] for effect in effects}
+                    or self.store.cycle_uncertain_effects(binding['cycle_id'])):raise ValueError('Recovery provider_uncertain')
+            for effect in effects:
+                if effect['reservation_id'] and self.store.connection.execute('SELECT 1 FROM budget_reservations WHERE reservation_id=?',(effect['reservation_id'],)).fetchone():raise ValueError('Recovery provider_uncertain')
+            self.store.connection.execute("UPDATE recovery_attempts SET terminal_json=? WHERE admission_id=?",(encoded,admission_id))
+
+    def settlement(self,binding,claim,token,terminal_id):
+        with self.store._lock:
+            row=self._scope(binding,claim,token,dispatch=False)
+            terminal=json.loads(row['terminal_json']) if row['terminal_json'] else None
+            if not terminal or terminal['id']!=terminal_id:raise ValueError('Recovery binding_mismatch')
+            effects=self.store.connection.execute('SELECT admission_id,state FROM recovery_effects WHERE binding_sha=?',(digest(binding),)).fetchall()
+            if any(effect['state']!='confirmed' for effect in effects):raise ValueError('Recovery provider_uncertain')
+            return {'settled':True,'binding':binding,'terminal_id':terminal_id,'admission_ids':sorted(effect['admission_id'] for effect in effects)}
 
     def revoke(self,admission_id):
         with self.store._lock,self.store.connection:self.store.connection.execute("UPDATE recovery_attempts SET state='revoked' WHERE admission_id=?",(admission_id,))

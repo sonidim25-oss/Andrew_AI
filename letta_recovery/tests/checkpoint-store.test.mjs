@@ -64,6 +64,13 @@ test('quota_is_scoped_to_one_conversation',t=>{
  assert.equal(store.inspect(other).phase,'input_committed');
  assert.equal(store.load(first).revision,1);
 });
+
+test('projection_bytes_count_toward_the_conversation_quota',t=>{
+ const {store}=initialized(t,{conversation:2000});input(store);
+ assert.throws(()=>store.assertProjectionBudget(binding,1900),/storage_limit/);
+ writeFileSync(store.checkpointPath(binding).replace(/\.json$/,'.projection.json'),'x'.repeat(1900));
+ assert.throws(()=>store.commit(binding,1,{type:'provider_admit',effect_id:'step-1',request_sha:'c'.repeat(64)}),/storage_limit/);
+});
 test('malformed_confirmed_checkpoint_is_not_completion_evidence',t=>{
  const {store}=initialized(t);input(store);const path=store.checkpointPath(binding);
  const value=JSON.parse(readFileSync(path));value.phase='provider_confirmed';

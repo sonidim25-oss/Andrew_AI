@@ -9,8 +9,8 @@ import {binding as baseBinding,acquireLock,directory} from './fixtures.mjs';
 
 export const textResponse={id:'provider-fixture',choices:[{index:0,message:{role:'assistant',content:'Fixture completed.'},finish_reason:'stop'}],usage:{prompt_tokens:5,completion_tokens:3,cost:.001}};
 export const toolResponse={id:'provider-tool-fixture',choices:[{index:0,message:{role:'assistant',content:null,tool_calls:[{id:'call-fixture',type:'function',function:{name:'recent_activity',arguments:'{}'}}]},finish_reason:'tool_calls'}],usage:{prompt_tokens:5,completion_tokens:3,cost:.001}};
-export async function executionFixture(t,{responses=[textResponse],unknownProvider=false,unknownTool=false}={}){
- const root=directory(t),input={model:'fixture',messages:[{role:'user',content:'fixture'}],tools:[{type:'function',function:{name:'recent_activity',parameters:{type:'object'}}}]};
+export async function executionFixture(t,{responses=[textResponse],unknownProvider=false,unknownTool=false,tools=[{type:'function',function:{name:'recent_activity',parameters:{type:'object'}}}]}={}){
+ const root=directory(t),input={model:'fixture',messages:[{role:'user',content:'fixture'}],tools};
  const binding={...baseBinding,input_sha:digest(input)},store=new CheckpointStore({root:join(root,'state'),acquireLock});store.initialize(binding.store_id);
  const ownership=new OwnershipManager({store}),results=new Map(),counts={provider:0,tool:0},projection=join(root,'projection.json');
  const gate={async authorize(bound,claim,effect){ownership.assertOwned(claim);return {...effect,admission_id:effect.effect_id,binding:bound,token:'fixture-token',fence:claim.fence};},async result(admission){return results.get(admission.admission_id)??{state:'uncertain',admission_id:admission.admission_id};}};

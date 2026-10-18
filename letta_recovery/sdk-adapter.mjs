@@ -1,10 +1,11 @@
 import {join} from 'node:path';
 import {canonical,digest} from './contracts.mjs';
+import {assertNotRestored} from './adoption.mjs';
 import {atomicWrite,readJSON} from './payload-store.mjs';
 
 // Transport credentials never enter a checkpoint, projection or model payload.
 export class LocalSDKAdapter{
- constructor({backend,resolveModel,root}){this.backend=backend;this.resolveModel=resolveModel;this.root=root;this.scopes=new Map();}
+ constructor({backend,resolveModel,root,assertAdoptable}){this.assertAdoptable=assertAdoptable;this.backend=backend;this.resolveModel=resolveModel;this.root=root;this.scopes=new Map();}
  async connection(binding){
   const resolved=await this.resolveModel(binding);
   const url=new URL(resolved.model.baseUrl);
@@ -19,18 +20,20 @@ export class LocalSDKAdapter{
  }
  setScope(binding,scope){this.scopes.set(digest(binding),scope);}
  scope(binding){const scope=this.scopes.get(digest(binding));if(!scope)throw Error('authority_lost');return scope;}
+ async checkEvidence(binding,claim){return this.request(binding,'/recovery/check_evidence',{binding,claim,scope_token:this.scope(binding).scope_token});}
+ async settlement(binding,claim,terminal_id){return this.request(binding,'/recovery/settlement',{binding,claim,terminal_id,scope_token:this.scope(binding).scope_token});}
  async checkScope(binding,claim){return this.request(binding,'/recovery/check_scope',{binding,claim,scope_token:this.scope(binding).scope_token});}
  gate(){return {
   authorize:async(binding,claim,effect)=>{
-   const scope=this.scope(binding),admission=await this.request(binding,'/recovery/authorize',{binding,claim,effect,scope_token:scope.scope_token});
+   assertNotRestored(this.root);const scope=this.scope(binding),admission=await this.request(binding,'/recovery/authorize',{binding,claim,effect,scope_token:scope.scope_token});
    return {...admission,binding,claim,scope_token:scope.scope_token};
   },
   result:async({binding,admission_id})=>{
    const scope=this.scope(binding);return this.request(binding,'/recovery/result',{binding,admission_id,claim:scope.claim(),scope_token:scope.scope_token});
   }
  };}
- async executeProviderStep(request,admission){return this.request(admission.binding,'/chat/completions',request,{'X-Andrew-Recovery':JSON.stringify(admission)});}
- async executeTool(call,admission){return this.request(admission.binding,'/recovery/tool',{name:call.name,arguments:call.arguments,recovery:admission});}
+ async executeProviderStep(request,admission){assertNotRestored(this.root);return this.request(admission.binding,'/chat/completions',request,{'X-Andrew-Recovery':JSON.stringify(admission)});}
+ async executeTool(call,admission){assertNotRestored(this.root);return this.request(admission.binding,'/recovery/tool',{name:call.name,arguments:call.arguments,recovery:admission});}
  _messages(binding){return this.backend.store.listLocalMessages(binding.conversation_id,binding.agent_id);}
  _wire(message){
   const content=message.content;
@@ -44,20 +47,31 @@ export class LocalSDKAdapter{
   const calls=blocks.filter(block=>block.type==='toolCall').map(block=>({id:block.id,type:'function',function:{name:block.name,arguments:canonical(block.arguments)}}));
   return {role:'assistant',content:text||null,...(calls.length?{tool_calls:calls}:{})};
  }
+ _contextMessages(binding,native){
+  const summary=this._projection(binding).rows.findLast(row=>row.kind==='compaction');
+  if(!summary)return native.map(row=>this._wire(row));
+  const index=native.findIndex(row=>row.metadata?.andrew_recovery?.operation_id===summary.operation_id);
+  if(index<0||!Array.isArray(summary.value.tail))throw Error('projection_conflict');
+  return [this._wire(native[index]),...summary.value.tail,...native.slice(index+1).map(row=>this._wire(row))];
+ }
  async prepareProviderStep(binding,context){
   let prepared=context;
   const connection=await this.connection(binding);
+  if(context.model&&context.model!==connection.model)throw Error('configuration_changed');
   if(!context._recovery_prepared){
+   await this.readProjectionOperations(binding);
    const store=this.backend.store,agent=store.retrieveExecutionAgentRecord(binding.conversation_id,binding.agent_id);
-   const native=this._messages(binding).filter(row=>row.metadata?.andrew_recovery?.input_sha!==binding.input_sha);
+   const native=this._messages(binding).filter(row=>row.metadata?.andrew_recovery?.binding_sha!==digest(binding));
    // Projected rows from this input are not part of the baseline history.
    const prompt=await this.backend.resolveSystemPromptForTurn({conversationId:binding.conversation_id,agentId:binding.agent_id,agent,
     body:{},history:store.listConversationMessages(binding.conversation_id,{agent_id:binding.agent_id,order:'asc'}),uiMessages:native});
    const system=typeof prompt==='string'?prompt:prompt.systemPrompt;
-   prepared={...context,model:connection.model,_recovery_prepared:true,messages:[{role:'system',content:system},...native.map(row=>this._wire(row)),...(prompt.midConversationSystemPrompt?[{role:'system',content:prompt.midConversationSystemPrompt}]:[]),...context.messages]};
+   prepared={...context,model:connection.model,_recovery_prepared:true,messages:[{role:'system',content:system},...this._contextMessages(binding,native),...(prompt.midConversationSystemPrompt?[{role:'system',content:prompt.midConversationSystemPrompt}]:[]),...context.messages]};
   }
   const {_recovery_prepared,_recovery_compacted,...request}=prepared;
-  if(Buffer.byteLength(canonical(request))/3>.8*(connection.contextWindow-connection.maxTokens)){
+  const reserve=Math.min(connection.maxTokens??6000,6000,Math.floor(connection.contextWindow/4));
+  if(!Number.isFinite(reserve)||reserve<1)throw Error('configuration_changed');
+  if(Buffer.byteLength(canonical(request))/3>.8*(connection.contextWindow-reserve)){
    const lastUser=prepared.messages.findLastIndex(message=>message.role==='user');
    const prefix=prepared.messages.slice(0,lastUser).filter(message=>message.role!=='system');
    if(!prefix.length||prepared._recovery_compacted)throw Error('storage_limit');
@@ -76,14 +90,14 @@ export class LocalSDKAdapter{
  _projectionPath(binding){return join(this.root,'conversations',digest({agent_id:binding.agent_id,conversation_id:binding.conversation_id})+'.projection.json');}
  _projection(binding){try{return readJSON(this._projectionPath(binding),16777216);}catch(error){if(error.code==='ENOENT')return {version:1,baseline:null,rows:[]};throw error;}}
  _nativeRow(row,binding,index){
-  const id='message-'+digest(row.operation_id),metadata={andrew_recovery:{operation_id:row.operation_id,digest:row.digest,input_sha:binding.input_sha}},timestamp=Date.now()+index;
+  const id='message-'+digest(row.operation_id),metadata={andrew_recovery:{operation_id:row.operation_id,digest:row.digest,binding_sha:row.binding_sha??digest(binding),input_sha:row.input_sha??binding.input_sha}},timestamp=Date.now()+index;
   const base={id,metadata,timestamp};
   if(row.kind==='input'){
    if(row.value.messages.length!==1||row.value.messages[0].role!=='user'||typeof row.value.messages[0].content!=='string')throw Error('unsupported_contract');
    return {...base,role:'user',content:[{type:'text',text:row.value.messages[0].content}]};
   }
-  if(row.kind==='tool')return {...base,role:'toolResult',toolCallId:row.value.call_id,toolName:row.value.name,isError:false,content:[{type:'text',text:canonical(row.value.result)}]};
-  if(row.kind==='compaction')return {...base,role:'user',content:[{type:'text',text:'Conversation summary:\n'+row.value.choices[0].message.content}]};
+  if(row.kind==='tool')return {...base,role:'toolResult',toolCallId:row.value.call_id,toolName:row.value.name,isError:row.value.cancelled===true,content:[{type:'text',text:canonical(row.value.result)}]};
+  if(row.kind==='compaction')return {...base,role:'user',content:[{type:'text',text:'Conversation summary:\n'+row.value.response.choices[0].message.content}]};
   const choice=row.value.choices[0],message=choice.message,content=[];
   if(message.content)content.push({type:'text',text:message.content});
   for(const call of message.tool_calls??[])content.push({type:'toolCall',id:call.id,name:call.function.name,arguments:JSON.parse(call.function.arguments)});
@@ -103,12 +117,13 @@ export class LocalSDKAdapter{
   }
   return result;
  }
- async replaceProjection(binding,rows){
-  await this.readProjectionOperations(binding);
+ async replaceProjection(binding,rows,assertOwned,assertBudget){
+  await this.readProjectionOperations(binding);assertOwned();
   const store=this.backend.store,native=this._messages(binding),legacy=native.filter(row=>!row.metadata?.andrew_recovery);
   const existing=new Map(native.filter(row=>row.metadata?.andrew_recovery).map(row=>[row.metadata.andrew_recovery.operation_id,row]));
   // Intent is durable first; a crash before transcript replacement reapplies the missing rows.
-  atomicWrite(this._projectionPath(binding),Buffer.from(canonical({version:1,baseline:digest(legacy),rows})));
+  const bytes=Buffer.from(canonical({version:1,baseline:digest(legacy),rows}));assertBudget(bytes.length);
+  atomicWrite(this._projectionPath(binding),bytes);
   const messages=[...legacy,...rows.map((row,index)=>existing.get(row.operation_id)??this._nativeRow(row,binding,index))];
   const key=store.conversationKey(binding.conversation_id,binding.agent_id);
   store.localMessagesByConversationKey.set(key,messages);store.rebuildMessageIndex();

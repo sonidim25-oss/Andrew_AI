@@ -3,21 +3,21 @@ import assert from 'node:assert/strict';
 import {existsSync,readdirSync,readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {RecoveryProtocol} from '../protocol.mjs';
-import {canonical,digest} from '../contracts.mjs';
+import {CONTRACT,canonical,digest} from '../contracts.mjs';
 import {directory,acquireLock,binding as baseBinding} from './fixtures.mjs';
 import {textResponse} from './execution-fixture.mjs';
 
 function fixture(t){
  const root=join(directory(t),'recovery');let provider=0,queue=0,scopeChecks=0;
  let rows=[];const results=new Map();
- const sdk={setScope(binding,scope){this.scope=scope;},checkScope(){scopeChecks++;},
+ const sdk={assertAdoptable(){},checkEvidence(){},setScope(binding,scope){this.scope=scope;},checkScope(){scopeChecks++;},
  gate(){return {authorize:async(binding,claim,effect)=>({admission_id:effect.effect_id}),result:async({admission_id})=>results.get(admission_id)};},
  async executeProviderStep(request,admission){provider++;results.set(admission.admission_id,{state:'confirmed',admission_id:admission.admission_id,result:textResponse,result_sha:digest(textResponse),usage:{settled:true}});},
  readProjectionOperations(){return rows;},replaceProjection(binding,next){rows=next;}};
  const protocol=new RecoveryProtocol({root,sdk,connectionId:'connection-fixture',acquireLock});t.after(()=>protocol.close());
  const input={messages:[{role:'user',content:'fixture'}],tools:[]},binding={...baseBinding,store_id:protocol.storeId,input_sha:digest(input)};
  const scope={admission_id:'scope-fixture',scope_token:'a'.repeat(64)};
- const command=(type,fields={})=>protocol.handleRecoveryCommand({type,binding,...scope,...fields});
+ const command=(type,fields={})=>protocol.handleRecoveryCommand({type,contract:CONTRACT,version:1,...(type==='recovery_capabilities'?{}:{binding,...scope}),...fields});
  return {root,protocol,command,input,binding,scope,get provider(){return provider;},get queue(){return queue;},get scopeChecks(){return scopeChecks;}};
 }
 async function admitted(f){await f.command('recovery_admit',{input:f.input});const revision=f.protocol.store.load(f.binding).revision;return f.command('recovery_claim',{expected_revision:revision});}
@@ -55,8 +55,9 @@ test('claim_cannot_authorize_another_binding_or_admission',async t=>{
  const fields={claim_id:claim.claim_id,fence:claim.fence};
  const before=readFileSync(f.protocol.store.checkpointPath(f.binding));
  for(const type of ['recovery_renew','recovery_release','recovery_revoke','recovery_ack','recovery_resume']){
-  await assert.rejects(f.command(type,{...fields,binding:{...f.binding,cycle_id:'another-cycle'},attempt_id:'foreign-attempt',expected_revision:claim.revision}),/authority_lost/);
-  await assert.rejects(f.command(type,{...fields,admission_id:'another-scope',attempt_id:'foreign-attempt',expected_revision:claim.revision}),/authority_lost/);
+  const extra=type==='recovery_resume'?{attempt_id:'foreign-attempt',expected_revision:claim.revision}:type==='recovery_ack'?{expected_revision:claim.revision,terminal_id:'foreign-terminal',consumer_id:f.binding.consumer_id}:{};
+  await assert.rejects(f.command(type,{...fields,...extra,binding:{...f.binding,cycle_id:'another-cycle'}}),/authority_lost/);
+  await assert.rejects(f.command(type,{...fields,...extra,admission_id:'another-scope'}),/authority_lost/);
  }
  assert.deepEqual(readFileSync(f.protocol.store.checkpointPath(f.binding)),before);
  assert.equal(f.provider,0);
@@ -84,7 +85,7 @@ test('raw_results_require_a_live_connection_claim_and_controller_scope',async t=
  const f=fixture(t),claim=await admitted(f);
  await f.command('recovery_resume',{attempt_id:'attempt-fixture',expected_revision:claim.revision,claim_id:claim.claim_id,fence:claim.fence});
  await completed(f);const snapshot=f.protocol.store.load(f.binding),effect_admission_id=snapshot.steps[0].admission_id;
- await assert.rejects(f.command('recovery_result_read',{effect_admission_id}),/authority_lost/);
+ await assert.rejects(f.command('recovery_result_read',{effect_admission_id,claim_id:'foreign-claim',fence:claim.fence}),/authority_lost/);
  const fields={effect_admission_id,claim_id:claim.claim_id,fence:claim.fence};
  const checks=f.scopeChecks,result=await f.command('recovery_result_read',fields);
  assert.deepEqual(result.result,textResponse);assert.equal(f.scopeChecks,checks+1);

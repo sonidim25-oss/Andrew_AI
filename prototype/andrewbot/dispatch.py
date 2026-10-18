@@ -306,6 +306,10 @@ class ControllerDispatch:
     def _finish_model_pass(self):
         if self._poll_stop.is_set() or self.should_stop():
             return
+        recovery=getattr(self.sessions.agent,'local_recovery',None) if hasattr(self.sessions,'agent') else None
+        if recovery is not None and recovery.enabled is True and recovery.has_pending():
+            self.guarded('Journaled model recovery',recovery.reconcile_one)
+            return
         self.guarded('Queued messages', lambda: self._run_stage('queued', lambda: self.store.queue_reply(
             self.owner_id, self.controller.flush_queued())))
         self._reply_ready.set()

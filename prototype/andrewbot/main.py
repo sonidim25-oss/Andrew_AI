@@ -126,7 +126,7 @@ def run(validate_only=False):
     except Exception as error:
         logging.error("Startup validation failed: controller database access (%s)", type(error).__name__)
         return 2
-    if store.get_state('restore_recovery_required', '0') == '1':
+    if any(store.get_state(key,'0')=='1' for key in ('restore_recovery_required','local_recovery_restore_required')):
         logging.error('Restored database is halted pending administrator billing and action reconciliation')
         store.close()
         return 2 if validate_only else 0
@@ -210,6 +210,11 @@ def run(validate_only=False):
         credit_reader=provider.credit_status,
     )
     agent.tool_handler = controller.execute_tool
+    if env_enabled('ANDREW_LOCAL_RECOVERY_ENABLED',False):
+        from .recovery import RecoveryCoordinator
+        recovery=RecoveryCoordinator(store,controller,enabled=True)
+        agent.local_recovery=controller.local_recovery=recovery
+        model_gateway.recovery_tool_handler=controller.execute_tool
     check = "Letta provider and persistent agent initialization"
     try:
         agent.initialize()

@@ -12,10 +12,10 @@ export class RecoveryExecution{
  _commit(binding,claim,event){this.ownership.assertOwned(claim);const current=this.store.load(binding);return this.store.commit(binding,current.revision,{...event,fence:claim.fence,claim_id:claim.claim_id});}
  _hold(binding,claim,reason){return this._commit(binding,claim,{type:'hold',reason});}
  async _confirm(binding,claim,kind,item){
-  let proof;try{proof=await this.gate.result({admission_id:item.admission_id,binding,effect_id:item.effect_id,kind});}catch{proof=null;}
+  let proof;try{proof=await this.gate.result({admission_id:item.admission_id,binding,effect_id:item.effect_id,kind});}catch{throw Error('authority_lost');}
   if(proof?.state!=='confirmed'||proof.admission_id!==item.admission_id||proof.result_sha!==digest(proof.result)
     ||(kind!=='tool'&&proof.usage?.settled!==true))return this._hold(binding,claim,kind==='tool'?'tool_uncertain':'provider_uncertain');
-  return this._commit(binding,claim,{type:kind==='tool'?'tool_confirm':'provider_confirm',effect_id:item.effect_id,result:proof.result,usage:proof.usage});
+  return this._commit(binding,claim,{type:kind==='tool'?'tool_confirm':'provider_confirm',effect_id:item.effect_id,result:proof.result,usage:proof.usage,...(kind==='tool'&&['sleep','wake_at'].includes(proof.terminal_stop)?{terminal_stop:proof.terminal_stop}:{})});
  }
  async advance(binding,claim){
   this.ownership.assertOwned(claim);const state=this.store.load(binding);if(!state)throw Error('missing checkpoint');
@@ -56,10 +56,16 @@ export class RecoveryExecution{
     }catch{return this._hold(binding,claim,'tool_uncertain');}
    }
    if(choice.finish_reason!=='stop'||typeof choice.message.content!=='string'||!choice.message.content.trim())return this._hold(binding,claim,'state_corrupt');
-   const terminal={id:randomUUID(),run_id:state.run_id,consumer_id:binding.consumer_id,stop_reason:'end_turn',assistant_ids:['provider:'+step.effect_id]};
+   const terminal={id:randomUUID(),run_id:state.run_id,consumer_id:binding.consumer_id,stop_reason:'end_turn',assistant_ids:['provider:'+step.effect_id],result_admission_id:step.admission_id};
    return this._commit(binding,claim,{type:'terminal',terminal});
   }
   if(['tool_prepared','tool_confirmed'].includes(state.phase)){
+   const lifecycle=state.tools.find(item=>item.state==='confirmed'&&['sleep','wake_at'].includes(item.terminal_stop));
+   if(lifecycle){
+    if(state.tools.some(item=>item.state==='admitted'))return this._hold(binding,claim,'tool_uncertain');
+    return this._commit(binding,claim,{type:'lifecycle_terminal',terminal:{id:randomUUID(),run_id:state.run_id,consumer_id:binding.consumer_id,
+     stop_reason:'end_turn',assistant_ids:['tool:'+lifecycle.effect_id],result_admission_id:lifecycle.admission_id,lifecycle_stop:lifecycle.terminal_stop}});
+   }
    const tool=state.tools.find(item=>item.state==='prepared');
    if(tool){
     const args=this._read(binding,tool.arguments_ref),effect={kind:'tool',effect_id:tool.effect_id,attempt_id:tool.attempt_id,request_sha:tool.request_sha,name:tool.name};
@@ -76,13 +82,16 @@ export class RecoveryExecution{
   }
   throw Error('unsupported recovery phase');
  }
- async projectTranscript(snapshot){return projectTranscript(snapshot,{sdk:this.sdk,readPayload:ref=>this.store.readPayload(snapshot.binding,ref)});}
+ async projectTranscript(snapshot,claim=snapshot.claim){
+  const assertOwned=()=>{this.ownership.assertOwned(claim);const current=this.store.load(snapshot.binding,{currentOnly:true});if(current.run_id!==snapshot.run_id)throw Error('authority_lost');};
+  assertOwned();return projectTranscript(snapshot,{sdk:this.sdk,assertOwned,assertBudget:bytes=>this.store.assertProjectionBudget(snapshot.binding,bytes),readPayload:ref=>this.store.readPayload(snapshot.binding,ref)});
+ }
  collectSettledPayloads(binding,evidence){
   const state=this.store.load(binding);
   if(state?.phase!=='terminal_committed'||state.terminal?.acknowledged!==true||evidence?.settled!==true||!evidence.binding||!sameBinding(evidence.binding,binding))return 0;
-  const required=[...state.steps,...state.tools].map(item=>item.admission_id).sort();
+  const required=[...state.steps,...state.tools].filter(item=>item.admission_id).map(item=>item.admission_id).sort();
   if(canonical(required)!==canonical([...(evidence.admission_ids??[])].sort()))return 0;
-  const payloads=this.store.payloadStore(binding),retained=new Set(state.payload_refs);let removed=0;
+  const payloads=this.store.payloadStore(binding),retained=this.store.retainedPayloadRefs(binding);let removed=0;
   for(const name of readdirSync(payloads.root)){
    const path=join(payloads.root,name);if(!lstatSync(path).isFile())throw Error('unsafe payload');
    if(/^[a-f0-9]{64}$/.test(name)&&!retained.has(name)){unlinkSync(path);removed++;}

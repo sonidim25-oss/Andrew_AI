@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from .appserver import LettaTurnError, LettaTurnCancelled, LettaTurnYielded
 from .diary import incident_summary
+from .recovery import RecoveryInterrupted
 
 
 class SessionRunner:
@@ -52,6 +53,12 @@ class SessionRunner:
                 except (TypeError, ValueError):
                     pass
                 else:
+                    recovery=getattr(self.agent,'local_recovery',None)
+                    if recovery is not None and recovery.enabled is True and recovery.has_pending():
+                        self.active_session_id=previous;self.started_at=started_at
+                        if not self.store.get_state('autonomy_error',''):
+                            self.store.set_state('autonomy_error','local_recovery_interrupted')
+                        return
                     self.store.promote_completed_model_turn(previous)
                     recovered = (self.store.action_hold_valid(previous)
                                  or self.store.hold_pending_session_actions(previous)
@@ -202,6 +209,12 @@ class SessionRunner:
             stage = "finish_cycle"
             self.store.finish_cycle(cycle_id, "complete")
             self.store.set_state('session_recovery_checkpoint', '')
+        except RecoveryInterrupted as error:
+            if (cycle_started and self.store.get_state('active_session_id','')==session_id
+                    and self.store.get_state('autonomy_error','') in ('','local_recovery_interrupted')):
+                self.store.set_state('autonomy_error','local_recovery_interrupted')
+                self.store.add_activity('Journaled model turn held (category='+error.category+')')
+            return False
         except LettaTurnYielded:
             if cycle_started:
                 self.store.finish_cycle(cycle_id, 'stopped')

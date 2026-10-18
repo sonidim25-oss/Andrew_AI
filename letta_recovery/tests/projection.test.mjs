@@ -15,3 +15,11 @@ test('changed_projection_operation_digest_is_held',async t=>{
  const rows=JSON.parse(readFileSync(f.projection));rows[0].digest='f'.repeat(64);writeFileSync(f.projection,JSON.stringify(rows));
  await assert.rejects(f.execution.projectTranscript(f.store.load(f.binding)),/projection_conflict/);
 });
+
+test('projection_cannot_write_after_owner_is_revoked_while_reading',async t=>{
+ const f=await executionFixture(t);await f.execution.advance(f.binding,f.claim);
+ const read=f.sdk.readProjectionOperations;
+ f.sdk.readProjectionOperations=async()=>{await f.ownership.release(f.claim);return read();};
+ await assert.rejects(f.execution.projectTranscript(f.store.load(f.binding),f.claim),/authority/);
+ assert.equal(f.sdk.readProjectionOperations===read,false);
+});

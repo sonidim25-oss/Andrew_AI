@@ -63,3 +63,16 @@ test('compaction_is_a_journaled_provider_step_and_is_not_repeated_after_restart'
  assert.deepEqual(kinds,['compaction','provider']);assert.equal(f.counts.provider,2);
  assert.equal(f.store.load(f.binding).phase,'terminal_committed');
 });
+
+test('confirmed_lifecycle_stop_finishes_without_another_provider_request',async t=>{
+ const response=structuredClone(toolResponse);response.choices[0].message.tool_calls[0].function.name='sleep';
+ response.choices[0].message.tool_calls.push({id:'cancelled-call',type:'function',function:{name:'recent_activity',arguments:'{}'}});
+ const f=await executionFixture(t,{responses:[response],tools:['sleep','recent_activity'].map(name=>({type:'function',function:{name,parameters:{type:'object'}}}))});
+ const result=f.gate.result;f.gate.result=async admission=>{const proof=await result(admission);return admission.kind==='tool'?{...proof,terminal_stop:'sleep'}:proof;};
+ for(let n=0;n<4;n++)await f.execution.advance(f.binding,f.claim);
+ assert.equal(f.store.load(f.binding).phase,'terminal_committed');assert.equal(f.counts.provider,1);assert.equal(f.counts.tool,1);
+ assert.equal(f.store.load(f.binding).terminal.lifecycle_stop,'sleep');
+ await f.execution.projectTranscript(f.store.load(f.binding));
+ const rows=JSON.parse(readFileSync(f.projection));
+ assert.deepEqual(rows.find(row=>row.value?.call_id==='cancelled-call').value.result,{status:'cancelled',reason:'lifecycle_stop',executed:false});
+});

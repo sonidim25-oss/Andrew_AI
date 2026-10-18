@@ -4,6 +4,10 @@ import {atomicWrite,readRegular} from './payload-store.mjs';
 import {canonical,digest} from './contracts.mjs';
 import {RecoveryProtocol} from './protocol.mjs';
 import {LocalSDKAdapter} from './sdk-adapter.mjs';
+import {readdirSync} from 'node:fs';
+import {safeDirectory} from './payload-store.mjs';
+import {guardLegacy,assertNotRestored} from './adoption.mjs';
+export {assertAdoptable} from './adoption.mjs';
 
 export const artifactEnabled=()=>process.env.ANDREW_LOCAL_RECOVERY_ARTIFACT==='1';
 export function atomicTranscriptWrite(path,text){
@@ -28,14 +32,19 @@ const services=new WeakMap();
 export async function handleRawFrame(data,{runtime,socket,connectionId,sdk}){
  if(!artifactEnabled())return false;
  let command;try{command=JSON.parse(typeof data==='string'?data:data.toString());}catch{return false;}
- if(typeof command?.type!=='string'||!command.type.startsWith('recovery_'))return false;
+ if(typeof command?.type!=='string')return false;
  try{
+  const root=join(process.env.LETTA_LOCAL_BACKEND_DIR??join(homedir(),'.letta'),'local-recovery-v1');
+  if(!command.type.startsWith('recovery_')){
+   const result=await guardLegacy(command,{root,sdk});
+   if(result){socket.send(JSON.stringify({type:command.type+'_response',request_id:command.request_id,success:true,...result}));return true;}
+   return false;
+  }
   let state=services.get(runtime);
   if(!state){state={storeId:null,connections:new WeakMap()};services.set(runtime,state);}
   let service=state.connections.get(socket);
   if(!service){
-   const root=join(process.env.LETTA_LOCAL_BACKEND_DIR??join(homedir(),'.letta'),'local-recovery-v1');
-   const adapter=new LocalSDKAdapter({backend:sdk.backend,resolveModel:sdk.resolveModel,root});
+   const adapter=new LocalSDKAdapter({backend:sdk.backend,resolveModel:sdk.resolveModel,root,assertAdoptable:sdk.assertAdoptable});
    service=new RecoveryProtocol({root,sdk:adapter,connectionId,acquireLock:sdk.acquireLock,storeId:state.storeId});
    state.storeId=service.storeId;state.connections.set(socket,service);
    socket.once('close',()=>{service.close().catch(()=>{});});
@@ -43,7 +52,7 @@ export async function handleRawFrame(data,{runtime,socket,connectionId,sdk}){
   const result=await service.handleRecoveryCommand(command);
   socket.send(JSON.stringify({type:command.type+'_response',request_id:command.request_id,success:true,...result}));
  }catch(error){
-  const category=['binding_mismatch','authority_lost','legacy_unproven','owner_blocked','configuration_changed','projection_conflict','storage_limit','unsupported_contract'].includes(error.message)?error.message:'recovery_held';
+  const category=error.message==='stale revision'?'revision_conflict':['binding_mismatch','authority_lost','legacy_unproven','owner_blocked','configuration_changed','projection_conflict','storage_limit','unsupported_contract','restore_required','state_corrupt','provider_uncertain','tool_uncertain'].includes(error.message)?error.message:'recovery_held';
   socket.send(JSON.stringify({type:command.type+'_response',request_id:command.request_id,success:false,error_category:category}));
  }
  return true;
@@ -52,4 +61,11 @@ export async function handleRawFrame(data,{runtime,socket,connectionId,sdk}){
 /** The builder's bootstrap remains inactive unless explicitly selected. */
 export function createLocalRecovery({sdk,root,enabled=false,gate}){
  return Object.freeze({capability:null});
+}
+
+// A disabled extension cannot reopen an adopted store through legacy startup.
+if(!artifactEnabled()){
+ const root=join(process.env.LETTA_LOCAL_BACKEND_DIR??join(homedir(),'.letta'),'local-recovery-v1');
+ assertNotRestored(root);
+ if(safeDirectory(join(root,'adopted'))&&readdirSync(join(root,'adopted')).length)throw Error('unsupported_contract');
 }

@@ -24,12 +24,19 @@ export function transition(previous,event){
  }
  case 'tool_confirm':{
   requirePhase('tool_admitted');const item=admitted(state.tools,event.effect_id);if(!event.result_ref)throw Error('invalid transition');
-  Object.assign(item,{state:'confirmed',result_ref:event.result_ref});state.phase='tool_confirmed';break;
+  Object.assign(item,{state:'confirmed',result_ref:event.result_ref,...(event.terminal_stop?{terminal_stop:event.terminal_stop}:{})});state.phase='tool_confirmed';break;
  }
  case 'continuation':requirePhase('tool_confirmed');if(state.tools.some(item=>item.state!=='confirmed')||!event.context_ref)throw Error('invalid transition');state.context_ref=event.context_ref;state.phase='continuation_ready';break;
  case 'compaction':requirePhase('provider_confirmed');if(state.steps.at(-1)?.kind!=='compaction'||!event.context_ref)throw Error('invalid transition');state.context_ref=event.context_ref;state.phase='continuation_ready';break;
  case 'terminal':requirePhase('provider_confirmed');if(!event.terminal||!safeId(event.terminal.id)||event.terminal.consumer_id!==state.binding.consumer_id||state.tools.some(item=>item.state!=='confirmed'))throw Error('invalid transition');state.terminal={...event.terminal,acknowledged:false};state.phase='terminal_committed';break;
- case 'ack':requirePhase('terminal_committed');if(event.consumer_id!==state.binding.consumer_id||event.terminal_id!==state.terminal.id)throw Error('invalid transition');state.terminal.acknowledged=true;break;
+ case 'lifecycle_terminal':{
+  requirePhase('tool_confirmed');
+  const tool=state.tools.find(item=>item.admission_id===event.terminal?.result_admission_id&&item.state==='confirmed'&&item.terminal_stop===event.terminal?.lifecycle_stop);
+  if(!tool||!['sleep','wake_at'].includes(tool.terminal_stop)||state.tools.some(item=>item.state==='admitted')||event.terminal.consumer_id!==state.binding.consumer_id)throw Error('invalid transition');
+  for(const pending of state.tools)if(pending.state==='prepared')pending.state='cancelled';
+  state.terminal={...event.terminal,acknowledged:false};state.phase='terminal_committed';break;
+ }
+ case 'ack':requirePhase('terminal_committed');if(event.consumer_id!==state.binding.consumer_id||event.terminal_id!==state.terminal.id)throw Error('invalid transition');state.terminal.acknowledged=true;state.terminal.settled=event.settled===true;break;
  case 'hold':if(!HOLD_REASONS.includes(event.reason))throw Error('invalid transition');state.held_phase=phase;state.hold_reason=event.reason;state.phase='held';break;
  case 'claim':if(!event.claim||event.claim.fence!==state.fence+1)throw Error('invalid transition');state.fence=event.claim.fence;state.claim=event.claim;break;
  case 'renew':if(state.claim?.claim_id!==event.claim?.claim_id||state.fence!==event.claim?.fence)throw Error('invalid transition');state.claim=event.claim;break;

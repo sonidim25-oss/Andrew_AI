@@ -1,0 +1,69 @@
+import {join} from 'node:path';
+import {readdirSync} from 'node:fs';
+import {canonical,digest,safeId} from './contracts.mjs';
+import {safeDirectory,readJSON,readRegular,atomicWrite} from './payload-store.mjs';
+
+const pathFor=(root,kind,id)=>join(root,'adopted',kind+'-'+digest(id)+'.json');
+export function adoption(root,kind,id){
+ if(!safeId(id))throw Error('binding_mismatch');
+ try{return readJSON(pathFor(root,kind,id));}catch(error){if(error.code==='ENOENT')return null;throw error;}
+}
+export function adopt(root,binding){
+ safeDirectory(join(root,'adopted'),{create:true});
+ for(const [kind,id] of [['agent',binding.agent_id],['conversation',binding.conversation_id]]){
+  const prior=adoption(root,kind,id);
+  if(prior&&prior.store_id!==binding.store_id)throw Error('binding_mismatch');
+  if(!prior)atomicWrite(pathFor(root,kind,id),Buffer.from(canonical({version:1,store_id:binding.store_id,agent_id:binding.agent_id,conversation_id:binding.conversation_id})));
+ }
+}
+const READS=new Set(['app_server_info','agent_list','agent_retrieve','conversation_list','conversation_retrieve',
+ 'conversation_messages_list','messages_list','message_retrieve','run_retrieve','run_steps_list','models_list',
+ 'list_providers','provider_list','tools_list','agent_memory_retrieve','agent_blocks_list']);
+const SETUP=new Set(['connect_provider','agent_create','conversation_create']);
+function scopes(value,depth=0,result=[]){
+ if(depth>12)throw Error('unsupported_contract');
+ if(!value||typeof value!=='object')return result;
+ if(typeof value.agent_id==='string')result.push(['agent',value.agent_id]);
+ if(typeof value.conversation_id==='string')result.push(['conversation',value.conversation_id]);
+ for(const child of Object.values(value))if(child&&typeof child==='object')scopes(child,depth+1,result);
+ return result;
+}
+function sameFields(current,patch){
+ if(patch&&Object.getPrototypeOf(patch)===Object.prototype)return Object.entries(patch).every(([key,value])=>sameFields(current?.[key],value));
+ return current!==undefined&&canonical(current)===canonical(patch);
+}
+export function assertNotRestored(root){
+ try{readRegular(join(root,'restore-required.json'),1024);}catch(error){if(error.code==='ENOENT')return;throw error;}
+ throw Error('restore_required');
+}
+export async function guardLegacy(command,{root,sdk}){
+ if(READS.has(command.type))return false;
+ assertNotRestored(root);
+ if(SETUP.has(command.type))return false;
+ const targets=scopes(command);let adopted=false;
+ for(const [kind,id] of targets)if(adoption(root,kind,id))adopted=true;
+ if(!targets.length&&safeDirectory(join(root,'adopted')))adopted=readdirSync(join(root,'adopted')).length>0;
+ if(!adopted)return false;
+ // Startup repeats the exact stored agent settings. Return them without mutation.
+ if(command.type==='agent_update'){
+  const current=sdk.backend.store.retrieveAgentRecord(command.agent_id);
+  if(command.body&&Object.keys(command.body).length&&sameFields(current,command.body))return {agent:await sdk.backend.retrieveAgent(command.agent_id)};
+ }
+ throw Error('unsupported_contract');
+}
+
+export function assertAdoptable(binding,{runtimeKey,dispositionPath,scopedRuntime,backend}){
+ if(!(backend.activeRunByConversation instanceof Map))throw Error('unsupported_contract');
+ if(backend.activeRunByConversation.has(binding.conversation_id))throw Error('legacy_unproven');
+ if(scopedRuntime&&(scopedRuntime.pendingTurns||scopedRuntime.pendingInboundDispatches||scopedRuntime.queueRuntime?.length
+   ||scopedRuntime.queuePumpActive||scopedRuntime.queuePumpScheduled||scopedRuntime.pendingApprovalBatchByToolCallId?.size
+   ||scopedRuntime.pendingInterruptedContext||scopedRuntime.loopStatus!=='idle'))throw Error('legacy_unproven');
+ if(!dispositionPath)throw Error('unsupported_contract');
+ let ledger;try{ledger=JSON.parse(readRegular(dispositionPath,1048576));}catch(error){if(error.code==='ENOENT')return;throw error;}
+ if(![2,3,4].includes(ledger.version)||!ledger.entries||!ledger.reservations)throw Error('state_corrupt');
+ for(const [key,entry] of [...Object.entries(ledger.entries),...Object.entries(ledger.reservations)]){
+  let identity;try{identity=JSON.parse(key);}catch{throw Error('state_corrupt');}
+  if(!Array.isArray(identity)||!entry||typeof entry!=='object')throw Error('state_corrupt');
+  if(identity[0]===runtimeKey)throw Error('legacy_unproven');
+ }
+}

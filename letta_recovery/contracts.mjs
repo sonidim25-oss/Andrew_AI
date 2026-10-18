@@ -32,7 +32,7 @@ export function validateSnapshot(value){
   const items=[...value.steps,...value.tools];
   if(value.steps.length>256||value.tools.length>256)throw Error();
   for(const item of items){
-   if(!item||!safeId(item.effect_id)||!['prepared','admitted','confirmed'].includes(item.state))throw Error();
+   if(!item||!safeId(item.effect_id)||!['prepared','admitted','confirmed','cancelled'].includes(item.state))throw Error();
    if(item.state==='confirmed'&&!validHash(item.result_ref))throw Error();
   }
   if(new Set(value.steps.map(item=>item.effect_id)).size!==value.steps.length||new Set(value.tools.map(item=>item.effect_id)).size!==value.tools.length)throw Error();

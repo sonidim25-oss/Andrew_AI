@@ -30,3 +30,14 @@ test('atomic_projection_retains_original_transcript_bytes',t=>{
  atomicTranscriptWrite(path,rewrite);const result=readFileSync(path,'utf8');assert.ok(result.startsWith(original));
  atomicTranscriptWrite(path,rewrite);assert.equal(readFileSync(path,'utf8'),result);
 });
+
+test('next_input_uses_confirmed_summary_and_typed_tail_once',t=>{
+ const sdk=new LocalSDKAdapter({root:directory(t)}),binding={agent_id:'agent',conversation_id:'conversation'};
+ const row={operation_id:'summary-op',kind:'compaction',value:{response:{choices:[{message:{content:'Exact summary.'}}]},tail:[{role:'user',content:'Original current question'}]}};
+ sdk._projection=()=>({rows:[row]});
+ const native=[{role:'user',content:'Old history'},
+  {role:'user',content:'Conversation summary:\nExact summary.',metadata:{andrew_recovery:{operation_id:'summary-op'}}},
+  {role:'assistant',content:'Confirmed answer'}];
+ assert.deepEqual(sdk._contextMessages(binding,native),[{role:'user',content:'Conversation summary:\nExact summary.'},
+  {role:'user',content:'Original current question'},{role:'assistant',content:'Confirmed answer'}]);
+});

@@ -140,3 +140,36 @@ class RecoveryDispatchTests(unittest.TestCase):
         root=Path(__file__).resolve().parents[2]
         actual=subprocess.check_output(['node','--input-type=module','-e',script],cwd=root,input=json.dumps(value).encode()).decode()
         self.assertEqual(digest(value),actual)
+
+    def test_terminal_ack_requires_exact_completed_controller_evidence(self):
+        metadata=self.metadata()
+        terminal={'id':'terminal-fixture','run_id':'run-fixture','consumer_id':self.binding['consumer_id'],
+            'stop_reason':'end_turn','assistant_ids':['provider:effect-fixture'],'result_admission_id':metadata['admission_id']}
+        with self.assertRaises(ValueError):self.records.complete_scope(self.scope['admission_id'],self.binding,terminal)
+        self.assertEqual(self.gateway.complete('Bearer fixture-token',self.payload,recovery=metadata)[0],200)
+        self.records.complete_scope(self.scope['admission_id'],self.binding,terminal)
+        evidence=self.records.settlement(self.binding,self.claim,self.scope['scope_token'],terminal['id'])
+        self.assertEqual(evidence['admission_ids'],[metadata['admission_id']]);self.assertTrue(evidence['settled'])
+        with self.assertRaises(ValueError):self.records.settlement(self.binding,self.claim,self.scope['scope_token'],'another-terminal')
+
+    def test_replacement_scope_can_take_only_a_never_dispatched_preparation(self):
+        metadata=self.metadata()
+        scope=self.records.admit_scope(self.binding)
+        claim={**self.claim,'admission_id':scope['admission_id'],'fence':2}
+        new=self.dispatch.authorize(self.binding,claim,metadata['effect'],scope['scope_token'])
+        self.assertEqual(new['state'],'prepared')
+        self.assertNotEqual(self.gateway.complete('Bearer fixture-token',self.payload,recovery=metadata)[0],200)
+        current={**new,'binding':self.binding,'claim':claim,'scope_token':scope['scope_token']}
+        self.assertEqual(self.gateway.complete('Bearer fixture-token',self.payload,recovery=current)[0],200)
+        self.assertEqual(self.provider.complete.call_count,1)
+
+    def test_untrusted_tool_context_survives_thread_and_scope_replacement(self):
+        from andrewbot.memory import MEMORY_SOURCE_CONTEXT, note_untrusted_memory_source
+        first=self.metadata('tool','taint-source',{'name':'recent_activity','arguments':{}})
+        self.dispatch.run_tool(first,'recent_activity',{},lambda:note_untrusted_memory_source() or 'external data')
+        scope=self.records.admit_scope(self.binding)
+        claim={**self.claim,'admission_id':scope['admission_id'],'fence':2}
+        effect={'kind':'tool','effect_id':'memory-next','request_sha':digest({'name':'memory_add_experience','arguments':{}})}
+        admitted=self.dispatch.authorize(self.binding,claim,effect,scope['scope_token'])
+        metadata={**admitted,'binding':self.binding,'claim':claim,'scope_token':scope['scope_token']}
+        self.assertTrue(self.dispatch.run_tool(metadata,'memory_add_experience',{},lambda:MEMORY_SOURCE_CONTEXT.get()['untrusted']))
