@@ -37,7 +37,7 @@
 Worktree: `/home/daniel/andrew-autonomy-media`, branch `autonomy-media-20261017`.
 An isolated linked worktree already exists. Preserve it and the confirmed deployed
 media receipt changes currently uncommitted. The preimplementation baseline is
-specification commit `6c8000f` plus those media changes. Record the actual baseline
+specification commit `6c8000f` plus those media changes. Task 0 baseline commit: `f7418d2`. Record the actual baseline
 commit created in Task 0; do not mistake an earlier exported deployment for current
 production source.
 
@@ -106,11 +106,11 @@ validation in the records/bridge boundary instead of repeating ad hoc coercions.
 
 **Interfaces:** produces `validateBinding(value): Binding`, `validateSnapshot(value): Snapshot`, contract constant `local_durable_recovery_v1`, and `build_release(base_package: Path, output: Path) -> dict`. `entry.mjs` exports `createLocalRecovery({sdk, root, enabled, gate})`; at this task it cannot execute or advertise the capability. `sdk` exposes existing `acquireDurableFileLock`, typed executor/transcript callbacks and safe protocol sends; later tasks fill implementations.
 
-- [ ] **Step 1:** Write `test_build_refuses_modified_or_ambiguous_base` and `test_build_is_repeatable_and_leaves_npm_package_unchanged`. Assert wrong SHA/multiple anchors fail, two builds have identical release file hashes, and the base tree is byte-identical. Add Node `invalid_binding_rejects_missing_identity` with `assert.throws(() => validateBinding({}), /binding/)`.
-- [ ] **Step 2:** Run `python3 -m unittest discover -s scripts/tests -p test_letta_recovery_builder.py -q` and `node --test letta_recovery/tests/artifact.test.mjs`; expect the named missing builder/contracts behavior to fail.
-- [ ] **Step 3:** Implement the builder and validators. Read the full base package and dependency lock; copy a self-contained release dependency layout so relocation cannot resolve a service-writable or unrelated package. Preserve base license/metadata. Build hooks from unique reviewed source-section anchors, retaining readable patch definitions. Output a manifest containing base/output hashes and contract version.
-- [ ] **Step 4:** Implement `protocol_fixture.py` as a test helper with `launch_release(release, data_dir, provider) -> Fixture` and `Fixture.{client, provider_calls, provider_calls_for(effect_id), stop(), kill(), restart()}`. It uses temporary HOME/backend/SQLite and loopback fake providers only. Add a startup test proving the inactive artifact makes no provider/tool calls and advertises no recovery capability.
-- [ ] **Step 5:** Run both targeted commands and startup fixture; expect OK and identical build hashes. Commit the exact Task 1 files.
+- [x] **Step 1:** Write `test_build_refuses_modified_or_ambiguous_base` and `test_build_is_repeatable_and_leaves_npm_package_unchanged`. Assert wrong SHA/multiple anchors fail, two builds have identical release file hashes, and the base tree is byte-identical. Add Node `invalid_binding_rejects_missing_identity` with `assert.throws(() => validateBinding({}), /binding/)`.
+- [x] **Step 2:** Run `python3 -m unittest discover -s scripts/tests -p test_letta_recovery_builder.py -q` and `node --test letta_recovery/tests/artifact.test.mjs`; expect the named missing builder/contracts behavior to fail.
+- [x] **Step 3:** Implement the builder and validators. Read the full base package and dependency lock; copy a self-contained release dependency layout so relocation cannot resolve a service-writable or unrelated package. Preserve base license/metadata. Build hooks from unique reviewed source-section anchors, retaining readable patch definitions. Output a manifest containing base/output hashes and contract version.
+- [x] **Step 4:** Implement `protocol_fixture.py` as a test helper with `launch_release(release, data_dir, provider) -> Fixture` and `Fixture.{client, provider_calls, provider_calls_for(effect_id), stop(), kill(), restart()}`. It uses temporary HOME/backend/SQLite and loopback fake providers only. Add a startup test proving the inactive artifact makes no provider/tool calls and advertises no recovery capability.
+- [x] **Step 5:** Run both targeted commands and startup fixture; expect OK and identical build hashes. Commit the exact Task 1 files.
 
 ## Task 2: Implement durable checkpoints and exact private payloads
 

@@ -1,0 +1,1 @@
+[{"anchor":"import { createRequire } from \"node:module\";","replacement":"import { createRequire } from \"node:module\";\nimport * as andrewRecoveryExtension from './recovery/entry.mjs';"}]
