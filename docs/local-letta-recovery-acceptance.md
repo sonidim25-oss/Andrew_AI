@@ -11,7 +11,7 @@ test a fresh exact merge against the actual installed files.
 | Full controller suite | 533 tests, OK, 2 live-service skips |
 | Full scripts suite, actual recovery release | 138 passed, no skips |
 | Compatible protocols, pristine pinned SDK | 26 tests, OK, 9 recovery-only skips; 17 compatible tests ran |
-| Exact merged candidate acceptance | All four stages passed; `verify_candidate(require_acceptance=True)` passed |
+| Original Git-baseline candidate acceptance | All four stages passed for that historical candidate; superseded by the installed-source compatibility correction below |
 | Production installation/enablement | Not performed |
 | Owner's independent final review | Pending |
 
@@ -51,7 +51,7 @@ Private evidence directory:
 | Separate patched bundle | `21662278772607943acf2d2acc365e0e25918d26d0c8342365296c50bd90a0c2` |
 | `release-candidate/recovery-release.json` | `f2cd8066142130d3955900daa9b7ceec6daea900e7c4b5859c53e6fa789fd7e3` |
 | `candidate-accepted/candidate.json` | `8715da3a2b42162bf709efdd681f6ec1155b9b4c61fe36675e5bc7bd5d407529` |
-| `scripts/letta-recovery-manifest.json` | `7edb83a317b7dd4c5b03cf86502887f51cb0ff4db3509c237a63f3749ac2b0e7` |
+| Original deployment manifest (historical) | `7edb83a317b7dd4c5b03cf86502887f51cb0ff4db3509c237a63f3749ac2b0e7` |
 
 Bundle SHA alone is insufficient: the bundle imports the separately hashed
 extension. The release manifest binds the full self-contained dependency tree.
@@ -90,3 +90,31 @@ separately private and must not be published.
 apply, enable, diagnosis and rollback commands. No paid provider request, real
 external effect, wake/replay, or production service mutation was used to obtain
 these results.
+
+## Installed-source compatibility correction
+
+The first production apply attempt stopped before service mutation because its
+installed controller hash was not in the reviewed manifest. A new read-only
+export at `/home/daniel/andrew-recovery-live-source` was then reviewed. Two exact
+installed hashes were added, both against merge ancestor `f7418d2`:
+
+- `controller.py`: `99443e0964000fa256d0680e3e9bf66f23127189bed3542f989f13a7d1fe18de`
+- `main.py`: `397784d8c7bbc3bbd03a44ae3b861dd7c9c41c98ddb8b2766c4aebdb412218c6`
+
+Their differences preserve owner-command normalization, the voice-disabled guard,
+and trusted skill-document startup validation. The recovery cancellation import
+was moved away from the adjacent menu import so Git can merge both independent
+changes without a conflict. No behavior was removed. The resulting package also
+preserves the exported `telegram_menu.py` and `skills.py` byte for byte.
+
+The exact installed-source merge is retained in `candidate-live-reviewed-v2`,
+candidate SHA-256 `59a90ef29139e50d6253fdcca74194873104f943fe7f36e3a6f3ca103e03ded4`.
+Its six actual recovery protocol tests and seven recovery installer tests passed.
+The full controller suite passed 533 tests (2 live-service skips), recorded in
+the adjacent `live-core-check.txt`; 42 incident/deployment checks also passed.
+The current deployment manifest SHA-256 is
+`ffe5fbc7fcb2eb4a74c2673cb6c5f0a82964ae5f42966a193344c5df5bd95c98`.
+The backend artifact is unchanged. Earlier candidate acceptance files remain
+historical evidence and do not authorize this new manifest. The root installer
+must repeat the complete acceptance run against the then-current installed merge
+before it changes services; unknown additional source hashes still refuse.

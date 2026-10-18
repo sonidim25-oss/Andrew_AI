@@ -3,7 +3,7 @@
   "modules": {
     "appserver.py": "e82dee7832cc1cdb9abb13efc4a994fa13ef44ad2f03c045248e0c14214a4c1a",
     "budget.py": "07c164572f242358226d65eff0fb3088fd40f3b0124b73132f46420fd3e1cc56",
-    "controller.py": "25b340e5f7305f750efa52a8a5886e72a84055681d999dc2f3a0205128f6a553",
+    "controller.py": "98d71e66615db4cb970218d4f24faae8ac6e0b9e62b2f06e44266433d9c168ee",
     "gateway.py": "0025382d87e640f008ce737fa4961fea127e841268bbdee130ef907f68e35057",
     "lifecycle_policy.py": "7eab2d34c1373e99460f0a2cd320ec9338cdad8be9665440d32054f98111df59",
     "main.py": "ebd80c58fcafc1aed80c73c9f07b033a9df3cbdf604caff86069e0e07eb9f5c0",
