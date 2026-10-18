@@ -158,7 +158,7 @@ assert.throws(() => first.assertOwned(oldClaim), /authority/);
 
 **Interfaces:** `new RecoveryExecution({store, ownership, gate, sdk})`; async `admitInput(binding, input): Snapshot`, `advance(binding, claim): Snapshot`; `projectTranscript(snapshot): void`; `collectSettledPayloads(binding, controllerEvidence): number` deletes only unreferenced payloads after bound terminal acknowledgement and accounting settlement, retaining deduplication/fence tombstones. The SDK adapter provides `executeProviderStep(request, admission)`, `emitConfirmedToolResult(call, result)`, `readProjectionOperations(scope)` and `replaceProjection(scope, rows)`; the replacement atomically retains operation IDs/digests. All provider calls, including compaction, cross `DispatchGate`.
 
-- [ ] **Step 1:** Write `confirmed_response_is_not_requested_again`, `confirmed_tool_result_is_not_executed_again`, `admitted_unknown_effect_holds`, `projection_commit_gap_does_not_duplicate` , `compaction_keeps_unfinished_payloads` and `unacknowledged_or_unsettled_payloads_are_not_collected`. Use literal fake response/result payloads and real persistent checkpoints. Assert one dispatch for a confirmed step and zero new dispatches for an unknown admitted step.
+- [x] **Step 1:** Write `confirmed_response_is_not_requested_again`, `confirmed_tool_result_is_not_executed_again`, `admitted_unknown_effect_holds`, `projection_commit_gap_does_not_duplicate` , `compaction_keeps_unfinished_payloads` and `unacknowledged_or_unsettled_payloads_are_not_collected`. Use literal fake response/result payloads and real persistent checkpoints. Assert one dispatch for a confirmed step and zero new dispatches for an unknown admitted step.
 ```javascript
 // confirmed_response_is_not_requested_again; restart after durable confirmation.
 await recovered.advance(binding, replacementClaim);
@@ -170,10 +170,10 @@ assert.equal(store.load(binding).phase, 'held');
 assert.equal(providerCountFor(unknownStepId), 1);
 ```
 
-- [ ] **Step 2:** Run `node --test letta_recovery/tests/execution.test.mjs letta_recovery/tests/projection.test.mjs`; confirm execution/projection behavior fails before implementation.
-- [ ] **Step 3:** Integrate `LocalBackend`/`HeadlessBackend` and `LocalStore` only for adopted recovery conversations. Allocate random run/step/tool IDs before dispatch. Persist accepted input before acknowledgement, provider response before tool preparation, exact tool return before continuation, and terminal before delivery. Prevent all legacy effectful entry points from bypassing these gates.
-- [ ] **Step 4:** Implement typed checkpoint-to-transcript projection with stable operation IDs and digests in its atomic persisted rows. Recover projection intent by exact identity, never transcript text. A conflicting existing operation digest holds. Retain terminal data and compaction inputs until acknowledged/settled; garbage collection requires exact current controller evidence and cannot remove unresolved or still-referenced blobs.
-- [ ] **Step 5:** Run the Node tests plus an actual built-artifact fake-provider turn using Task 1's fixture. Assert saved transcript operations and run identity survive kill/restart. Commit the executor/projection integration and tests.
+- [x] **Step 2:** Run `node --test letta_recovery/tests/execution.test.mjs letta_recovery/tests/projection.test.mjs`; confirm execution/projection behavior fails before implementation.
+- [x] **Step 3:** Integrate `LocalBackend`/`HeadlessBackend` and `LocalStore` only for adopted recovery conversations. Allocate random run/step/tool IDs before dispatch. Persist accepted input before acknowledgement, provider response before tool preparation, exact tool return before continuation, and terminal before delivery. Prevent all legacy effectful entry points from bypassing these gates.
+- [x] **Step 4:** Implement typed checkpoint-to-transcript projection with stable operation IDs and digests in its atomic persisted rows. Recover projection intent by exact identity, never transcript text. A conflicting existing operation digest holds. Retain terminal data and compaction inputs until acknowledged/settled; garbage collection requires exact current controller evidence and cannot remove unresolved or still-referenced blobs.
+- [x] **Step 5:** Run the Node tests plus an actual built-artifact fake-provider turn using Task 1's fixture. Assert saved transcript operations and run identity survive kill/restart. Commit the executor/projection integration and tests.
 
 ## Task 5: Expose inspection and conditional recovery protocol
 
@@ -181,7 +181,7 @@ assert.equal(providerCountFor(unknownStepId), 1);
 
 **Interfaces:** `handleRecoveryCommand(command, connection): Promise<Response>` validates binding/version and routes `recovery_inspect`, `recovery_claim`, `recovery_resume`, `recovery_status`, `recovery_subscribe`, `recovery_result_read`, `recovery_revoke`; claim renewal/release retain exact identities. Resume uses `ResumeIntent` and returns `{attempt_id, state, revision}`. Capability requires all store/owner/executor/protocol dependencies and remains feature-gated.
 
-- [ ] **Step 1:** Write protocol tests `inspection_and_handshake_are_evidence_only`, `lost_resume_reply_reuses_attempt`, `subscription_does_not_pump_unrelated_queue`, `old_consumer_cannot_settle_new_input` and `legacy_started_without_checkpoint_is_held`. Assert exact attempt IDs, one continuation and zero startup/inspection effects or recovery-state writes.
+- [x] **Step 1:** Write protocol tests `inspection_and_handshake_are_evidence_only`, `lost_resume_reply_reuses_attempt`, `subscription_does_not_pump_unrelated_queue`, `old_consumer_cannot_settle_new_input` and `legacy_started_without_checkpoint_is_held`. Assert exact attempt IDs, one continuation and zero startup/inspection effects or recovery-state writes.
 ```python
 # lost_resume_reply_reuses_attempt; real patched fixture and persisted identities.
 self.assertEqual(first_status['attempt_id'], repeated_status['attempt_id'])
@@ -191,10 +191,10 @@ self.assertEqual(before_recovery_tree, after_recovery_tree)
 self.assertEqual(fixture.provider_calls, [])
 ```
 
-- [ ] **Step 2:** Run Node protocol tests and `ANDREW_LOCAL_RECOVERY_TEST_RELEASE=RELEASE ANDREW_LETTA_TEST_BINARY=RELEASE/letta.js PYTHONPATH=prototype:. python3 -m unittest discover -s scripts/tests -p test_local_recovery_protocol.py -q`; the executor substitutes the actual temporary release path. Expect missing new protocol behavior to fail, not skip.
-- [ ] **Step 3:** Implement explicit commands. Revalidate claim/resume revisions under lock; commit resume intent before effect execution. Duplicate attempt IDs return status; changed payloads conflict. Inspection/result/status reads do not create runtimes, repair projections, acknowledge terminals or create lock files.
-- [ ] **Step 4:** Disable eager interrupted-work recovery, terminal promotion/cleanup and queue pumping at launch/handshake for the extension. Reject legacy mutations on adopted conversations; leave legacy read access and nonadopted behavior available without silently adopting old inputs.
-- [ ] **Step 5:** Run both protocol suites against the actual patched bundle, including malformed fields, changed binding and the local App Server identity. Confirm cloud `conn-` guards were not relaxed. The two new recovery protocol suites require `ANDREW_LOCAL_RECOVERY_TEST_RELEASE` to name the verified release directory; without it they skip explicitly, and recovery acceptance treats such skips as failure. Commit protocol integration/tests.
+- [x] **Step 2:** Run Node protocol tests and `ANDREW_LOCAL_RECOVERY_TEST_RELEASE=RELEASE ANDREW_LETTA_TEST_BINARY=RELEASE/letta.js PYTHONPATH=prototype:. python3 -m unittest discover -s scripts/tests -p test_local_recovery_protocol.py -q`; the executor substitutes the actual temporary release path. Expect missing new protocol behavior to fail, not skip.
+- [x] **Step 3:** Implement explicit commands. Revalidate claim/resume revisions under lock; commit resume intent before effect execution. Duplicate attempt IDs return status; changed payloads conflict. Inspection/result/status reads do not create runtimes, repair projections, acknowledge terminals or create lock files.
+- [x] **Step 4:** Disable eager interrupted-work recovery, terminal promotion/cleanup and queue pumping at launch/handshake for the extension. Reject legacy mutations on adopted conversations; leave legacy read access and nonadopted behavior available without silently adopting old inputs.
+- [x] **Step 5:** Run both protocol suites against the actual patched bundle, including malformed fields, changed binding and the local App Server identity. Confirm cloud `conn-` guards were not relaxed. The two new recovery protocol suites require `ANDREW_LOCAL_RECOVERY_TEST_RELEASE` to name the verified release directory; without it they skip explicitly, and recovery acceptance treats such skips as failure. Commit protocol integration/tests.
 
 ## Task 6: Make controller provider/tool outcomes durable and scoped
 
@@ -202,7 +202,7 @@ self.assertEqual(fixture.provider_calls, [])
 
 **Interfaces:** `RecoveryRecords(store)` creates additive `recovery_attempts`, `recovery_effects`, `recovery_results` tables under Store's lock. Methods: `admit_effect(binding, effect) -> dict`, `confirm_provider(admission_id, response, usage) -> dict`, `confirm_tool(admission_id, result) -> dict`, `effect_result(admission_id) -> dict`, `revoke(admission_id) -> None`. `RecoveryDispatch.authorize(binding, claim, effect) -> dict` and `result(admission_id) -> dict` implement the shared gate contract.
 
-- [ ] **Step 1:** Write Python tests `test_gateway_success_backend_loss_reuses_response`, `test_unknown_provider_keeps_original_reservation`, `test_compaction_uses_scoped_receipts`, `test_pause_between_admission_and_dispatch_blocks_call`, `test_duplicate_confirmed_tool_returns_exact_result` and `test_unknown_tool_does_not_execute_twice`. Persist actual SQLite and reopen it; use subprocess exit after response/result commits. Assert exact fixture payload/digest, reservation count and fake destination invocation counts.
+- [x] **Step 1:** Write Python tests `test_gateway_success_backend_loss_reuses_response`, `test_unknown_provider_keeps_original_reservation`, `test_compaction_uses_scoped_receipts`, `test_pause_between_admission_and_dispatch_blocks_call`, `test_duplicate_confirmed_tool_returns_exact_result` and `test_unknown_tool_does_not_execute_twice`. Persist actual SQLite and reopen it; use subprocess exit after response/result commits. Assert exact fixture payload/digest, reservation count and fake destination invocation counts.
 ```python
 # gateway_success_backend_loss_reuses_response
 self.assertEqual(reopened.effect_result(admission_id)['result'], fixture_response)
@@ -213,10 +213,10 @@ self.assertEqual(open_reservations_for(unknown_step_id), 1)
 self.assertEqual(provider.calls_for(unknown_step_id), 1)
 ```
 
-- [ ] **Step 2:** Run `PYTHONPATH=prototype:prototype/tests:. python3 -m unittest test_recovery_dispatch -q`; observe failure from the absent durable gate/receipt behavior.
-- [ ] **Step 3:** Add schema initialization and records wrapper without changing existing receipt meanings. Provider confirmation stores the exact validated response and settles usage/removes only that reservation in one SQLite transaction. Admission is committed before dispatch; lost/unknown outcomes retain their existing reservation. Do not store provider auth headers or reasoning fields.
-- [ ] **Step 4:** Add trusted local admission metadata to backend↔gateway and tool callbacks, outside model content, stripping it before provider forwarding. Opaque tokens are scoped to binding, owner revision, effect digest and fence. Recheck current owner controls/configuration and reservation admission immediately before dispatch; old tokens cannot authorize another step. Confirmed repeat calls return exact saved results; unresolved repeats return a fixed hold. Preserve backwards-compatible call signatures by adding keyword-only `recovery=None` to `ModelGateway.complete` and `Controller.execute_tool`; trusted protocol wrappers supply it, model tool arguments cannot.
-- [ ] **Step 5:** Run targeted tests, gateway/core tool regressions and the actual patched protocol fixture. Verify normal owner replies retain their current path, recovery metadata is absent from fake provider payloads, and no global reservations are cleared. Commit controller/gateway receipt changes.
+- [x] **Step 2:** Run `PYTHONPATH=prototype:prototype/tests:. python3 -m unittest test_recovery_dispatch -q`; observe failure from the absent durable gate/receipt behavior.
+- [x] **Step 3:** Add schema initialization and records wrapper without changing existing receipt meanings. Provider confirmation stores the exact validated response and settles usage/removes only that reservation in one SQLite transaction. Admission is committed before dispatch; lost/unknown outcomes retain their existing reservation. Do not store provider auth headers or reasoning fields.
+- [x] **Step 4:** Add trusted local admission metadata to backend↔gateway and tool callbacks, outside model content, stripping it before provider forwarding. Opaque tokens are scoped to binding, owner revision, effect digest and fence. Recheck current owner controls/configuration and reservation admission immediately before dispatch; old tokens cannot authorize another step. Confirmed repeat calls return exact saved results; unresolved repeats return a fixed hold. Preserve backwards-compatible call signatures by adding keyword-only `recovery=None` to `ModelGateway.complete` and `Controller.execute_tool`; trusted protocol wrappers supply it, model tool arguments cannot.
+- [x] **Step 5:** Run targeted tests, gateway/core tool regressions and the actual patched protocol fixture. Verify normal owner replies retain their current path, recovery metadata is absent from fake provider payloads, and no global reservations are cleared. Commit controller/gateway receipt changes.
 
 ## Task 7: Coordinate recovery through the existing model worker
 
@@ -224,7 +224,7 @@ self.assertEqual(provider.calls_for(unknown_step_id), 1)
 
 **Interfaces:** `LocalRecoveryClient` provides `inspect(binding)`, `claim(binding, revision, admission_id)`, `resume(intent)`, `status(attempt_id)`, `subscribe(attempt_id)`, `result_read(admission_id)`, `revoke(attempt_id)`. `RecoveryCoordinator(store, controller, client)` provides `inspect_pending() -> list[dict]`, `reconcile_one() -> bool`, `cancel_active() -> None`. Configuration flag `ANDREW_LOCAL_RECOVERY_ENABLED` defaults to `false`.
 
-- [ ] **Step 1:** Write `test_ready_boundary_continues_original_input_once`, `test_unknown_outcome_stays_held`, `test_lost_resume_reply_is_inspected_by_original_attempt`, `test_pending_owner_input_preempts_recovery`, `test_pause_sleep_restore_and_revision_races_block_next_effect`, and `test_terminal_recovery_preserves_held_messages`. Assert unchanged original input ID, no normal session dispatch while recovery runs and no unrelated hold/queue/reservation changes.
+- [x] **Step 1:** Write `test_ready_boundary_continues_original_input_once`, `test_unknown_outcome_stays_held`, `test_lost_resume_reply_is_inspected_by_original_attempt`, `test_pending_owner_input_preempts_recovery`, `test_pause_sleep_restore_and_revision_races_block_next_effect`, and `test_terminal_recovery_preserves_held_messages`. Assert unchanged original input ID, no normal session dispatch while recovery runs and no unrelated hold/queue/reservation changes.
 ```python
 # ready_boundary_continues_original_input_once
 self.assertEqual(recovered_binding['client_message_id'], original_input_id)
@@ -234,10 +234,10 @@ self.assertEqual(fake_destination.calls, [])
 self.assertEqual(store.get_state(control_key), '1')
 ```
 
-- [ ] **Step 2:** Run `PYTHONPATH=prototype:prototype/tests:. python3 -m unittest test_local_recovery -q`; confirm missing coordinator behavior fails.
-- [ ] **Step 3:** Implement additive recovery attempts and local protocol bridge. Negotiate version/store identity. Select only newly admitted autonomous cycles with exact current binding/configuration. Reconcile positive evidence first; any unknown effect/billing outcome blocks resume. Reuse the existing serialized model worker and saved conversation, not `send_user_turn`, `runtime_start` or `sync`.
-- [ ] **Step 4:** Route owner controls to revoke the active admission, cancel transport and prohibit subsequent dispatch while preserving already admitted effects. Complete a turn only through the existing exact bound terminal-receipt contract. Diagnostics expose fixed categories/counts/IDs, never payloads or opaque tokens; preserve legacy no-receipt labels.
-- [ ] **Step 5:** Run targeted/core worker/session tests and the real patched protocol test. Verify default-disabled startup still makes no attachment/resume call and performs no legacy queue recovery. Commit coordinator/bridge/diagnostic changes.
+- [x] **Step 2:** Run `PYTHONPATH=prototype:prototype/tests:. python3 -m unittest test_local_recovery -q`; confirm missing coordinator behavior fails.
+- [x] **Step 3:** Implement additive recovery attempts and local protocol bridge. Negotiate version/store identity. Select only newly admitted autonomous cycles with exact current binding/configuration. Reconcile positive evidence first; any unknown effect/billing outcome blocks resume. Reuse the existing serialized model worker and saved conversation, not `send_user_turn`, `runtime_start` or `sync`.
+- [x] **Step 4:** Route owner controls to revoke the active admission, cancel transport and prohibit subsequent dispatch while preserving already admitted effects. Complete a turn only through the existing exact bound terminal-receipt contract. Diagnostics expose fixed categories/counts/IDs, never payloads or opaque tokens; preserve legacy no-receipt labels.
+- [x] **Step 5:** Run targeted/core worker/session tests and the real patched protocol test. Verify default-disabled startup still makes no attachment/resume call and performs no legacy queue recovery. Commit coordinator/bridge/diagnostic changes.
 
 ## Task 8: Package activation, coordinated snapshots and safe rollback
 
@@ -245,7 +245,7 @@ self.assertEqual(store.get_state(control_key), '1')
 
 **Interfaces:** `build_candidate(backend_release, deployed_sources, backup_dir) -> Candidate`, `verify_candidate(candidate) -> Evidence`, `activate(candidate, enable_resume=False)`, `rollback(snapshot)`. A candidate binds backend/controller hashes, capability version and runtime proof; no runtime defaults enable recovery. Snapshot metadata includes both store UUIDs and digests and requires quiescent workers.
 
-- [ ] **Step 1:** Write `test_unknown_deployment_rejected_before_service_change`, `test_resume_disabled_during_initial_activation`, `test_restore_either_store_requires_reconciliation`, and `test_rollback_never_pumps_new_contract_input`. Simulate service operations with existing installer conventions and run rollback startup against a disposable actual older binary. Assert outstanding admissions remain held; unsafe rollback leaves services stopped.
+- [x] **Step 1:** Write `test_unknown_deployment_rejected_before_service_change`, `test_resume_disabled_during_initial_activation`, `test_restore_either_store_requires_reconciliation`, and `test_rollback_never_pumps_new_contract_input`. Simulate service operations with existing installer conventions and run rollback startup against a disposable actual older binary. Assert outstanding admissions remain held; unsafe rollback leaves services stopped.
 ```python
 # rollback_never_pumps_new_contract_input
 self.assertEqual(older_runtime.provider_calls, [])
@@ -254,10 +254,10 @@ self.assertEqual(retained_admission['state'], 'held')
 self.assertNotIn(('start', 'andrew-letta.service'), unsafe_rollback.service_actions)
 ```
 
-- [ ] **Step 2:** Run `python3 -m unittest discover -s scripts/tests -p test_letta_recovery_installer.py -q` and targeted memory-backup tests; confirm missing candidate/restore/rollback guarantees fail.
-- [ ] **Step 3:** Implement exact artifact/controller validation and merge preservation before service mutation. Update every changed module's tested hash using verified source. Select a root-owned separate artifact without mutating npm. Initial install keeps automatic resume off and preserves owner pause/sleep and all unresolved records.
-- [ ] **Step 4:** Implement quiescent paired snapshot/restore holds and rollback fence. Never start an older backend on live new-contract inputs: use an isolated retained snapshot only after verifying exclusion of all newer admissions from its input-disposition/queue stores. Otherwise leave services stopped and retain journals. Document explicit operator commands for install preview, apply, read-only diagnosis and rollback; do not execute them on production.
-- [ ] **Step 5:** Run installer, backup and disposable older-runtime rollback checks; verify no production path or service was touched. Commit packaging and operations changes.
+- [x] **Step 2:** Run `python3 -m unittest discover -s scripts/tests -p test_letta_recovery_installer.py -q` and targeted memory-backup tests; confirm missing candidate/restore/rollback guarantees fail.
+- [x] **Step 3:** Implement exact artifact/controller validation and merge preservation before service mutation. Update every changed module's tested hash using verified source. Select a root-owned separate artifact without mutating npm. Initial install keeps automatic resume off and preserves owner pause/sleep and all unresolved records.
+- [x] **Step 4:** Implement quiescent paired snapshot/restore holds and rollback fence. Never start an older backend on live new-contract inputs: use an isolated retained snapshot only after verifying exclusion of all newer admissions from its input-disposition/queue stores. Otherwise leave services stopped and retain journals. Document explicit operator commands for install preview, apply, read-only diagnosis and rollback; do not execute them on production.
+- [x] **Step 5:** Run installer, backup and disposable older-runtime rollback checks; verify no production path or service was touched. Commit packaging and operations changes.
 
 ## Task 9: Complete the process-loss matrix and readiness report
 
@@ -265,7 +265,7 @@ self.assertNotIn(('start', 'andrew-letta.service'), unsafe_rollback.service_acti
 
 **Interfaces:** consumes the actual built artifact, coordinator, dispatch receipts and installer candidate from Tasks 1–8. Produces a reproducible acceptance report with source/artifact/candidate hashes, named test totals and remaining limitations; not an activation request until tests pass.
 
-- [ ] **Step 1:** Write parameterized subprocess-kill scenarios for before/after each admission, provider confirmation, tool effect/result commit, transcript projection and terminal commit. Include backend-only, controller-only and simultaneous loss, lost transport responses, concurrent owners, boot/fence changes, quotas/corrupt files, compaction, owner-control races and paired restore/rollback. Each scenario asserts literal provider/tool/next-step counts and exact original identity.
+- [x] **Step 1:** Write parameterized subprocess-kill scenarios for before/after each admission, provider confirmation, tool effect/result commit, transcript projection and terminal commit. Include backend-only, controller-only and simultaneous loss, lost transport responses, concurrent owners, boot/fence changes, quotas/corrupt files, compaction, owner-control races and paired restore/rollback. Each scenario asserts literal provider/tool/next-step counts and exact original identity.
 ```python
 # Useful unfinished-turn recovery, not terminal-only recovery.
 self.assertEqual(calls_for(confirmed_provider_step), 1)
@@ -277,9 +277,9 @@ self.assertEqual(unknown_checkpoint['phase'], 'held')
 self.assertEqual(calls_for(unknown_attempt), 1)
 ```
 
-- [ ] **Step 2:** Run `ANDREW_LOCAL_RECOVERY_TEST_RELEASE=RELEASE ANDREW_LETTA_TEST_BINARY=RELEASE/letta.js PYTHONPATH=prototype:. python3 -m unittest discover -s scripts/tests -p test_local_recovery_crash_protocol.py -q` using the real temporary release. Confirm each fault scenario reaches its intended boundary; a test that never crashes or never crosses the boundary is not acceptance.
-- [ ] **Step 3:** Resolve failures in their owning task modules without weakening hold semantics. Demonstrate one useful unfinished-turn recovery from a confirmed response plus confirmed tool result to exactly one new step. Its paired unknown-provider/tool case must remain held with zero retries.
-- [ ] **Step 4:** Run `node --test letta_recovery/tests/*.test.mjs`, the full core unittest suite, all scripts tests with both release environment variables set, all compatible protocol checks against the pristine pinned binary with the recovery-release variable unset (report new-suite skips explicitly), and installer acceptance on the exact merged deployment candidate. Use explicit actual release paths, not the `RELEASE` notation used here. Report skips and unrelated failures by name; no blanket passing claim.
+- [x] **Step 2:** Run `ANDREW_LOCAL_RECOVERY_TEST_RELEASE=RELEASE ANDREW_LETTA_TEST_BINARY=RELEASE/letta.js PYTHONPATH=prototype:. python3 -m unittest discover -s scripts/tests -p test_local_recovery_crash_protocol.py -q` using the real temporary release. Confirm each fault scenario reaches its intended boundary; a test that never crashes or never crosses the boundary is not acceptance.
+- [x] **Step 3:** Resolve failures in their owning task modules without weakening hold semantics. Demonstrate one useful unfinished-turn recovery from a confirmed response plus confirmed tool result to exactly one new step. Its paired unknown-provider/tool case must remain held with zero retries.
+- [x] **Step 4:** Run `node --test letta_recovery/tests/*.test.mjs`, the full core unittest suite, all scripts tests with both release environment variables set, all compatible protocol checks against the pristine pinned binary with the recovery-release variable unset (report new-suite skips explicitly), and installer acceptance on the exact merged deployment candidate. Use explicit actual release paths, not the `RELEASE` notation used here. Report skips and unrelated failures by name; no blanket passing claim.
 - [ ] **Step 5:** Compare changed source hashes to deployment manifests; run `git diff --check`; request whole-change review and address critical/important findings. Update the roadmap with verified local readiness, undeployed status and known nonrecoverable outcomes. Commit final tests/docs. Produce the concrete installer command only after this evidence exists; do not install, wake or replay as part of implementation.
 
 ## Plan self-review and handoff
@@ -296,3 +296,22 @@ recovery by itself; all intermediate components are independently testable with
 isolated storage and fake effects. Native execution is recommended because the
 backend, protocol and controller gates share a tightly coupled contract. The
 implementation method and this plan still require owner review before code work.
+
+## Verification checkpoint — 2026-10-18
+
+Tasks 4–8 are implemented and locally verified. Source checkout: Node48; core533
+(2 live skips); scripts138 on the actual isolated release (no skips); pristine
+protocol26 (9 recovery-only skips, 17 compatible checks executed). The real
+process-loss matrix has 27 fault cases, including useful unfinished-turn recovery,
+unknown outcomes without retries, controller-only/combined death, projection and
+confirmed compaction. Exact final merged candidate acceptance is recorded separately
+in [the evidence report](../../local-letta-recovery-acceptance.md). The local merge
+uses reviewed baseline f7418d2 and does not claim to be a live production export.
+
+The owner selected personal final review, so the independent review portion of
+Task 9 Step 5 remains pending. Production installation and enablement have not been
+performed. Root preview must repeat the exact installed-source merge and acceptance;
+the current session cannot use passwordless sudo. Existing legacy inputs/holds
+remain untouched. See [operator commands](../../local-letta-recovery-operations.md).
+
+Corrected exact candidate `candidate-accepted` passed Node48, core533 (2 live skips), scripts138 (0 skips), pristine protocols26 (9 recovery-only skips); acceptance.json is present and strict candidate verification passed. Task9 Step5 source/manifests/diff self-review and evidence documentation are complete; the owner’s independent final review remains pending.

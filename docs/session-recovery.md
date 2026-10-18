@@ -1,5 +1,13 @@
 # Session recovery checkpoints
 
+The new local durable recovery increment is implemented in an undeployed candidate.
+It can continue newly journaled autonomous turns using exact controller receipts;
+unknown outcomes and older inputs remain held. See
+[operation and review instructions](local-letta-recovery-operations.md).
+Automatic recovery defaults off, initial installation keeps it off, and the owner
+selected personal final review. Existing recovery behavior below remains the
+production baseline until installation and separate enablement complete.
+
 This implements the first P0 recovery increment from [Memory update.md](../Memory%20update.md).
 
 The controller commits a SQLite checkpoint alongside each new autonomous cycle,
