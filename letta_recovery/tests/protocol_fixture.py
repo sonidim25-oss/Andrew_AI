@@ -25,7 +25,8 @@ class Fixture:
                     raise AssertionError('Unexpected fixture model request')
                 return provider(payload)
         self.store = Store(self.root / 'controller.sqlite3')
-        self.gateway = GatewayThread(make_server(ModelGateway(FakeProvider(), self.store, 'fixture-token'), port=0))
+        self.model_gateway = ModelGateway(FakeProvider(), self.store, 'fixture-token')
+        self.gateway = GatewayThread(make_server(self.model_gateway, port=0))
         self.gateway.start()
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0))

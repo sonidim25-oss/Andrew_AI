@@ -53,6 +53,7 @@ export class OwnershipManager{
   entry.lastNow=now;const current=this.store.load(entry.binding);
   if(!current||current.fence!==claim.fence||current.claim?.claim_id!==claim.claim_id||current.claim.owner_id!==this.ownerId||!sameBinding(current.binding,entry.binding)){entry.lost=true;throw Error('authority lost');}
  }
+ currentClaim(claim){this.assertOwned(claim);return {...this.owned.get(claim.claim_id).claim};}
  async renew(claim){
   this.assertOwned(claim);const entry=this.owned.get(claim.claim_id),current=this.store.load(entry.binding);
   const renewed={...entry.claim,revision:current.revision+1,expires_monotonic_ms:this.clock()+LEASE_MS};

@@ -1,4 +1,52 @@
-/** Capability remains absent until the complete persistent executor is configured. */
+import {join} from 'node:path';
+import {homedir} from 'node:os';
+import {atomicWrite,readRegular} from './payload-store.mjs';
+import {canonical,digest} from './contracts.mjs';
+import {RecoveryProtocol} from './protocol.mjs';
+import {LocalSDKAdapter} from './sdk-adapter.mjs';
+
+export const artifactEnabled=()=>process.env.ANDREW_LOCAL_RECOVERY_ARTIFACT==='1';
+export function atomicTranscriptWrite(path,text){
+ const generated=text.trimEnd().split('\n').map(line=>JSON.parse(line));
+ if(generated.some(row=>row.message?.metadata?.andrew_recovery)){
+  let previous='';try{previous=readRegular(path,268435456).toString('utf8');}catch(error){if(error.code!=='ENOENT')throw error;}
+  const oldRows=previous.trim()?previous.trimEnd().split('\n').map(line=>JSON.parse(line)):[];
+  const oldMessages=oldRows.filter(row=>row.message),messages=generated.filter(row=>row.message);
+  if(oldMessages.length>messages.length||oldMessages.some((row,index)=>canonical(row.message)!==canonical(messages[index].message)))throw Error('projection_conflict');
+  let parentId=oldRows.at(-1)?.id??null;
+  const additions=messages.slice(oldMessages.length).map(row=>{
+   const operationId=row.message.metadata?.andrew_recovery?.operation_id;if(!operationId)throw Error('projection_conflict');
+   const next={...row,id:'recovery-'+digest(operationId),parentId};parentId=next.id;return JSON.stringify(next)+'\n';
+  }).join('');
+  const prefix=oldRows.length?previous+(previous.endsWith('\n')?'':'\n'):JSON.stringify(generated[0])+'\n';
+  atomicWrite(path,Buffer.from(prefix+additions));return;
+ }
+ atomicWrite(path,Buffer.from(text));
+}
+
+const services=new WeakMap();
+export async function handleRawFrame(data,{runtime,socket,connectionId,sdk}){
+ if(!artifactEnabled())return false;
+ let command;try{command=JSON.parse(typeof data==='string'?data:data.toString());}catch{return false;}
+ if(typeof command?.type!=='string'||!command.type.startsWith('recovery_'))return false;
+ try{
+  let service=services.get(runtime);
+  if(!service){
+   const root=join(process.env.LETTA_LOCAL_BACKEND_DIR??join(homedir(),'.letta'),'local-recovery-v1');
+   const adapter=new LocalSDKAdapter({backend:sdk.backend,resolveModel:sdk.resolveModel,root});
+   service=new RecoveryProtocol({root,sdk:adapter,connectionId,acquireLock:sdk.acquireLock});services.set(runtime,service);
+  }
+  if(!socket.__andrewRecoveryClose){socket.__andrewRecoveryClose=true;socket.once('close',()=>{service.close().catch(()=>{});});}
+  const result=await service.handleRecoveryCommand(command);
+  socket.send(JSON.stringify({type:command.type+'_response',request_id:command.request_id,success:true,...result}));
+ }catch(error){
+  const category=['binding_mismatch','authority_lost','legacy_unproven','owner_blocked','configuration_changed','projection_conflict','storage_limit','unsupported_contract'].includes(error.message)?error.message:'recovery_held';
+  socket.send(JSON.stringify({type:command.type+'_response',request_id:command.request_id,success:false,error_category:category}));
+ }
+ return true;
+}
+
+/** The builder's bootstrap remains inactive unless explicitly selected. */
 export function createLocalRecovery({sdk,root,enabled=false,gate}){
  return Object.freeze({capability:null});
 }

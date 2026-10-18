@@ -7,7 +7,7 @@ export function transition(previous,event){
  switch(event.type){
  case 'provider_admit':{
   requirePhase('input_committed','continuation_ready');if(!safeId(event.effect_id)||state.steps.some(step=>step.effect_id===event.effect_id)||!/^([a-f0-9]{64})$/.test(event.request_sha))throw Error('invalid transition');
-  state.steps.push({effect_id:event.effect_id,request_sha:event.request_sha,request_ref:event.request_ref??null,state:'admitted',admission_id:event.admission_id??null});state.phase='provider_admitted';break;
+  state.steps.push({effect_id:event.effect_id,request_sha:event.request_sha,request_ref:event.request_ref??null,kind:event.kind??'provider',context_ref:event.context_ref??null,state:'admitted',admission_id:event.admission_id??null});if(event.context_ref)state.context_ref=event.context_ref;state.phase='provider_admitted';break;
  }
  case 'provider_confirm':{
   requirePhase('provider_admitted');const item=admitted(state.steps,event.effect_id);if(!event.result_ref)throw Error('invalid transition');
@@ -27,6 +27,7 @@ export function transition(previous,event){
   Object.assign(item,{state:'confirmed',result_ref:event.result_ref});state.phase='tool_confirmed';break;
  }
  case 'continuation':requirePhase('tool_confirmed');if(state.tools.some(item=>item.state!=='confirmed')||!event.context_ref)throw Error('invalid transition');state.context_ref=event.context_ref;state.phase='continuation_ready';break;
+ case 'compaction':requirePhase('provider_confirmed');if(state.steps.at(-1)?.kind!=='compaction'||!event.context_ref)throw Error('invalid transition');state.context_ref=event.context_ref;state.phase='continuation_ready';break;
  case 'terminal':requirePhase('provider_confirmed');if(!event.terminal||!safeId(event.terminal.id)||event.terminal.consumer_id!==state.binding.consumer_id||state.tools.some(item=>item.state!=='confirmed'))throw Error('invalid transition');state.terminal={...event.terminal,acknowledged:false};state.phase='terminal_committed';break;
  case 'ack':requirePhase('terminal_committed');if(event.consumer_id!==state.binding.consumer_id||event.terminal_id!==state.terminal.id)throw Error('invalid transition');state.terminal.acknowledged=true;break;
  case 'hold':if(!HOLD_REASONS.includes(event.reason))throw Error('invalid transition');state.held_phase=phase;state.hold_reason=event.reason;state.phase='held';break;

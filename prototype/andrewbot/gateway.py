@@ -69,6 +69,34 @@ class ModelGateway:
         self.input_rate = self.model_config.input_usd_per_million / 1_000_000
         self.output_rate = self.model_config.output_usd_per_million / 1_000_000
         self._budget_lock = threading.Lock()
+        self.recovery_tool_handler = None
+
+    def recovery_request(self, path, payload):
+        from .recovery_dispatch import RecoveryDispatch
+        from .recovery_records import digest
+        dispatch = RecoveryDispatch(self.store)
+        try:
+            if path == '/v1/recovery/authorize':
+                if set(payload) != {'binding','claim','effect','scope_token'}:
+                    raise ValueError('Invalid recovery command')
+                return 200, dispatch.authorize(payload['binding'],payload['claim'],payload['effect'],payload['scope_token'])
+            if path in {'/v1/recovery/result','/v1/recovery/check_scope'}:
+                with self.store._lock:
+                    dispatch.records._scope(payload['binding'],payload['claim'],payload['scope_token'],dispatch=path.endswith('check_scope'))
+                    if path.endswith('check_scope'):
+                        return 200, {'state':'active'}
+                    row = self.store.connection.execute('SELECT binding_sha FROM recovery_effects WHERE admission_id=?',(payload['admission_id'],)).fetchone()
+                    if row is None or row['binding_sha'] != digest(payload['binding']):
+                        raise ValueError('Recovery binding_mismatch')
+                    return 200, dispatch.result(payload['admission_id'])
+            if path == '/v1/recovery/tool' and self.recovery_tool_handler is not None:
+                result = self.recovery_tool_handler(payload['name'],payload['arguments'],recovery=payload['recovery'])
+                return 200, {'result':result,'admission_id':payload['recovery']['admission_id']}
+        except (ValueError,KeyError,TypeError):
+            return 423, {'error':{'message':'Recovery dispatch blocked','type':'recovery_blocked'}}
+        except Exception:
+            return 422, {'error':{'message':'Recovery effect held','type':'recovery_uncertain'}}
+        return 404, {'error':{'message':'Recovery operation unavailable'}}
 
     @staticmethod
     def is_compaction_request(payload):
@@ -95,17 +123,29 @@ class ModelGateway:
         now = datetime.now(timezone.utc).astimezone(TORONTO)
         return now.strftime("%Y-%m"), now.strftime("%Y-%m-%d")
 
-    def complete(self, authorization, payload):
+    def complete(self, authorization, payload, *, recovery=None):
         with self._budget_lock:
-            return self._complete_locked(authorization, payload)
+            return self._complete_locked(authorization, payload, recovery=recovery)
 
-    def _complete_locked(self, authorization, payload):
+    def _complete_locked(self, authorization, payload, *, recovery=None):
         expected = f"Bearer {self.gateway_token}"
         if not isinstance(authorization, str) or not hmac.compare_digest(authorization, expected):
             return 401, {"error": {"message": "unauthorized", "type": "authentication_error"}}
+        recovery_records = None
+        if recovery is not None:
+            from .recovery_records import RecoveryRecords
+            recovery_records = RecoveryRecords(self.store)
+            try:
+                with self.store._lock:
+                    recovery_records._validate_dispatch(recovery, payload, {'provider', 'compaction'})
+                proof = recovery_records.effect_result(recovery['admission_id'])
+                if proof['state'] == 'confirmed':
+                    return 200, proof['result']
+            except (ValueError, KeyError, TypeError):
+                return 423, {'error': {'message': 'Recovery dispatch blocked', 'type': 'recovery_blocked'}}
         if self.store.get_state('restore_recovery_required', '0') == '1':
             return 423, {'error': {'message': 'Restore requires billing and action reconciliation', 'type': 'recovery_blocked'}}
-        if self.store.get_state('autonomy_error', ''):
+        if self.store.get_state('autonomy_error', '') and not (recovery is not None and self.store.get_state('autonomy_error') == 'local_recovery_interrupted'):
             return self.uncertain_response()
         owner_id = self.store.get_state('autonomous_owner_id', '')
         if owner_id and self.store.pending_owner_input(int(owner_id)):
@@ -196,7 +236,14 @@ class ModelGateway:
                                'owner_retry': self.store.get_state('provider_retry_revision', '')},
                               sort_keys=True, ensure_ascii=False, separators=(',', ':'))
         reservation_id = 'provider-' + hashlib.sha256(identity.encode()).hexdigest()
-        if not self.store.reserve_usage(reservation_id, month, day, reserved):
+        if recovery_records is not None:
+            try:
+                reservation_id = recovery_records.begin_provider(recovery, payload, month, day, reserved)
+            except (ValueError, KeyError, TypeError):
+                return 423, {'error': {'message': 'Recovery dispatch blocked', 'type': 'recovery_blocked'}}
+            if reservation_id is None:
+                return self.uncertain_response()
+        elif not self.store.reserve_usage(reservation_id, month, day, reserved):
             self.store.add_activity('Letta model gateway blocked a repeated uncertain provider request')
             return self.uncertain_response()
 
@@ -261,10 +308,24 @@ class ModelGateway:
             result = {**result, 'usage': {'prompt_tokens': input_tokens,
                       'completion_tokens': output_tokens,
                       'total_tokens': input_tokens + output_tokens, 'cost': cost}}
-        self.store.settle_usage(
-            reservation_id, month, day, max(cost, reserved if not usage else 0.0),
-            input_tokens or input_tokens_bound, output_tokens,
-        )
+        if recovery_records is not None:
+            if invalid_usage or not usage:
+                return self.uncertain_response()
+            # Recovery stores only the structured public response, never private reasoning.
+            result = {key:value for key,value in result.items() if key in {'id','object','created','model','usage'}} | {
+                'choices': [{key:value for key,value in choice.items() if key in {'index','finish_reason'}} | {
+                    'message': {key:value for key,value in choice['message'].items()
+                                if key in {'role','content','tool_calls','refusal'}}
+                } for choice in result['choices']]}
+            recovery_records.confirm_provider(recovery['admission_id'], result, {
+                'cost': max(cost, reserved if not usage else 0.0),
+                'input_tokens': input_tokens or input_tokens_bound, 'output_tokens': output_tokens})
+        else:
+            self.store.settle_usage(
+                reservation_id, month, day, max(cost, reserved if not usage else 0.0),
+                input_tokens or input_tokens_bound, output_tokens,
+            )
+
         if any(isinstance(choice, dict) and choice.get("finish_reason") == "length" for choice in result["choices"]):
             # Preserve provider truth and billing; never silently replay a paid request.
             event = "Letta model gateway response reached output token limit"
@@ -314,7 +375,7 @@ def make_server(gateway, host="127.0.0.1", port=8284):
             self._json(200, {"object": "list", "data": [{"id": gateway.model_id, "object": "model", "owned_by": "andrew-controller"}]})
 
         def do_POST(self):
-            if self.path != "/v1/chat/completions":
+            if self.path not in {"/v1/chat/completions", "/v1/recovery/authorize", "/v1/recovery/result", "/v1/recovery/check_scope", "/v1/recovery/tool"}:
                 self._json(404, {"error": {"message": "not found"}})
                 return
             if not hmac.compare_digest(self.headers.get("Authorization", ""), f"Bearer {gateway.gateway_token}"):
@@ -329,11 +390,27 @@ def make_server(gateway, host="127.0.0.1", port=8284):
             except (ValueError, json.JSONDecodeError):
                 self._json(400, {"error": {"message": "invalid JSON"}})
                 return
+            if self.path.startswith('/v1/recovery/'):
+                if not isinstance(payload, dict):
+                    self._json(400, {'error':{'message':'Invalid recovery command'}})
+                    return
+                status, result = gateway.recovery_request(self.path, payload)
+                self._json(status, result)
+                return
             if not isinstance(payload, dict) or not isinstance(payload.get('stream_options', {}), dict):
                 self._json(400, {"error": {"message": "request must be an object with valid stream options"}})
                 return
             wants_stream = payload.get("stream") is True
-            status, result = gateway.complete(self.headers.get("Authorization"), payload)
+            try:
+                raw_recovery = self.headers.get('X-Andrew-Recovery')
+                recovery = json.loads(raw_recovery) if raw_recovery else None
+                if recovery is not None and not isinstance(recovery,dict):
+                    raise ValueError('Invalid recovery header')
+            except (ValueError,TypeError):
+                self._json(400, {'error':{'message':'Invalid recovery header'}})
+                return
+            status, result = gateway.complete(self.headers.get("Authorization"), payload,
+                **({'recovery':recovery} if recovery is not None else {}))
             if status != 200 or not wants_stream:
                 self._json(status, result)
                 return

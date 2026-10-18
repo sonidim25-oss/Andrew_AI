@@ -340,3 +340,13 @@ reopen, abrupt process exit between receipt commit and acknowledgement, stale
 identity/content/recipient rejection, restore holds and suppression of repeated
 generation/uploads. The owner confirmed deployment on 2026-10-18; this records
 that confirmation, not a fresh live-service inspection.
+
+Durable unfinished-turn recovery is under development in the approved
+`docs/superpowers/plans/2026-10-18-local-letta-durable-recovery.md` plan.
+The separate pinned artifact, checkpoint store and kernel ownership layers are
+committed. Executor/protocol/gateway integration is an incomplete development
+checkpoint. Disposable real-bundle tests cover a saved answer across restart
+and a confirmed tool followed by one provider continuation. These tests do not
+establish production readiness: legacy mutation exclusion, repeated normal
+turns, coordinator integration, paired backup/rollback and the complete crash
+matrix remain open. Do not enable the artifact flag in a production service.

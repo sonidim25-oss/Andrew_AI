@@ -38,7 +38,7 @@ test('renewal_preserves_fence_and_uses_fifteen_second_lease',async t=>{
  const {store}=make(t),time=clock();const manager=new OwnershipManager({store,clock:time.now,bootId:'boot-1'});
  const claim=await manager.claim(binding,1,'admission-1');t.after(()=>manager.release(claim));time.advance(5000);
  const renewed=await manager.renew(claim);assert.equal(renewed.fence,claim.fence);assert.equal(renewed.expires_monotonic_ms,21000);
- manager.assertOwned(renewed);
+ manager.assertOwned(renewed);assert.equal(manager.currentClaim(claim).expires_monotonic_ms,21000);
 });
 test('parent_exit_releases_execution_lock',async t=>{
  const {store,root}=make(t);

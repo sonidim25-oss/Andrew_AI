@@ -1,1 +1,22 @@
-[{"anchor":"import { createRequire } from \"node:module\";","replacement":"import { createRequire } from \"node:module\";\nimport * as andrewRecoveryExtension from './recovery/entry.mjs';"}]
+[
+  {
+    "anchor": "import { createRequire } from \"node:module\";",
+    "replacement": "import { createRequire } from \"node:module\";\nimport * as andrewRecoveryExtension from './recovery/entry.mjs';"
+  },
+  {
+    "anchor": "      const parsed = parseServerMessage(data);",
+    "replacement": "      if (await andrewRecoveryExtension.handleRawFrame(data, { runtime, socket, connectionId, sdk: {\n        backend: getBackend(), acquireLock: acquireDurableFileLock,\n        resolveModel: async (binding) => {\n          const backend = getBackend();\n          const agent = backend.store.retrieveExecutionAgentRecord(binding.conversation_id, binding.agent_id);\n          const localModel = await resolveAvailableLocalModelForTurn({model:agent.model,modelSettings:agent.model_settings,storageDir:backend.storageDir,modelsRuntime:backend.piModelsRuntime});\n          return resolvePiModelForAgent(localModel.model,localModel.modelSettings,{localProviderAuthStorageDir:backend.storageDir,modelsRuntime:backend.piModelsRuntime});\n        }\n      } })) return;\n      const parsed = parseServerMessage(data);"
+  },
+  {
+    "anchor": "    writeFileSync9(messagesPath, jsonl(entries));",
+    "replacement": "    andrewRecoveryExtension.atomicTranscriptWrite(messagesPath, jsonl(entries));"
+  },
+  {
+    "anchor": "async function completeInitialConnectionStartup(listener, connection, transport3, options, startupOptions) {",
+    "replacement": "async function completeInitialConnectionStartup(listener, connection, transport3, options, startupOptions) {\n  if (andrewRecoveryExtension.artifactEnabled()) {\n    await options.onConnected(options.connectionId);\n    if (listener.connections.get(options.connectionId) !== connection || connection.cancellation.signal.aborted) return false;\n    markListenerConnectionInitialized(listener, options.connectionId, connection);\n    return connection.initialized;\n  }"
+  },
+  {
+    "anchor": "      startProcessServices: options.startProcessServices ?? true,",
+    "replacement": "      startProcessServices: andrewRecoveryExtension.artifactEnabled() ? false : options.startProcessServices ?? true,"
+  }
+]

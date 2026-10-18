@@ -344,6 +344,8 @@ class Store:
                     SELECT {identifier},CASE source WHEN 'owner' THEN 'owner' WHEN 'system' THEN 'system'
                     ELSE 'untrusted' END,'legacy_unverified',created_at FROM {table}''')
         self.backfill_session_history()
+        from .recovery_records import initialize_schema
+        initialize_schema(self)
         try:
             self.path.chmod(0o600)
         except FileNotFoundError:

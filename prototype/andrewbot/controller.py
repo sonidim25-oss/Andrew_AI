@@ -321,7 +321,11 @@ class Controller:
         if self.gmail_tools is not None:
             self.gmail_tools.reconcile_pending()
 
-    def execute_tool(self, name, arguments):
+    def execute_tool(self, name, arguments, *, recovery=None):
+        if recovery is not None:
+            from .recovery_dispatch import RecoveryDispatch
+            return RecoveryDispatch(self.store).run_tool(
+                recovery, name, arguments, lambda: self.execute_tool(name, arguments))
         if name in (AppServerClient.EXTERNAL_TOOL_NAMES | {'gmail.read', 'research.list', 'research.get'}):
             note_untrusted_memory_source()
         known = (AppServerClient.SAFE_CONTROLLER_TOOL_NAMES | AppServerClient.EXTERNAL_TOOL_NAMES
