@@ -30,13 +30,16 @@ export async function handleRawFrame(data,{runtime,socket,connectionId,sdk}){
  let command;try{command=JSON.parse(typeof data==='string'?data:data.toString());}catch{return false;}
  if(typeof command?.type!=='string'||!command.type.startsWith('recovery_'))return false;
  try{
-  let service=services.get(runtime);
+  let state=services.get(runtime);
+  if(!state){state={storeId:null,connections:new WeakMap()};services.set(runtime,state);}
+  let service=state.connections.get(socket);
   if(!service){
    const root=join(process.env.LETTA_LOCAL_BACKEND_DIR??join(homedir(),'.letta'),'local-recovery-v1');
    const adapter=new LocalSDKAdapter({backend:sdk.backend,resolveModel:sdk.resolveModel,root});
-   service=new RecoveryProtocol({root,sdk:adapter,connectionId,acquireLock:sdk.acquireLock});services.set(runtime,service);
+   service=new RecoveryProtocol({root,sdk:adapter,connectionId,acquireLock:sdk.acquireLock,storeId:state.storeId});
+   state.storeId=service.storeId;state.connections.set(socket,service);
+   socket.once('close',()=>{service.close().catch(()=>{});});
   }
-  if(!socket.__andrewRecoveryClose){socket.__andrewRecoveryClose=true;socket.once('close',()=>{service.close().catch(()=>{});});}
   const result=await service.handleRecoveryCommand(command);
   socket.send(JSON.stringify({type:command.type+'_response',request_id:command.request_id,success:true,...result}));
  }catch(error){

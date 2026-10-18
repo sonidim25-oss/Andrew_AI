@@ -28,6 +28,10 @@ class TimeoutRecoveryProtocolTests(unittest.TestCase):
                 if not dependencies.is_dir():
                     dependencies = next(parent for parent in binary.parents if parent.name == 'node_modules')
                 (root / 'node_modules').symlink_to(dependencies, target_is_directory=True)
+                # The separate recovery artifact imports its adjacent extension even when disabled.
+                extension = binary.parent / 'recovery'
+                if extension.is_dir():
+                    (root / 'recovery').symlink_to(extension.resolve(), target_is_directory=True)
                 # Reproduce the pinned backend's missing finalization when a
                 # consumer stops its stream before the stop-reason chunk.
                 source = binary.read_text()

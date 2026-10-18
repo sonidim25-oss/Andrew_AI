@@ -19,7 +19,8 @@ class RecoveryBuilderTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.base = self.root / 'base'
         self.base.mkdir()
-        self.source = b'#!/usr/bin/env node\nimport { createRequire } from "node:module";\nconsole.log("fixture");\n'
+        patches = json.loads((ROOT / 'letta_recovery/patches.json').read_text())
+        self.source = ('#!/usr/bin/env node\n' + '\n'.join(patch['anchor'] for patch in patches) + '\n').encode()
         (self.base / 'letta.js').write_bytes(self.source)
         (self.base / 'package.json').write_text(json.dumps({'name':'@letta-ai/letta-code','version':'0.34.13','type':'module'}))
         (self.base / 'LICENSE').write_text('Fixture license')

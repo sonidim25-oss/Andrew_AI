@@ -10,7 +10,7 @@ from datetime import datetime,timezone
 from unittest.mock import Mock
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'prototype'))
-from andrewbot.appserver import AppServerClient
+from andrewbot.appserver import AppServerClient, LettaCommandError
 from andrewbot.controller import Controller
 from andrewbot.sessions import SessionRunner
 from andrewbot.recovery_records import RecoveryRecords,digest
@@ -102,3 +102,40 @@ class LocalRecoveryProtocolTests(unittest.TestCase):
         self.assertEqual(calls,[('recent_activity',{})]);self.assertEqual(len(self.fixture.provider_calls),2)
         continuation=self.fixture.provider_calls[1]['messages']
         self.assertEqual(continuation[-1],{'role':'tool','tool_call_id':'fixture-call','content':'{"entries":["exact fixture event"]}'})
+
+    def test_connections_have_separate_claims_and_disconnect_releases_only_owner(self):
+        # Opening a second connection before the first input must not create a second store identity.
+        peer=AppServerClient(self.fixture.url,timeout=3)
+        self.addCleanup(peer.close)
+        peer_capability=peer.request({'type':'recovery_capabilities'},'recovery_capabilities_response')
+        binding,input,scope=self.prepare()
+        self.assertEqual(peer_capability['store_id'],binding['store_id'])
+        admitted=self.command('recovery_admit',binding=binding,input=input,**scope)
+        claim=self.command('recovery_claim',binding=binding,expected_revision=admitted['revision'],**scope)
+        self.assertTrue(claim['success'],claim)
+        for kind in ('recovery_renew','recovery_release','recovery_revoke','recovery_ack','recovery_resume'):
+            with self.assertRaises(LettaCommandError):
+                peer.request({'type':kind,'binding':binding,**scope,
+                    'claim_id':claim['claim_id'],'fence':claim['fence'],
+                    'attempt_id':'foreign-attempt','expected_revision':claim['revision'],
+                    **({'terminal_id':'foreign-terminal','consumer_id':binding['consumer_id']} if kind=='recovery_ack' else {})},kind+'_response')
+        peer.close()
+        # A response from a fresh connection also proves the earlier close reached the server.
+        peer=AppServerClient(self.fixture.url,timeout=3)
+        self.addCleanup(peer.close)
+        peer.request({'type':'recovery_capabilities'},'recovery_capabilities_response')
+        renewed=self.command('recovery_renew',binding=binding,claim_id=claim['claim_id'],fence=claim['fence'],**scope)
+        self.assertTrue(renewed['success'],renewed)
+        self.fixture.client.close()
+        import time
+        deadline=time.monotonic()+5
+        while True:
+            inspected=peer.request({'type':'recovery_inspect','binding':binding},'recovery_inspect_response')
+            try:
+                replacement=peer.request({'type':'recovery_claim','binding':binding,**scope,'expected_revision':inspected['revision']},'recovery_claim_response')
+                break
+            except LettaCommandError:
+                self.assertLess(time.monotonic(),deadline)
+                time.sleep(.03)
+        self.assertGreater(replacement['fence'],claim['fence'])
+        self.assertEqual(self.fixture.provider_calls,[])
