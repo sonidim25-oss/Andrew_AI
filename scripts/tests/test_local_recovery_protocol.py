@@ -226,6 +226,37 @@ class LocalRecoveryProtocolTests(unittest.TestCase):
         agent.initialize()
         return agent,controller,coordinator,SessionRunner(self.fixture.store,controller,agent,enabled=True)
 
+    def test_first_journaled_turn_preserves_legacy_history_tombstones_costs_and_held_messages(self):
+        agent,controller,coordinator,runner=self.coordinated_agent()
+        runtime=self.fixture.client.start_runtime(agent.agent_id,agent.conversation_id,controller_tools=False)
+        self.assertEqual(self.fixture.client.send_user_turn(runtime,'A historical fixture question.'),'Persisted fixture answer.')
+        self.fixture.restart()  # Existing history after the installation's backend restart.
+        self.assertEqual(len(self.fixture.provider_calls),1)
+        ledgers=list(self.fixture.root.rglob('input-dispositions-v2.json'))
+        self.assertEqual(len(ledgers),1)
+        before=ledgers[0].read_bytes();self.assertTrue(json.loads(before)['entries'])
+        store=self.fixture.store
+        with store.connection:
+            for index in range(10):
+                store.connection.execute('INSERT INTO budget_reservations VALUES(?,?,?,?,?)',('provider-'+format(index,'064x'),'2026-10','2026-10-16',.01,'2026-10-16T00:00:00+00:00'))
+        for index in range(15):store.add_message(17,'user','Historical held fixture '+str(index),queued=3)
+        self.responses.append({'id':'new-journaled-response','choices':[{'index':0,'message':{'role':'assistant','content':'Distinct new work completed.'},'finish_reason':'stop'}],
+            'usage':{'prompt_tokens':20,'completion_tokens':5,'cost':.000001}})
+        session=runner.start('owner_wake',datetime.now(timezone.utc))
+        errors=[];turn=agent.autonomous_turn
+        def checked(*args,**kwargs):
+            try:return turn(*args,**kwargs)
+            except Exception as error:errors.append((type(error).__name__,str(error)));raise
+        agent.autonomous_turn=checked
+        self.assertTrue(runner.run_cycle(session),(errors,json.loads(before)))
+        self.assertEqual(len(self.fixture.provider_calls),2)
+        self.assertIn('Persisted fixture answer.',json.dumps(self.fixture.provider_calls[-1]['messages']))
+        self.assertEqual(store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0],10)
+        self.assertEqual(store.uncertain_message_count(17),15)
+        self.assertEqual(ledgers[0].read_bytes(),before)
+        self.assertFalse(coordinator.has_pending())
+        with self.assertRaises(LettaCommandError):self.fixture.client.start_runtime(agent.agent_id,agent.conversation_id,controller_tools=False)
+
     def test_confirmed_tool_survives_backend_and_controller_loss_then_one_continuation(self):
         from andrewbot.recovery_dispatch import RecoveryDispatch
         from andrewbot.store import Store

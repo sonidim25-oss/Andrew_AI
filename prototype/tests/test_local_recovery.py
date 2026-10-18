@@ -8,7 +8,7 @@ from unittest.mock import Mock
 from andrewbot.controller import Controller
 from andrewbot.sessions import SessionRunner
 from andrewbot.store import Store
-from andrewbot.recovery import RecoveryCoordinator
+from andrewbot.recovery import RecoveryCoordinator,RecoveryInterrupted
 from andrewbot.recovery_records import RecoveryRecords,digest
 
 
@@ -69,3 +69,18 @@ class CoordinatorTests(unittest.TestCase):
         self.assertEqual(before,'\n'.join(self.store.connection.iterdump()))
         self.assertNotIn(self.scope['scope_token'],json.dumps(result));self.assertNotIn('token_sha',json.dumps(result))
         self.client.claim.assert_not_called();self.client.resume.assert_not_called()
+
+    def test_distinct_new_input_keeps_legacy_cost_reserved_without_replaying_it(self):
+        reservation='provider-'+'a'*64
+        with self.store.connection:
+            self.store.connection.execute('INSERT INTO budget_reservations VALUES(?,?,?,?,?)',(reservation,'2026-10','2026-10-16',.01,'2026-10-16T00:00:00+00:00'))
+        self.coordinator._check_outcomes(self.binding,fresh=True)
+        self.assertEqual(self.store.connection.execute('SELECT reservation_id FROM budget_reservations').fetchone()[0],reservation)
+        with self.assertRaises(RecoveryInterrupted):self.coordinator._check_outcomes(self.binding)
+
+    def test_fresh_input_cannot_bypass_a_new_contract_or_unrecognized_reservation(self):
+        for reservation in ('local-recovery-'+('a'*64),'unrecognized-reservation'):
+            with self.subTest(reservation=reservation),self.store.connection:
+                self.store.connection.execute('DELETE FROM budget_reservations')
+                self.store.connection.execute('INSERT INTO budget_reservations VALUES(?,?,?,?,?)',(reservation,'2026-10','2026-10-16',.01,self.store.now()))
+                with self.assertRaises(RecoveryInterrupted):self.coordinator._check_outcomes(self.binding,fresh=True)

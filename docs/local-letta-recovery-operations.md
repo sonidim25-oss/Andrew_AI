@@ -3,8 +3,8 @@
 This change journals newly admitted local turns and resumes autonomous turns only
 from confirmed controller receipts. It does not recover the older interrupted
 input, infer success from transcript text, or retry an uncertain request/action.
-Automatic recovery of owner replies is outside this increment. Existing legacy
-input dispositions can prevent adoption of a conversation; that hold requires
+Automatic recovery of owner replies is outside this increment. Legacy queued replay payloads, input reservations, active runtimes or reuse of
+an old input identity can prevent adoption of a conversation; that hold requires
 separate reconciliation, without deleting the disposition records.
 
 Production has not been changed during development. The owner selected personal
@@ -26,7 +26,7 @@ Local artifacts and private test logs live under:
 /home/daniel/andrew-autonomy-media/.superpowers/sdd/2026-10-18-local-letta-durable-recovery/
 ```
 
-`release-candidate/recovery-release.json` binds the complete backend artifact.
+`release-legacy-admission/recovery-release.json` binds the complete backend artifact.
 `candidate-accepted/candidate.json` binds the exact controller merge, test sources,
 and backend manifest. This local candidate was merged with the reviewed
 `f7418d2` source baseline; it is not represented as a current production export.
@@ -54,7 +54,7 @@ not stop/start services:
 ```bash
 cd /home/daniel/andrew-autonomy-media
 sudo python3 scripts/install-letta-recovery.py \
-  --backend-release /home/daniel/andrew-autonomy-media/.superpowers/sdd/2026-10-18-local-letta-durable-recovery/release-candidate
+  --backend-release /home/daniel/andrew-autonomy-media/.superpowers/sdd/2026-10-18-local-letta-durable-recovery/release-legacy-admission
 ```
 
 Unknown source, changed runtime proof, failed tests, or unsettled workers stop the
@@ -73,7 +73,7 @@ Failures after stopping services leave them stopped, with evidence retained.
 
 ```bash
 sudo python3 scripts/install-letta-recovery.py \
-  --backend-release /home/daniel/andrew-autonomy-media/.superpowers/sdd/2026-10-18-local-letta-durable-recovery/release-candidate \
+  --backend-release /home/daniel/andrew-autonomy-media/.superpowers/sdd/2026-10-18-local-letta-durable-recovery/release-legacy-admission \
   --apply
 ```
 
@@ -124,3 +124,13 @@ to authorize recovery. The existing billing/action reconciliation command does
 not clear the new local recovery fence. Fence release requires an explicit
 operator reconciliation of both stores; this increment intentionally supplies no
 automatic fence-clear command.
+
+## Updating after the first-turn legacy reservation hold
+
+Keep Andrew paused. Restart the controller normally before applying this update
+so its standard startup bookkeeping retires the blocked, never-admitted running
+cycle. This does not replay held input or settle old reservations. Apply using
+`release-legacy-admission`, then enable using the new successful candidate path.
+The old ten cost reservations remain counted. Fresh turns can now proceed around
+recognized unlinked legacy costs; interrupted-turn recovery still requires global
+reconciliation of uncertain costs.

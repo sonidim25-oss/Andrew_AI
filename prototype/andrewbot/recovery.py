@@ -1,5 +1,6 @@
 """Explicit local continuation on the existing serialized model worker."""
 import json
+import re
 import threading
 import time
 import uuid
@@ -97,12 +98,19 @@ class RecoveryCoordinator:
     def _deactivate(self):
         with self._active_lock:self._active_client=self._active_scope=self._active_cancel=None
 
-    def _check_outcomes(self,binding):
+    def _check_outcomes(self,binding,*,fresh=False):
         with self.store._lock:
             # Never resolve an admitted effect from its absence in a transcript.
             unknown=self.store.connection.execute("SELECT kind FROM recovery_effects WHERE state='admitted' LIMIT 1").fetchone()
             if unknown:raise RecoveryInterrupted('tool_uncertain' if unknown['kind']=='tool' else 'provider_uncertain')
-            if self.store.connection.execute('SELECT 1 FROM budget_reservations LIMIT 1').fetchone():raise RecoveryInterrupted('provider_uncertain')
+            for reservation in self.store.connection.execute('SELECT reservation_id FROM budget_reservations'):
+                reservation_id=reservation['reservation_id']
+                # A distinct newly journaled input is not a replay of a legacy
+                # request. Keep its reserved cost and duplicate guard intact.
+                # Resuming interrupted work still requires global reconciliation.
+                legacy=bool(re.fullmatch(r'(?:provider-[a-f0-9]{64}|[a-f0-9]{32})',reservation_id))
+                linked=self.store.connection.execute('SELECT 1 FROM recovery_effects WHERE reservation_id=? LIMIT 1',(reservation_id,)).fetchone()
+                if not fresh or not legacy or linked:raise RecoveryInterrupted('provider_uncertain')
             if self.store.cycle_uncertain_effects(binding['cycle_id']):raise RecoveryInterrupted('tool_uncertain')
             if self.store.connection.execute("SELECT 1 FROM external_action_receipts WHERE state='uncertain' LIMIT 1").fetchone():raise RecoveryInterrupted('tool_uncertain')
             tables={row[0] for row in self.store.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -160,13 +168,15 @@ class RecoveryCoordinator:
         if not isinstance(text,str) or not text.strip():raise RecoveryInterrupted('state_corrupt')
         return text
 
-    def _drive(self,client,binding,scope,state,origin,cancelled,*,old_attempt=None):
+    def _drive(self,client,binding,scope,state,origin,cancelled,*,old_attempt=None,fresh=False):
         if old_attempt:
             state=client.status(binding,old_attempt)
             if state.get('state')=='running':raise RecoveryInterrupted('authority_lost')
         if state.get('status') not in {'found','held'} or state.get('binding')!=binding:raise RecoveryInterrupted(state.get('hold_reason','binding_mismatch'))
         if state.get('phase')=='held':raise RecoveryInterrupted(state.get('hold_reason'))
-        if state.get('phase')!='terminal_committed':self._check_outcomes(binding)
+        if state.get('phase')!='terminal_committed':
+            if fresh and (old_attempt or state.get('phase')!='input_committed'):raise RecoveryInterrupted('binding_mismatch')
+            self._check_outcomes(binding,fresh=fresh)
         if cancelled.is_set():raise LettaTurnCancelled('Owner cancelled this turn')
         claim=client.claim(binding,state['revision'],scope)
         if state.get('phase')=='terminal_committed':return self._finish(client,binding,scope,claim,client.inspect(binding),origin)
@@ -199,7 +209,7 @@ class RecoveryCoordinator:
         validate_binding(binding)
         if origin=='autonomous':self.store.record_model_turn_receipt(binding['session_id'],binding['cycle_id'],runtime,
             {'kind':'prepared','request_id':binding['consumer_id'],'client_message_id':binding['client_message_id']})
-        self._check_outcomes(binding);scope=self.records.admit_scope(binding,origin=origin);self._activate(client,scope,cancelled)
+        self._check_outcomes(binding,fresh=True);scope=self.records.admit_scope(binding,origin=origin);self._activate(client,scope,cancelled)
         try:
             previous=self._previous(runtime);extra={}
             if previous:
@@ -207,7 +217,7 @@ class RecoveryCoordinator:
                 extra={'previous_binding':previous,'expected_revision':state['revision']}
             state=client.command('recovery_admit',binding=binding,input=input,**scope,**extra)
             self._accepted(binding,origin)
-            return self._drive(client,binding,scope,state,origin,cancelled)
+            return self._drive(client,binding,scope,state,origin,cancelled,fresh=True)
         except (OSError,TimeoutError,ConnectionError):raise RecoveryInterrupted('authority_lost') from None
         finally:self._deactivate()
 

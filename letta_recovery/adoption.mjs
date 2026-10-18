@@ -61,9 +61,17 @@ export function assertAdoptable(binding,{runtimeKey,dispositionPath,scopedRuntim
  if(!dispositionPath)throw Error('unsupported_contract');
  let ledger;try{ledger=JSON.parse(readRegular(dispositionPath,1048576));}catch(error){if(error.code==='ENOENT')return;throw error;}
  if(![2,3,4].includes(ledger.version)||!ledger.entries||!ledger.reservations)throw Error('state_corrupt');
- for(const [key,entry] of [...Object.entries(ledger.entries),...Object.entries(ledger.reservations)]){
+ for(const [key,entry] of Object.entries(ledger.entries)){
   let identity;try{identity=JSON.parse(key);}catch{throw Error('state_corrupt');}
-  if(!Array.isArray(identity)||!entry||typeof entry!=='object')throw Error('state_corrupt');
+  if(!Array.isArray(identity)||identity.length!==3||!identity.every(value=>typeof value==='string')||!entry||typeof entry!=='object')throw Error('state_corrupt');
+  if(identity[0]!==runtimeKey)continue;
+  // Adoption freezes legacy execution entry points. Retained tombstones do not
+  // prove the older input completed and cannot authorize resuming that input.
+  if([binding.client_message_id,binding.consumer_id].includes(identity[2])||entry.disposition!=='started'||entry.replayCompleted!==true||entry.queuedInput!==undefined)throw Error('legacy_unproven');
+ }
+ for(const [key,entry] of Object.entries(ledger.reservations)){
+  let identity;try{identity=JSON.parse(key);}catch{throw Error('state_corrupt');}
+  if(!Array.isArray(identity)||identity.length!==3||!identity.every(value=>typeof value==='string')||!entry||typeof entry!=='object')throw Error('state_corrupt');
   if(identity[0]===runtimeKey)throw Error('legacy_unproven');
  }
 }

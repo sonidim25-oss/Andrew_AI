@@ -122,3 +122,39 @@ The backend artifact is unchanged. Earlier candidate acceptance files remain
 historical evidence and do not authorize this new manifest. The root installer
 must repeat the complete acceptance run against the then-current installed merge
 before it changes services; unknown additional source hashes still refuse.
+
+## First live turn: legacy reservation admission fix
+
+After successful installation/enablement, the first live wake was held as
+`provider_uncertain` before creating any recovery scope or effect. Read-only
+diagnostics confirmed ten older legacy reservations (October 16–17), total
+approximately $0.0944. The prior diagnostic incorrectly reported only reservations
+in the current session window; it now reports global metadata.
+
+The correction distinguishes fresh logical input from interrupted-turn recovery.
+Fresh admission can retain recognized legacy provider reservations (UUID or
+provider-SHA identifiers) unlinked to new-contract effects. No cost/reservation
+is cleared or settled. Unknown/new-contract reservations still block fresh input;
+all outstanding reservations still block interrupted-turn resume. Adoption of a
+quiescent conversation can retain older nonreplayable legacy input tombstones,
+while refusing the same old input ID, queued replay payloads, durable input
+reservations and active execution. Adoption fences all legacy execution routes;
+retained markers never certify old completion.
+
+The actual SDK regression first runs an old-format turn, restarts the backend,
+then completes one distinct new turn with ten older reservations and fifteen
+held owner messages. The old disposition bytes, reservations and held messages
+remain; original history is present, and legacy runtime_start is rejected after
+adoption. Existing unknown-outcome process-loss cases still pass.
+
+Exact corrected deployment candidate: `candidate-legacy-admission`, SHA-256
+`e99905e39c35a34536e4fdef5f9410ff58eefd91e47400b493a7653bc15ff531`.
+Acceptance: Node49 (no skips), core535 (2 live skips), scripts139 (no skips),
+pristine protocols27 (10 recovery-only skips, 17 compatible checks executed).
+Release directory: `release-legacy-admission`; full release manifest SHA-256
+`c7e99ddcccbf822213ebe67760ca3baa5a79f44fe352b4ec8c47d2523f814068`.
+This correction is locally accepted and is not yet reported installed. The owner
+reported pause. A normal paused controller restart safely retires the blocked
+unadmitted cycle before installer idle checks; a separate isolated check retained
+all ten reservations and fifteen held inputs without any transport call. Root
+apply must use the new release, then enable using the newly printed backup path.
