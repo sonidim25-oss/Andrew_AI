@@ -95,6 +95,10 @@ def main():
     parser.add_argument("session", nargs="?", default="latest", help="Session ID, hexadecimal prefix, or latest (default)")
     parser.add_argument("--database", default="/var/lib/andrew/control/controller.sqlite3")
     parser.add_argument("--letta-metadata", action="store_true", help="Read saved Letta message structure; no content is printed")
+    parser.add_argument("--letta-recovery-metadata", action="store_true",
+                        help="Read local recovery journal metadata without attaching to Letta or changing state")
+    parser.add_argument("--letta-home", default="/var/lib/andrew/letta",
+                        help="Letta service home for optional recovery metadata (not the controller home)")
     parser.add_argument("--current", action="store_true", help="Inspect the latest cycle and current queues, even without a failure")
     parser.add_argument("--brief", action="store_true", help="Show current state, recent events and saved message metadata with usage totals")
     args = parser.parse_args()
@@ -142,6 +146,12 @@ def main():
             report['model_turn_receipts'] = rows(
                 'SELECT cycle_id,session_id,agent_id,conversation_id,state,run_id,terminal_id,created_at,updated_at '
                 'FROM model_turn_receipts ORDER BY created_at DESC LIMIT 20')
+        if args.letta_recovery_metadata:
+            from letta_recovery_metadata import collect_recovery_metadata
+            receipts = rows('SELECT cycle_id,agent_id,conversation_id,request_id,client_message_id,run_id '
+                            'FROM model_turn_receipts WHERE session_id LIKE ? ORDER BY created_at DESC LIMIT 6',
+                            (args.session + '%',)) if 'model_turn_receipts' in tables else []
+            report['letta_recovery_metadata'] = collect_recovery_metadata(args.letta_home, receipts)
         if 'cycle_recovery_checkpoints' in tables:
             report['recovery_checkpoints'] = rows(
                 'SELECT k.*,c.session_id,c.status AS cycle_status FROM cycle_recovery_checkpoints k '
@@ -197,7 +207,7 @@ def main():
                     report["letta_metadata"] = {"status": "metadata_read_failed"}
         if args.brief:
             usage = report.get('usage', [])
-            report = {key: report[key] for key in ('integrity', 'lifecycle', 'letta_metadata', 'recovery_checkpoints',
+            report = {key: report[key] for key in ('integrity', 'lifecycle', 'letta_metadata', 'letta_recovery_metadata', 'recovery_checkpoints',
                                                   'recovery_tool_attempts', 'action_recovery', 'model_turn_receipts', 'telegram_receipts') if key in report} | {
                 'recent_owner_messages': report['recent_owner_messages'][:3],
                 'events': report.get('events', [])[-12:],

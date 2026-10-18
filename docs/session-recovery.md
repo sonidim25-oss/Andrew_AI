@@ -253,3 +253,44 @@ keeps a real provider run unfinished while initializing a replacement controller
 twice, verifies no runtime attachment/input/abort/tool response and no extra
 provider request, preserves owner controls and queued inputs, and then lets only
 the original run complete. All provider responses are local fixtures.
+
+## Read-only administrator journal metadata
+
+The optional diagnostic reads local recovery files directly, without importing
+Letta, connecting to its socket, obtaining SDK locks, acknowledging terminals,
+pruning journals, or modifying the controller database:
+
+```bash
+sudo python3 /home/daniel/andrew-autonomy-media/scripts/diagnose-session.py --current --brief --letta-recovery-metadata
+```
+
+`--letta-home` defaults to the Letta service's `/var/lib/andrew/letta`. The
+command examines only exact scope filenames under `.letta/listener-state` and
+`.letta/listener-terminal-state`, and the v4 input-disposition ledger under
+`.letta/state`. It compares saved controller client-message and consumer IDs,
+reports tool/result counts and fixed state labels, and never prints tool results,
+queued input contents, credentials, working directories or authority values.
+Namespace names are represented by hashes rather than printed server URLs.
+
+Reads reject symlinks in all path components and non-regular files, cap each
+file at 1 MiB, reject duplicate JSON keys, and report changes during a read.
+The scan is bounded to five controller receipts and 16 namespaces per kind;
+missing/unreadable/oversized/unsupported records and limits are explicit.
+Missing files are not evidence that an input was never admitted or that a run
+completed. Multiple files are not an atomic snapshot. The parser describes the
+pinned 0.34.13 format; its output does not attest the installed SDK version or
+validate every field in the SDK's schema.
+
+This is metadata for investigating recovery, not a new recovery adapter.
+`replayCompleted` is the SDK ledger marker, not proof that an external action
+succeeded. `authority_verified` and `automatic_resume` always remain false,
+including for matching `end_turn` terminals. Consumer ownership, lineage
+sidecars, authority revisions, expiry and action/billing outcomes still require
+separate verification before any automatic continuation.
+
+The pinned protocol fixture inspects the real input-disposition ledger before
+the controller sends its terminal acknowledgement. Normal completion can be
+recorded there while the separate terminal journal is empty. Offline tests also
+verify private-data redaction, identity mismatches, malformed records,
+symlink/FIFO handling, scan/file limits and an unchanged controller database.
+No service reinstall is needed to run this administrator script from the checkout.

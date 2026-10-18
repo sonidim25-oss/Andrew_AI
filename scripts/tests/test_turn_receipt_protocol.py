@@ -11,6 +11,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'prototype'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from letta_recovery_metadata import collect_recovery_metadata
 from andrewbot.appserver import AppServerClient, LettaAgent
 from andrewbot.controller import Controller
 from andrewbot.gateway import ModelGateway, GatewayThread, make_server
@@ -69,8 +71,18 @@ class TurnReceiptProtocolTests(unittest.TestCase):
                     runner=SessionRunner(store,controller,agent,enabled=True)
                     store.set_state('session_start_requested','owner_wake')
                     failed=[]
+                    journal_metadata=[]
                     outer=self
                     class FailFinalRead(AppServerClient):
+                        def __init__(self, *args, **kwargs):
+                            super().__init__(*args, **kwargs)
+                            original_send = self.connection.send_json
+                            def send(command):
+                                if command.get('type') == 'turn_finished_ack':
+                                    receipts = [dict(row) for row in store.connection.execute('SELECT * FROM model_turn_receipts')]
+                                    journal_metadata.append(collect_recovery_metadata(root, receipts))
+                                return original_send(command)
+                            self.connection.send_json = send
                         def request(self, command, response_type, timeout=None):
                             if command['type']=='conversation_messages_list' and not failed:
                                 proof=store.connection.execute('SELECT * FROM model_turn_receipts').fetchone()
@@ -84,6 +96,11 @@ class TurnReceiptProtocolTests(unittest.TestCase):
                         self.assertFalse(runner.tick())
                     self.assertEqual(len(failed),1,'the real pinned protocol must produce a bound receipt')
                     self.assertEqual(len(calls),1)
+                    self.assertTrue(journal_metadata, 'inspect the pinned SDK journal before acknowledgement removes it')
+                    input_records = [item for item in journal_metadata[0]['records'] if item['kind'] == 'input']
+                    self.assertTrue(any(item['status'] == 'matching_record' and item['disposition'] == 'started'
+                        for item in input_records), journal_metadata)
+                    self.assertFalse(journal_metadata[0]['automatic_resume'])
                     self.assertEqual(store.connection.execute('SELECT status FROM cycles').fetchone()[0],'complete')
                     self.assertEqual(store.get_state('autonomy_error',''),'')
                     self.assertEqual(store.get_state('active_session_id'),runner.active_session_id)

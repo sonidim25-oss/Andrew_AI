@@ -245,6 +245,7 @@ def snapshot(backup, replacements):
     tests.mkdir(parents=True)
     for path in (ROOT / 'scripts/tests').glob('test_*protocol.py'):
         shutil.copy2(path, tests / path.name)
+    shutil.copy2(ROOT / 'scripts/letta_recovery_metadata.py', root / 'scripts/letta_recovery_metadata.py')
     shutil.copytree(ROOT / 'prototype/tests', root / 'prototype/tests', ignore=shutil.ignore_patterns('__pycache__'))
     # Unit tests import the worker support package from the project root. The
     # pinned production image is independently checked by runtime acceptance.

@@ -212,6 +212,8 @@ class AutonomyInstallerTests(unittest.TestCase):
                                  (ROOT / 'skills' / name / 'SKILL.md').read_bytes())
             self.assertTrue((snapshot / 'prototype/tests/test_autonomous_media.py').is_file())
             self.assertTrue((snapshot / 'runtime/worker_entry.py').is_file())
+            self.assertEqual((snapshot / 'scripts/letta_recovery_metadata.py').read_bytes(),
+                             (ROOT / 'scripts/letta_recovery_metadata.py').read_bytes())
             subprocess.run([sys.executable, '-c',
                             'from runtime import worker_entry; import andrewbot.extra; '
                             'assert callable(worker_entry.execute_request)'],
