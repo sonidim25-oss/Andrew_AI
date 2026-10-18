@@ -1,9 +1,13 @@
 # Local recovery acceptance — 2026-10-18
 
-Implementation and local verification are complete for the source checkout.
-Production has not been changed. The owner chose to review the final candidate
-personally; that independent review is pending. Root installation must build and
-test a fresh exact merge against the actual installed files.
+Implementation and local verification are complete. The owner reported successful
+production installation (`installed: true`) and subsequent enablement
+(`enabled: true`, `owner_controls_preserved: true`, `wake_requested: false`).
+This records the installer output supplied by the owner; no separate live-service
+inspection was performed in this session. Evidence and paired snapshot are under
+`/var/backups/andrew-local-recovery-85aecab1bf054ac1b7b1cb9cd60beb76`.
+The owner chose personal review and proceeded with installation; no separate
+independent review report has been recorded.
 
 | Check | Result |
 | --- | --- |
@@ -12,8 +16,8 @@ test a fresh exact merge against the actual installed files.
 | Full scripts suite, actual recovery release | 138 passed, no skips |
 | Compatible protocols, pristine pinned SDK | 26 tests, OK, 9 recovery-only skips; 17 compatible tests ran |
 | Original Git-baseline candidate acceptance | All four stages passed for that historical candidate; superseded by the installed-source compatibility correction below |
-| Production installation/enablement | Not performed |
-| Owner's independent final review | Pending |
+| Production installation/enablement | Both succeeded, reported by owner |
+| Owner's independent final review | Owner proceeded with deployment; separate report not recorded |
 
 The 27 real process-loss cases comprise 18 before/after backend durable
 boundaries, 8 controller-only/combined-loss cases, and one confirmed compaction
