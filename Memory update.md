@@ -1,5 +1,13 @@
 # Memory update
 
+## Подтверждена причина projection_conflict; исправление подготовлено
+
+Повторный структурный отчёт production: 929 message entries, 114 compaction entries, 7 active IDs, 6 найденных active messages, 1 отсутствующий ID нового ввода, recovery entries=0. Writer сравнивал весь сохранённый transcript с коротким активным контекстом. Теперь активный baseline связан с точными bytes transcript до синхронной записи; исходная история сохраняется byte-for-byte, добавляются только новые recovery-строки, изменение baseline или диска по-прежнему блокирует запись.
+
+Новый backend `release-compacted-projection` проверен на реальном SDK с 929 entries и 114 compactions: новый ход завершён, история сохранена. Отдельный end-to-end сценарий воспроизвёл старую ошибку, сохранил paired snapshot, архивировал только не начатый input, затем выполнил новый wake без повтора старого ввода, сохранив 15 held messages и legacy cost reservation.
+
+Installer поддерживает явный `--retire-unstarted-projection 1fac4b0c354f4822aad6b17185d704cd`: после остановки сервисов и парного backup он требует backend hold `projection_conflict` именно в `input_committed`, пустые provider/tool steps и controller effects, точный исходный input и единственный отсутствующий projection ID. Старый checkpoint сохраняется в `.history`, строка controller остаётся со state `retired`; удаляется только отсутствующий ID из active context. Любая неоднозначность оставляет сервисы остановленными. Операции над хранилищами выполняются от их штатных пользователей. Это явная отмена доказанно не начатого ввода, не разрешение replay или очистка неопределённых расходов. Применение исправления production и успешный live wake ещё ожидаются.
+
 ## Последний live wake после обновления: P0 открыт
 
 Владелец подтвердил успешный resume-install кандидата `27babacc943743e3aacacf3c049930e0` с backend manifest `c7e99ddcccbf822213ebe67760ca3baa5a79f44fe352b4ec8c47d2523f814068`. Следующий wake 2026-10-18 14:47:56 UTC снова остановился. Свежий отчёт: input принят, backend revision 2; исходное событие `projection_conflict`, позднее controller hold `provider_uncertain`; recovery_effects пуст, новых settled requests нет. Старые 10 резервов и held сообщения сохранены. Сейчас owner pause=1.

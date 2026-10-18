@@ -257,6 +257,99 @@ class LocalRecoveryProtocolTests(unittest.TestCase):
         self.assertFalse(coordinator.has_pending())
         with self.assertRaises(LettaCommandError):self.fixture.client.start_runtime(agent.agent_id,agent.conversation_id,controller_tools=False)
 
+    def test_first_turn_retains_large_compacted_transcript_outside_active_context(self):
+        agent,controller,coordinator,runner=self.coordinated_agent()
+        runtime=self.fixture.client.start_runtime(agent.agent_id,agent.conversation_id,controller_tools=False)
+        self.fixture.client.send_user_turn(runtime,'Historical active fixture question.')
+        self.fixture.kill()
+        matches=[]
+        for path in (self.fixture.root/'backend/conversations').glob('*/conversation.json'):
+            value=json.loads(path.read_text())
+            if value.get('agent_id')==agent.agent_id and value.get('id')==agent.conversation_id:matches.append(path)
+        self.assertEqual(len(matches),1)
+        path=matches[0].with_name('messages.jsonl');rows=[json.loads(line) for line in path.read_text().splitlines()]
+        template=next(row['message'] for row in rows if row.get('message',{}).get('role')=='user')
+        historical=[]
+        for index in range(927):
+            message={**template,'id':'historical-'+str(index),'content':[{'type':'text','text':'Inactive historical fixture '+str(index)}]}
+            row={'type':'message','id':'entry-'+str(index),'parentId':historical[-1]['id'] if historical else None,
+                 'timestamp':datetime.now(timezone.utc).isoformat(),'message':message}
+            if index<114:row.update(type='compaction',summary='Historical fixture summary',firstKeptEntryId=None,tokensBefore=100)
+            historical.append(row)
+        original='\n'.join(json.dumps(row) for row in [rows[0],*historical,*rows[1:]])+'\n';path.write_text(original)
+        self.fixture.restart()
+        self.responses.append({'id':'fresh-after-compaction','choices':[{'index':0,'message':{'role':'assistant','content':'Fresh work after compaction.'},'finish_reason':'stop'}],
+            'usage':{'prompt_tokens':20,'completion_tokens':5,'cost':.000001}})
+        session=runner.start('owner_wake',datetime.now(timezone.utc))
+        self.assertTrue(runner.run_cycle(session))
+        self.assertEqual(len(self.fixture.provider_calls),2)
+        self.assertNotIn('Inactive historical fixture',json.dumps(self.fixture.provider_calls[-1]['messages']))
+        self.assertTrue(path.read_text().startswith(original))
+        self.assertFalse(coordinator.has_pending())
+        self.fixture.restart()
+        history=self.fixture.client.request({'type':'conversation_messages_list','conversation_id':agent.conversation_id,
+            'query':{'limit':100,'order':'desc'}},'conversation_messages_list_response')
+        self.assertIn('Fresh work after compaction.',json.dumps(history))
+        self.assertEqual(len(self.fixture.provider_calls),2)
+
+    def test_projection_failed_input_is_retained_without_replay_then_fresh_wake_succeeds(self):
+        import shutil
+        from andrewbot.store import Store
+        from andrewbot.memory_backup import create_paired_recovery_snapshot,verify_paired_recovery_snapshot
+        spec=importlib.util.spec_from_file_location('retirement_fixture',ROOT/'scripts/retire_unstarted_projection.py')
+        repair=importlib.util.module_from_spec(spec);spec.loader.exec_module(repair)
+        agent,controller,coordinator,runner=self.coordinated_agent()
+        runtime=self.fixture.client.start_runtime(agent.agent_id,agent.conversation_id,controller_tools=False)
+        self.fixture.client.send_user_turn(runtime,'Historical active fixture question.')
+        self.fixture.kill()
+        # Reproduce the deployed writer's missing active-context baseline in isolation.
+        fault_directory=tempfile.TemporaryDirectory();self.addCleanup(fault_directory.cleanup)
+        fixed=self.fixture.release;broken=Path(fault_directory.name)/'broken-release';broken.mkdir()
+        shutil.copy2(fixed/'letta.js',broken/'letta.js');shutil.copytree(fixed/'recovery',broken/'recovery')
+        (broken/'node_modules').symlink_to(fixed/'node_modules',target_is_directory=True)
+        module=broken/'recovery/transcript-write.mjs'
+        module.write_text(module.read_text().replace('baselines.set(path,{messages:structuredClone(messages),text:readTranscript(path)});','// Fault injection: reproduce the previous raw-prefix writer.'))
+        home=self.fixture.root;backend=home/'.letta/lc-local-backend';(home/'backend').rename(backend)
+        self.fixture.environment['LETTA_LOCAL_BACKEND_DIR']=str(backend)
+        paths=[path for path in (backend/'conversations').glob('*/conversation.json')
+               if (json.loads(path.read_text()).get('agent_id'),json.loads(path.read_text()).get('id'))==(agent.agent_id,agent.conversation_id)]
+        self.assertEqual(len(paths),1)
+        transcript=paths[0].with_name('messages.jsonl');rows=[json.loads(line) for line in transcript.read_text().splitlines()]
+        historical={**rows[1],'id':'retained-entry','message':{**rows[1]['message'],'id':'retained-message'}}
+        original='\n'.join(json.dumps(row) for row in [rows[0],historical,*rows[1:]])+'\n';transcript.write_text(original)
+        self.fixture.release=broken;self.fixture.restart()
+        store=self.fixture.store
+        store.reserve_usage('provider-'+'a'*64,'2026-10','2026-10-16',.01)
+        for index in range(15):store.add_message(17,'user','Old held fixture '+str(index),queued=3)
+        session=runner.start('owner_wake',datetime.now(timezone.utc))
+        self.assertFalse(runner.run_cycle(session));self.assertEqual(len(self.fixture.provider_calls),1)
+        row=dict(store.connection.execute("SELECT * FROM recovery_attempts WHERE state='active' ORDER BY rowid DESC LIMIT 1").fetchone())
+        controller._command('/pause')
+        with store.connection:store.connection.execute("UPDATE recovery_attempts SET state='held',hold_reason='provider_uncertain' WHERE admission_id=?",(row['admission_id'],))
+        self.fixture.kill();store.close()
+        snapshot_directory=tempfile.TemporaryDirectory();self.addCleanup(snapshot_directory.cleanup)
+        snapshot=Path(snapshot_directory.name)/'paired-before-repair'
+        create_paired_recovery_snapshot(home/'controller.sqlite3',home,snapshot,workers_quiescent=True)
+        verify_paired_recovery_snapshot(snapshot)
+        value=repair.plan(home/'controller.sqlite3',home,row['admission_id'])
+        repair.retire_backend(value);repair.retire_controller(value)
+        self.assertEqual(transcript.read_text(),original)
+        self.assertTrue(Path(value['archive']).is_file())
+        self.fixture.store=Store(home/'controller.sqlite3');self.fixture.model_gateway.store=self.fixture.store
+        self.fixture.release=fixed;self.fixture.restart()
+        agent,controller,coordinator,runner=self.coordinated_agent()
+        self.assertFalse(coordinator.has_pending());controller._command('/wake')
+        self.responses.append({'id':'fresh-after-repair','choices':[{'index':0,'message':{'role':'assistant','content':'Fresh work after repair.'},'finish_reason':'stop'}],
+            'usage':{'prompt_tokens':20,'completion_tokens':5,'cost':.000001}})
+        new_session=runner.start('owner_wake',datetime.now(timezone.utc))
+        self.assertTrue(runner.run_cycle(new_session));self.assertEqual(len(self.fixture.provider_calls),2)
+        self.assertTrue(transcript.read_text().startswith(original))
+        self.assertEqual(self.fixture.store.uncertain_message_count(17),15)
+        self.assertEqual(self.fixture.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0],1)
+        retained=self.command('recovery_inspect',binding=value['binding'])
+        self.assertEqual(retained['phase'],'held');self.assertEqual(retained['hold_reason'],'projection_conflict')
+        self.assertEqual(len(self.fixture.provider_calls),2)
+
     def test_confirmed_tool_survives_backend_and_controller_loss_then_one_continuation(self):
         from andrewbot.recovery_dispatch import RecoveryDispatch
         from andrewbot.store import Store

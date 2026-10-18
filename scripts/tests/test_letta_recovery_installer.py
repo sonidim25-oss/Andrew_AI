@@ -59,6 +59,36 @@ class RecoveryInstallerTests(unittest.TestCase):
             with patch.object(media.sqlite3,'connect',side_effect=reader):media.idle()
             with self.assertRaises(sqlite3.ProgrammingError):readers[0].execute('SELECT 1')
 
+    def test_idle_exception_only_allows_the_exact_validated_cycle(self):
+        from andrewbot.store import Store
+        from andrewbot.media import MediaService
+        media=installer.helper('install-autonomy-media')
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'db';store=Store(path);MediaService(store,Path(directory)/'artifacts',1)
+            store.set_state('paused','1');store.begin_cycle('session','held-cycle','2026-10-18');store.close()
+            connect=sqlite3.connect
+            with patch.object(media.sqlite3,'connect',side_effect=lambda *args,**kwargs:connect(path)):
+                with self.assertRaisesRegex(ValueError,'settling'):media.idle()
+                media.idle(allowed_running_cycle='held-cycle')
+                with self.assertRaisesRegex(ValueError,'settling'):media.idle(allowed_running_cycle='different-cycle')
+
+    def test_retirement_is_after_snapshot_and_refusal_keeps_services_stopped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);target=root/'target';target.mkdir();(target/'recovery.py').write_text('old')
+            candidate={'directory':str(root),'deployed_files':installer.tree_hashes(target),
+                'originals':{'recovery.py':installer.sha(target/'recovery.py')}}
+            service=Mock();helper=Mock();repair=Mock();events=[]
+            def snapshot(*args,**kwargs):events.append('snapshot')
+            def plan(*args,**kwargs):events.append('retirement');raise ValueError('Not an unstarted input')
+            repair.plan.side_effect=plan
+            with patch.multiple(installer,TARGET=target,BACKEND_DROPIN=root/'backend.conf',CONTROL_DROPIN=root/'controller.conf'),\
+                 patch.object(installer,'verify_candidate'),patch.object(installer,'checkpoint_controller_wal'),\
+                 patch.object(installer,'helper',side_effect=lambda name:repair if name=='retire_unstarted_projection' else helper),\
+                 patch.object(installer,'create_paired_recovery_snapshot',side_effect=snapshot):
+                with self.assertRaisesRegex(ValueError,'unstarted'):installer.activate(candidate,service=service,retire_projection='scope')
+            self.assertEqual(events,['snapshot','retirement']);repair.retire.assert_not_called();helper.replace.assert_not_called()
+            self.assertFalse(any(call.args[0]=='start' for call in service.call_args_list))
+
     def test_checkpoint_retains_committed_wal_rows_before_snapshot(self):
         from andrewbot.memory_backup import create_paired_recovery_snapshot
         with tempfile.TemporaryDirectory() as directory:

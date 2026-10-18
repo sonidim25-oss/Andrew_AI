@@ -233,7 +233,7 @@ def load_accepted_candidate(directory):
     return candidate
 
 
-def activate(candidate,enable_resume=False,*,service=_service):
+def activate(candidate,enable_resume=False,*,service=_service,retire_projection=None):
     if enable_resume:raise ValueError('Initial activation must keep automatic resume disabled')
     verify_candidate(candidate,require_acceptance=True)
     directory=Path(candidate['directory']);h=helper('install-p1-fixes')
@@ -250,6 +250,12 @@ def activate(candidate,enable_resume=False,*,service=_service):
         for unit in ('andrew-control.service','andrew-letta.service'):service('assert-stopped',unit)
         checkpoint_controller_wal(DATABASE)
         create_paired_recovery_snapshot(DATABASE,BACKEND_HOME,directory/'paired-before',workers_quiescent=True)
+        if retire_projection:
+            repair=helper('retire_unstarted_projection')
+            retirement=repair.plan(DATABASE,BACKEND_HOME,retire_projection)
+            repair.retire(retirement,directory/'paired-before')
+            (directory/'retired-projection.json').write_text(json.dumps({'admission_id':retire_projection,
+                'archive':retirement['archive'],'checkpoint_sha256':retirement['files'][retirement['checkpoint']]}))
         if tree_hashes(TARGET,ignore_bytecode=True)!=candidate['deployed_files']:raise ValueError('Deployed package changed during activation; services remain stopped')
         for name,expected in candidate['originals'].items():
             path=TARGET/name
@@ -344,10 +350,13 @@ def main():
     parser.add_argument('--backend-release',type=Path)
     parser.add_argument('--apply',action='store_true')
     parser.add_argument('--resume-apply',type=Path,help='Retry activation of an unchanged accepted candidate after a pre-snapshot failure')
+    parser.add_argument('--retire-unstarted-projection',help='Retain one exact projection-failed input proven to have no effects; requires --apply')
     parser.add_argument('--rollback',type=Path,help='Candidate directory from the installation')
     parser.add_argument('--enable',type=Path,help='Verified candidate directory after initial disabled activation')
     args=parser.parse_args()
     if args.resume_apply and (args.backend_release or args.enable or args.rollback):parser.error('--resume-apply cannot be combined with another action')
+    if args.retire_unstarted_projection and (not args.apply or not args.backend_release or args.enable or args.rollback or args.resume_apply):
+        parser.error('--retire-unstarted-projection requires --backend-release and --apply')
     if os.geteuid()!=0:raise SystemExit('Run with sudo in your server terminal; no services changed.')
     if args.enable:
         candidate=json.loads((args.enable/'candidate.json').read_text());print(json.dumps(enable(candidate)));return
@@ -356,7 +365,10 @@ def main():
     if not args.backend_release and not args.resume_apply:parser.error('--backend-release or --resume-apply is required')
     h=helper('install-p1-fixes');readiness=h.load_readiness()
     proof=readiness.protected_read(readiness.PROOF);before=readiness.bindings();readiness.check_proof(json.loads(proof),before)
-    helper('install-autonomy-media').idle()
+    if args.retire_unstarted_projection:
+        retirement=helper('retire_unstarted_projection').plan(DATABASE,BACKEND_HOME,args.retire_unstarted_projection)
+        helper('install-autonomy-media').idle(allowed_running_cycle=retirement['binding']['cycle_id'])
+    else:helper('install-autonomy-media').idle()
     if args.resume_apply:
         candidate=load_accepted_candidate(args.resume_apply);directory=Path(candidate['directory'])
         if (directory/'paired-before').exists() or (directory/'activated.json').exists():raise ValueError('Candidate has already reached the snapshot stage; create a fresh candidate')
@@ -372,7 +384,7 @@ def main():
     if readiness.bindings()!=before:raise ValueError('Runtime changed during candidate verification; no services changed')
     if not args.apply and not args.resume_apply:
         print('Candidate verified; preview only, no services changed.');return
-    result=activate(candidate)
+    result=activate(candidate,retire_projection=args.retire_unstarted_projection) if args.retire_unstarted_projection else activate(candidate)
     try:
         h.renew_proof(readiness,json.loads(proof),before,directory)
         _service('start','andrew-letta.service');h.wait_for_letta()

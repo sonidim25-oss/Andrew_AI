@@ -2,6 +2,7 @@ import {join} from 'node:path';
 import {canonical,digest} from './contracts.mjs';
 import {assertNotRestored} from './adoption.mjs';
 import {atomicWrite,readJSON} from './payload-store.mjs';
+import {withTranscriptBaseline} from './transcript-write.mjs';
 
 // Transport credentials never enter a checkpoint, projection or model payload.
 export class LocalSDKAdapter{
@@ -126,8 +127,12 @@ export class LocalSDKAdapter{
   atomicWrite(this._projectionPath(binding),bytes);
   const messages=[...legacy,...rows.map((row,index)=>existing.get(row.operation_id)??this._nativeRow(row,binding,index))];
   const key=store.conversationKey(binding.conversation_id,binding.agent_id);
-  store.localMessagesByConversationKey.set(key,messages);store.rebuildMessageIndex();
-  for(const message of messages)store.touchConversationForLocalMessage(binding.conversation_id,binding.agent_id,message);
-  store.persistConversationState(binding.conversation_id,binding.agent_id,{transcript:'rewrite'});
+  const metadata=store.validateTranscriptMetadata(key);
+  if(!metadata?.messagesPath)throw Error('projection_conflict');
+  withTranscriptBaseline(metadata.messagesPath,native,()=>{
+   store.localMessagesByConversationKey.set(key,messages);store.rebuildMessageIndex();
+   for(const message of messages)store.touchConversationForLocalMessage(binding.conversation_id,binding.agent_id,message);
+   store.persistConversationState(binding.conversation_id,binding.agent_id,{transcript:'rewrite'});
+  });
  }
 }

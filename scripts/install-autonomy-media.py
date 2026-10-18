@@ -49,7 +49,7 @@ def load_helper():
     return helper
 
 
-def idle():
+def idle(*,allowed_running_cycle=None):
     with closing(sqlite3.connect('file:/var/lib/andrew/control/controller.sqlite3?mode=ro', uri=True, timeout=5)) as db:
         state = dict(db.execute("SELECT key,value FROM state WHERE key IN "
                                 "('paused','sleeping','autonomy_error','active_session_id','session_start_requested')"))
@@ -57,8 +57,10 @@ def idle():
             raise ValueError('Send Andrew /pause before installation; no services changed')
         if state.get('active_session_id') or state.get('session_start_requested'):
             raise ValueError('Andrew still has an active session; wait for /pause to settle')
-        for query in ("SELECT count(*) FROM cycles WHERE status='running'",
-                      "SELECT count(*) FROM messages WHERE queued=2",
+        if db.execute("SELECT count(*) FROM cycles WHERE status='running' AND (? IS NULL OR cycle_id!=?)",
+                      (allowed_running_cycle,allowed_running_cycle)).fetchone()[0]:
+            raise ValueError('An attempted operation is still settling; installation deferred')
+        for query in ("SELECT count(*) FROM messages WHERE queued=2",
                       "SELECT count(*) FROM telegram_claims",
                       "SELECT count(*) FROM media_jobs WHERE state='running' OR delivery='sending'",
                       "SELECT count(*) FROM media_avatar_proposals WHERE state='applying'"):

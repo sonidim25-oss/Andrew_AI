@@ -168,3 +168,39 @@ refusal with an active reader, closed idle connections, failure before any
 replacement/start, and reuse of exact accepted candidates with unchanged proof.
 The controller/backend runtime and release manifest remain unchanged by this
 installer correction. Root retry and successful first live turn remain pending.
+
+## Compacted transcript failure observed after successful WAL retry
+
+The owner confirmed candidate `27babacc943743e3aacacf3c049930e0` installed with
+backend manifest `c7e99ddcccbf822213ebe67760ca3baa5a79f44fe352b4ec8c47d2523f814068`.
+Its next live wake accepted input, then reported `projection_conflict`. Structural
+read-only evidence found 929 message entries, 114 compaction entries, six active
+messages and one missing projected input ID; no recovery effect was recorded.
+The previous writer incorrectly compared all transcript entries with active
+context. A later reconciliation's `provider_uncertain` label did not identify
+the original projection error.
+
+The corrected writer binds active messages and exact on-disk bytes before the
+synchronous SDK rewrite. It appends only new recovery entries while retaining
+the original transcript bytes. Changed active messages or disk bytes still
+refuse projection. The pinned SDK regression retains 929 entries including 114
+compactions, completes fresh work, restarts, and reads the completed answer.
+
+A separate actual-SDK regression injects the prior raw-prefix failure, pauses,
+takes and verifies a paired snapshot, archives only the proven unstarted input,
+and then completes a new wake on the corrected release. The prior checkpoint
+remains inspectable as held; the original transcript, 15 held messages and legacy
+cost reservation remain. No previous input is replayed. Retirement unit tests
+also reject any backend step, controller effect admission, changed evidence,
+already projected input, missing pause, or unsafe archive symlink. Installer
+tests require the paired snapshot before retirement and leave services stopped
+when retirement refuses.
+
+Release: `release-compacted-projection`, manifest SHA-256
+`39f3a8fb62298b3b84c736c90de3edd25e05d010950159c3485699831e0e5044`.
+The release passes strict verification against the pinned bundle and current
+extension sources. Node51 passed; core535 passed (2 live skips); pristine29
+passed (12 recovery-only skips, 17 compatible checks executed). Retirement8 and
+installer16 focused tests passed, including the actual-SDK repair regression.
+The full scripts run is recorded separately in local evidence. This release is
+not yet reported deployed; P0 remains open until a successful live turn.

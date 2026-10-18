@@ -1,32 +1,14 @@
 import {join} from 'node:path';
 import {homedir} from 'node:os';
-import {atomicWrite,readRegular} from './payload-store.mjs';
-import {canonical,digest} from './contracts.mjs';
 import {RecoveryProtocol} from './protocol.mjs';
 import {LocalSDKAdapter} from './sdk-adapter.mjs';
 import {readdirSync} from 'node:fs';
 import {safeDirectory} from './payload-store.mjs';
 import {guardLegacy,assertNotRestored} from './adoption.mjs';
 export {assertAdoptable} from './adoption.mjs';
+export {atomicTranscriptWrite} from './transcript-write.mjs';
 
 export const artifactEnabled=()=>process.env.ANDREW_LOCAL_RECOVERY_ARTIFACT==='1';
-export function atomicTranscriptWrite(path,text){
- const generated=text.trimEnd().split('\n').map(line=>JSON.parse(line));
- if(generated.some(row=>row.message?.metadata?.andrew_recovery)){
-  let previous='';try{previous=readRegular(path,268435456).toString('utf8');}catch(error){if(error.code!=='ENOENT')throw error;}
-  const oldRows=previous.trim()?previous.trimEnd().split('\n').map(line=>JSON.parse(line)):[];
-  const oldMessages=oldRows.filter(row=>row.message),messages=generated.filter(row=>row.message);
-  if(oldMessages.length>messages.length||oldMessages.some((row,index)=>canonical(row.message)!==canonical(messages[index].message)))throw Error('projection_conflict');
-  let parentId=oldRows.at(-1)?.id??null;
-  const additions=messages.slice(oldMessages.length).map(row=>{
-   const operationId=row.message.metadata?.andrew_recovery?.operation_id;if(!operationId)throw Error('projection_conflict');
-   const next={...row,id:'recovery-'+digest(operationId),parentId};parentId=next.id;return JSON.stringify(next)+'\n';
-  }).join('');
-  const prefix=oldRows.length?previous+(previous.endsWith('\n')?'':'\n'):JSON.stringify(generated[0])+'\n';
-  atomicWrite(path,Buffer.from(prefix+additions));return;
- }
- atomicWrite(path,Buffer.from(text));
-}
 
 const services=new WeakMap();
 export async function handleRawFrame(data,{runtime,socket,connectionId,sdk}){

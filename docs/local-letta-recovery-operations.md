@@ -162,3 +162,35 @@ sudo python3 scripts/install-letta-recovery.py \
 
 Owner pause remains in effect. A successful install/enable is required before
 requesting a new wake.
+
+## Updating after the compacted-transcript projection failure
+
+The owner's next live wake accepted input but stopped at `projection_conflict`.
+Offline metadata showed 929 transcript message entries, 114 compaction entries,
+and six existing active messages plus one missing projected input ID. The prior
+writer incorrectly compared full retained history with active context.
+
+Keep the owner pause. Apply the corrected artifact with the exact failed
+admission explicitly selected:
+
+```bash
+sudo python3 scripts/install-letta-recovery.py \
+  --backend-release "$PWD/.superpowers/sdd/2026-10-18-local-letta-durable-recovery/release-compacted-projection" \
+  --retire-unstarted-projection 1fac4b0c354f4822aad6b17185d704cd \
+  --apply
+```
+
+The preflight permits only that failed cycle through the idle check. After both
+services stop and a paired snapshot is retained, retirement revalidates a held
+`projection_conflict` at `input_committed`, with no provider/tool steps, no
+controller effect admissions, exact original input evidence and one missing
+projected input ID. It refuses already projected input or other missing IDs.
+It archives the exact failed checkpoint, removes only the missing ID from active
+context, and retains the controller row as `retired`. Existing cost reservations,
+held messages, raw transcript bytes and original receipts are retained. Each
+writer runs as its existing service user. Failure leaves both services stopped;
+private phase evidence is beside the paired snapshot.
+
+This update takes a fresh candidate through the usual acceptance checks. After
+successful installation, use `--enable` with its newly printed candidate path.
+Owner pause remains in effect; request a fresh wake after enable succeeds.

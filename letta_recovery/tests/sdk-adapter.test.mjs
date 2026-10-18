@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {LocalSDKAdapter} from '../sdk-adapter.mjs';
 import {atomicTranscriptWrite} from '../entry.mjs';
+import {withTranscriptBaseline} from '../transcript-write.mjs';
 import {directory} from './fixtures.mjs';
 import {join} from 'node:path';
 import {writeFileSync,readFileSync} from 'node:fs';
@@ -40,4 +41,33 @@ test('next_input_uses_confirmed_summary_and_typed_tail_once',t=>{
   {role:'assistant',content:'Confirmed answer'}];
  assert.deepEqual(sdk._contextMessages(binding,native),[{role:'user',content:'Conversation summary:\nExact summary.'},
   {role:'user',content:'Original current question'},{role:'assistant',content:'Confirmed answer'}]);
+});
+
+test('projection_preserves_compacted_history_and_only_appends_to_active_context',t=>{
+ const path=join(directory(t),'messages.jsonl'),header={type:'session',id:'fixture'};
+ const originalMessage={id:'old',role:'user',content:'Historical fixture'};
+ const summary={id:'summary',role:'user',content:'Confirmed summary fixture'};
+ const original=[header,{type:'message',id:'old-entry',message:originalMessage},
+  {type:'compaction',id:'summary-entry',parentId:'old-entry',message:summary}].map(JSON.stringify).join('\n')+'\n';
+ writeFileSync(path,original);
+ const added={id:'new',role:'user',content:'Fresh fixture',metadata:{andrew_recovery:{operation_id:'fresh-input'}}};
+ const rewrite=[header,{type:'message',message:summary},{type:'message',message:added}].map(JSON.stringify).join('\n')+'\n';
+ withTranscriptBaseline(path,[summary],()=>atomicTranscriptWrite(path,rewrite));
+ const result=readFileSync(path,'utf8');assert.ok(result.startsWith(original));
+ assert.equal(result.split('\n').filter(Boolean).length,4);
+ withTranscriptBaseline(path,[summary,added],()=>atomicTranscriptWrite(path,rewrite));
+ assert.equal(readFileSync(path,'utf8'),result);
+});
+
+test('projection_rejects_changed_active_messages_or_disk_bytes',t=>{
+ const path=join(directory(t),'messages.jsonl'),header={type:'session',id:'fixture'};
+ const old={id:'old',role:'user',content:'Original fixture'},added={id:'new',metadata:{andrew_recovery:{operation_id:'input'}}};
+ const original=[header,{type:'message',message:old}].map(JSON.stringify).join('\n')+'\n';writeFileSync(path,original);
+ const rewrite=messages=>[header,...messages.map(message=>({type:'message',message}))].map(JSON.stringify).join('\n')+'\n';
+ assert.throws(()=>withTranscriptBaseline(path,[old],()=>atomicTranscriptWrite(path,rewrite([{...old,content:'Changed fixture'},added]))),/projection_conflict/);
+ assert.equal(readFileSync(path,'utf8'),original);
+ assert.throws(()=>withTranscriptBaseline(path,[old],()=>{
+  writeFileSync(path,original+'\n');atomicTranscriptWrite(path,rewrite([old,added]));
+ }),/projection_conflict/);
+ assert.equal(readFileSync(path,'utf8'),original+'\n');
 });
