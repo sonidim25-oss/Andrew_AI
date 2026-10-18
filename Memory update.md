@@ -6,6 +6,8 @@
 
 Новый backend `release-compacted-projection` проверен на реальном SDK с 929 entries и 114 compactions: новый ход завершён, история сохранена. Отдельный end-to-end сценарий воспроизвёл старую ошибку, сохранил paired snapshot, архивировал только не начатый input, затем выполнил новый wake без повтора старого ввода, сохранив 15 held messages и legacy cost reservation.
 
+Проверки: Node51, core535 (2 live-пропуска), полный scripts160 без пропусков (251.111 с), pristine29 (12 recovery-only пропусков; 17 совместимых проверок выполнены), дополнительные retirement8 и installer16 прошли. Manifest SHA нового backend `39f3a8fb62298b3b84c736c90de3edd25e05d010950159c3485699831e0e5044`.
+
 Installer поддерживает явный `--retire-unstarted-projection 1fac4b0c354f4822aad6b17185d704cd`: после остановки сервисов и парного backup он требует backend hold `projection_conflict` именно в `input_committed`, пустые provider/tool steps и controller effects, точный исходный input и единственный отсутствующий projection ID. Старый checkpoint сохраняется в `.history`, строка controller остаётся со state `retired`; удаляется только отсутствующий ID из active context. Любая неоднозначность оставляет сервисы остановленными. Операции над хранилищами выполняются от их штатных пользователей. Это явная отмена доказанно не начатого ввода, не разрешение replay или очистка неопределённых расходов. Применение исправления production и успешный live wake ещё ожидаются.
 
 ## Последний live wake после обновления: P0 открыт

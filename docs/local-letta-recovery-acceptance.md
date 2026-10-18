@@ -202,5 +202,7 @@ The release passes strict verification against the pinned bundle and current
 extension sources. Node51 passed; core535 passed (2 live skips); pristine29
 passed (12 recovery-only skips, 17 compatible checks executed). Retirement8 and
 installer16 focused tests passed, including the actual-SDK repair regression.
-The full scripts run is recorded separately in local evidence. This release is
+The full scripts run passed 160 tests without skips (251.111 seconds); the two
+additional retirement guard/owner tests also passed in the focused retirement8 run.
+This release is
 not yet reported deployed; P0 remains open until a successful live turn.
