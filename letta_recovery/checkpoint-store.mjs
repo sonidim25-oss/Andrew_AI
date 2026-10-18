@@ -42,6 +42,8 @@ export class CheckpointStore{
   safeDirectory(join(this.root,'conversations'));const path=this.checkpointPath(binding),release=this.acquireLock(path);
   try{
    const previous=this.load(binding);if((previous?.revision??null)!==expectedRevision)throw Error('stale revision');
+   if(previous?.fence>0&&!['claim','renew','release'].includes(event.type)
+     &&(!previous.claim||event.fence!==previous.fence||event.claim_id!==previous.claim.claim_id))throw Error('authority lost');
    const prepared=structuredClone(event),refs=new Set(previous?.payload_refs??[]);
    const put=value=>{const ref=this.payloadStore(binding).putPayload(Buffer.from(canonical(value))).sha;refs.add(ref);return ref;};
    for(const key of ['input','result','context','request'])if(Object.hasOwn(prepared,key)){prepared[key+'_ref']=put(prepared[key]);delete prepared[key];}

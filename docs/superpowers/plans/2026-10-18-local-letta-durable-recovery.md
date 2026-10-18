@@ -138,7 +138,7 @@ assert.deepEqual(store.load(binding), latestCommitted);
 
 **Interfaces:** `new OwnershipManager({store, lockHelper, clock, bootId})`; async `claim(binding, expectedRevision, admissionId): Claim`, `renew(claim): Claim`, `release(claim): void`, `revoke(claim): void`; `assertOwned(claim): void` before every effect. `lock-helper.py --path PATH` holds kernel `fcntl.flock(LOCK_EX|LOCK_NB)`, reports acquisition on stdout, releases on parent pipe EOF or explicit release, and never runs SDK work.
 
-- [ ] **Step 1:** Write `live_os_lock_blocks_expired_lease_takeover`, `parent_exit_releases_execution_lock`, `stale_fence_cannot_dispatch`, `boot_change_invalidates_lease` and `clock_jump_cannot_extend_authority`. Use two real processes; assert lease `15000` ms and renewal `5000` ms. Advancing the lease clock cannot override a held OS lock.
+- [x] **Step 1:** Write `live_os_lock_blocks_expired_lease_takeover`, `parent_exit_releases_execution_lock`, `stale_fence_cannot_dispatch`, `boot_change_invalidates_lease` and `clock_jump_cannot_extend_authority`. Use two real processes; assert lease `15000` ms and renewal `5000` ms. Advancing the lease clock cannot override a held OS lock.
 ```javascript
 // live_os_lock_blocks_expired_lease_takeover; two real owner processes.
 clock.advance(15001);
@@ -148,9 +148,9 @@ assert.equal(fakeEffectCount(), 0);
 assert.throws(() => first.assertOwned(oldClaim), /authority/);
 ```
 
-- [ ] **Step 2:** Run `node --test letta_recovery/tests/ownership.test.mjs`; verify absence of exclusive/fenced ownership is the failure.
-- [ ] **Step 3:** Implement the helper and manager using a parent-owned pipe, process-instance UUID, OS boot ID and monotonic deadlines. Reserve/increment fences durably under the checkpoint lock; never identify an owner by PID alone. Loss of helper/connection/renewal prevents new dispatch. Release a claim without deleting evidence.
-- [ ] **Step 4:** Run the real competing-process and parent-kill tests, including a stale worker trying to commit a result after a successor claim. Expect rejection without successor overwrite. Commit these files.
+- [x] **Step 2:** Run `node --test letta_recovery/tests/ownership.test.mjs`; verify absence of exclusive/fenced ownership is the failure.
+- [x] **Step 3:** Implement the helper and manager using a parent-owned pipe, process-instance UUID, OS boot ID and monotonic deadlines. Reserve/increment fences durably under the checkpoint lock; never identify an owner by PID alone. Loss of helper/connection/renewal prevents new dispatch. Release a claim without deleting evidence.
+- [x] **Step 4:** Run the real competing-process and parent-kill tests, including a stale worker trying to commit a result after a successor claim. Expect rejection without successor overwrite. Commit these files.
 
 ## Task 4: Journal normal execution and idempotent transcript projection
 
