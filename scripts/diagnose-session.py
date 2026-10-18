@@ -201,6 +201,7 @@ def main():
                 "WHERE datetime(created_at) BETWEEN datetime(?, '-5 minutes') AND datetime(?, '+5 minutes') "
                 "AND (event LIKE 'Autonomous %' OR event LIKE 'Letta model gateway %' "
                 "OR event LIKE 'Letta turn failed %' "
+                "OR event LIKE 'Journaled model turn held (category=%' "
                 "OR event='Owner reply provider returned tool calls despite text-only mode; execution blocked' "
                 "OR event='Owner message outcome uncertain; held to avoid duplicate delivery' "
                 "OR event='Andrew replied to the owner' "
