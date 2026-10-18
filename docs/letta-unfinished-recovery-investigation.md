@@ -125,5 +125,5 @@ other destination-specific receipts remains a safe separate roadmap option.
 
 The owner approved this architectural direction on 2026-10-18. The resulting
 [written specification](superpowers/specs/2026-10-18-local-letta-durable-recovery-design.md)
-is awaiting review. No new controller/backend resume code has been written or
+was approved on 2026-10-18. The implementation plan is awaiting review. No new controller/backend resume code has been written or
 deployed.

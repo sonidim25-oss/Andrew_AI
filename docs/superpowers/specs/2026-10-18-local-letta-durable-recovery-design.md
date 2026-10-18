@@ -1,7 +1,7 @@
 # Durable recovery of unfinished local Letta turns
 
 **Date:** 2026-10-18
-**Status:** Design direction approved by the owner; written specification awaiting review.
+**Status:** Written specification approved by the owner on 2026-10-18; implementation plan prepared for review.
 **Scope:** The pinned local Letta backend and Andrew's autonomous-session bridge.
 
 ## Outcome and limits
