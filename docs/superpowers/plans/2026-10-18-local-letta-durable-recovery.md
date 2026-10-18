@@ -118,7 +118,7 @@ validation in the records/bridge boundary instead of repeating ad hoc coercions.
 
 **Interfaces:** `new CheckpointStore({root, acquireLock, limits})`; `inspect(binding): Evidence`; `load(binding): Snapshot|null`; `commit(binding, expectedRevision, transition, payloads): Snapshot`. `putPayload(bytes): {sha, size}` and `readPayload(sha): Buffer`. `transition(snapshot, event): Snapshot` rejects illegal phase/identity changes. Root/store identity is created only by explicit initialization/admission, never inspection.
 
-- [ ] **Step 1:** Write real-filesystem tests `missing_inspection_does_not_create_state`, `commit_survives_process_exit`, `stale_revision_cannot_overwrite`, `corrupt_or_missing_blob_holds` and `size_and_unsafe_file_limits_hold`. Assert exact limits `1048576`, `16777216`, `268435456`, modes `0o600`/`0o700`, no writes from inspection, and rejection of a symlink/FIFO/digest mismatch. Assert `started` without a new checkpoint returns `legacy_unproven`, never `continuation_ready`.
+- [x] **Step 1:** Write real-filesystem tests `missing_inspection_does_not_create_state`, `commit_survives_process_exit`, `stale_revision_cannot_overwrite`, `corrupt_or_missing_blob_holds` and `size_and_unsafe_file_limits_hold`. Assert exact limits `1048576`, `16777216`, `268435456`, modes `0o600`/`0o700`, no writes from inspection, and rejection of a symlink/FIFO/digest mismatch. Assert `started` without a new checkpoint returns `legacy_unproven`, never `continuation_ready`.
 ```javascript
 // missing_inspection_does_not_create_state; temporary parent exists, root does not.
 assert.equal(store.inspect(binding).status, 'missing');
@@ -128,9 +128,9 @@ assert.throws(() => store.commit(binding, oldRevision, event, []), /revision/);
 assert.deepEqual(store.load(binding), latestCommitted);
 ```
 
-- [ ] **Step 2:** Run `node --test letta_recovery/tests/checkpoint-store.test.mjs`; verify missing storage/state-transition behavior fails.
-- [ ] **Step 3:** Implement blob-first fsync then atomic checkpoint replacement under the SDK lock. Validate all identity fields, byte limits, safe integers and nine legal phases. Failed post-effect persistence leaves the previous admission uncertain. Use one authoritative conversation checkpoint with retained admission/identity tombstones; do not silently rotate its store UUID.
-- [ ] **Step 4:** Run the same tests with subprocess termination at blob-write and checkpoint-replace boundaries. Expect only the previous or next valid checkpoint, never success from temporary files. Commit the storage modules/tests.
+- [x] **Step 2:** Run `node --test letta_recovery/tests/checkpoint-store.test.mjs`; verify missing storage/state-transition behavior fails.
+- [x] **Step 3:** Implement blob-first fsync then atomic checkpoint replacement under the SDK lock. Validate all identity fields, byte limits, safe integers and nine legal phases. Failed post-effect persistence leaves the previous admission uncertain. Use one authoritative conversation checkpoint with retained admission/identity tombstones; do not silently rotate its store UUID.
+- [x] **Step 4:** Run the same tests with subprocess termination at blob-write and checkpoint-replace boundaries. Expect only the previous or next valid checkpoint, never success from temporary files. Commit the storage modules/tests.
 
 ## Task 3: Add exclusive local execution ownership
 

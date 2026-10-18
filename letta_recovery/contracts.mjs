@@ -27,7 +27,23 @@ export function validateBinding(value){
 export function validateSnapshot(value){
  try{
   if(!value||value.version!==1||!Number.isSafeInteger(value.revision)||value.revision<0||!Number.isSafeInteger(value.fence)||value.fence<0||!PHASES.includes(value.phase)||!safeId(value.run_id)||!Array.isArray(value.steps)||!Array.isArray(value.tools)||!(value.terminal===null||typeof value.terminal==='object'))throw Error();
-  validateBinding(value.binding);canonical(value);return value;
+  validateBinding(value.binding);
+  const validHash=hash=>typeof hash==='string'&&/^[a-f0-9]{64}$/.test(hash);
+  const items=[...value.steps,...value.tools];
+  if(value.steps.length>256||value.tools.length>256)throw Error();
+  for(const item of items){
+   if(!item||!safeId(item.effect_id)||!['prepared','admitted','confirmed'].includes(item.state))throw Error();
+   if(item.state==='confirmed'&&!validHash(item.result_ref))throw Error();
+  }
+  if(new Set(value.steps.map(item=>item.effect_id)).size!==value.steps.length||new Set(value.tools.map(item=>item.effect_id)).size!==value.tools.length)throw Error();
+  if(value.phase==='provider_confirmed'&&value.steps.at(-1)?.state!=='confirmed')throw Error();
+  if(value.phase==='provider_admitted'&&value.steps.at(-1)?.state!=='admitted')throw Error();
+  if(value.phase==='terminal_committed'&&(!value.terminal||!safeId(value.terminal.id)||value.terminal.consumer_id!==value.binding.consumer_id||value.steps.at(-1)?.state!=='confirmed'))throw Error();
+  if(value.payload_refs!==undefined){
+   if(!Array.isArray(value.payload_refs)||!value.payload_refs.every(validHash)||!validHash(value.input_ref)||!value.payload_refs.includes(value.input_ref))throw Error();
+   for(const item of items)for(const key of ['result_ref','request_ref','arguments_ref'])if(item[key]&&!value.payload_refs.includes(item[key]))throw Error();
+  }
+  canonical(value);return value;
  }catch{throw Error('invalid snapshot');}
 }
 export const sameBinding=(left,right)=>canonical(validateBinding(left))===canonical(validateBinding(right));
