@@ -226,6 +226,241 @@ class LocalRecoveryProtocolTests(unittest.TestCase):
         agent.initialize()
         return agent,controller,coordinator,SessionRunner(self.fixture.store,controller,agent,enabled=True)
 
+    def test_owner_arriving_during_autonomy_yields_without_replaying_prepared_tool(self):
+        agent,controller,coordinator,runner=self.coordinated_agent();store=self.fixture.store
+        self.responses.insert(0,{'id':'interrupted-step','choices':[{'index':0,'message':{'role':'assistant','content':None,
+            'tool_calls':[{'id':'not-executed','type':'function','function':{'name':'recent_activity','arguments':'{}'}}]},
+            'finish_reason':'tool_calls'}],'usage':{'prompt_tokens':20,'completion_tokens':5,'cost':.000001}})
+        update={'update_id':991,'message':{'from':{'id':17},'chat':{'id':17,'type':'private'},'text':'Answer this owner question'}}
+        original=self.fixture.model_gateway.provider.complete
+        def owner_arrives(payload):
+            result=original(payload)
+            if len(self.fixture.provider_calls)==1:store.enqueue_update(update)
+            return result
+        self.fixture.model_gateway.provider.complete=owner_arrives
+        for index in range(10):store.reserve_usage('provider-'+format(index,'064x'),'2026-10','2026-10-17',.01)
+        session=runner.start('owner_wake',datetime.now(timezone.utc))
+        self.assertFalse(runner.run_cycle(session))
+        self.assertEqual(store.get_state('autonomy_error',''),'')
+        self.assertFalse(coordinator.has_pending())
+        old=store.connection.execute('SELECT * FROM model_turn_receipts').fetchone()
+        self.assertEqual(old['state'],'accepted')
+        self.assertEqual(store.connection.execute('SELECT status FROM cycles').fetchone()[0],'stopped')
+        self.assertEqual(store.connection.execute("SELECT count(*) FROM recovery_effects WHERE kind='tool'").fetchone()[0],0)
+        self.assertTrue(store.claim_update(update['update_id']))
+        reply=controller.handle_update(update)
+        self.assertEqual(reply,'Persisted fixture answer.')
+        store.complete_update(update['update_id'])
+        self.assertEqual(len(self.fixture.provider_calls),2)
+        self.assertEqual(store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0],10)
+        self.assertIn('owner_input_pending',json.dumps(self.fixture.provider_calls[-1]['messages']))
+
+    def test_owner_diary_without_autonomous_session_returns_rejection_and_answer(self):
+        agent,controller,coordinator,runner=self.coordinated_agent();store=self.fixture.store
+        self.responses.insert(0,{'id':'owner-diary-request','choices':[{'index':0,'message':{'role':'assistant','content':None,
+            'tool_calls':[{'id':'diary-without-session','type':'function','function':{'name':'save_diary_entry',
+                'arguments':json.dumps({'content':'A fixture diary that must not be saved.'})}}]},
+            'finish_reason':'tool_calls'}],'usage':{'prompt_tokens':20,'completion_tokens':5,'cost':.000001}})
+        self.assertEqual(store.get_state('active_session_id',''),'')
+        reply=controller.handle_update({'message':{'from':{'id':17},'chat':{'id':17,'type':'private'},'text':'Please answer my new question.'}})
+        self.assertEqual(reply,'Persisted fixture answer.')
+        self.assertFalse(coordinator.has_pending())
+        self.assertEqual(store.get_state('autonomy_error',''),'')
+        self.assertEqual(store.connection.execute('SELECT count(*) FROM diary_entries').fetchone()[0],0)
+        self.assertEqual(len(self.fixture.provider_calls),2)
+        proof=store.connection.execute("SELECT r.result_json FROM recovery_results r JOIN recovery_effects e ON e.admission_id=r.admission_id WHERE e.kind='tool'").fetchone()
+        rejection=json.loads(json.loads(proof[0]))
+        self.assertEqual(rejection['status'],'error')
+        self.assertEqual(rejection['error'],'diary_requires_autonomous_session')
+        self.assertFalse(rejection['executed'])
+
+    def test_owner_arriving_with_final_response_follows_a_genuinely_completed_turn(self):
+        agent,controller,coordinator,runner=self.coordinated_agent();store=self.fixture.store
+        self.responses.append({'id':'owner-answer','choices':[{'index':0,'message':{'role':'assistant','content':'Answer to owner.'},'finish_reason':'stop'}],
+            'usage':{'prompt_tokens':20,'completion_tokens':5,'cost':.000001}})
+        update={'update_id':993,'message':{'from':{'id':17},'chat':{'id':17,'type':'private'},'text':'Owner question at completion'}}
+        original=self.fixture.model_gateway.provider.complete
+        def arriving(payload):
+            result=original(payload)
+            if len(self.fixture.provider_calls)==1:store.enqueue_update(update)
+            return result
+        self.fixture.model_gateway.provider.complete=arriving
+        session=runner.start('owner_wake',datetime.now(timezone.utc))
+        self.assertTrue(runner.run_cycle(session))
+        self.assertEqual(store.connection.execute('SELECT state FROM model_turn_receipts').fetchone()[0],'completed')
+        self.assertFalse(coordinator.has_pending());self.assertEqual(store.get_state('autonomy_error',''),'')
+        self.assertTrue(store.claim_update(update['update_id']))
+        self.assertEqual(controller.handle_update(update),'Answer to owner.')
+        self.assertEqual(len(self.fixture.provider_calls),2)
+
+    def test_existing_owner_blocked_checkpoint_can_handoff_with_legacy_error_preserved(self):
+        agent,controller,coordinator,runner=self.coordinated_agent();store=self.fixture.store
+        self.responses.insert(0,{'id':'interrupted-step','choices':[{'index':0,'message':{'role':'assistant','content':None,
+            'tool_calls':[{'id':'not-executed','type':'function','function':{'name':'recent_activity','arguments':'{}'}}]},
+            'finish_reason':'tool_calls'}],'usage':{'prompt_tokens':20,'completion_tokens':5,'cost':.000001}})
+        update={'update_id':992,'message':{'from':{'id':17},'chat':{'id':17,'type':'private'},'text':'Answer this queued question'}}
+        original=self.fixture.model_gateway.provider.complete
+        def owner_arrives(payload):
+            result=original(payload)
+            if len(self.fixture.provider_calls)==1:
+                attempt=store.begin_cycle_tool(store.research_tool_context(),'python.run')
+                store.finish_cycle_tool(attempt,False);store.enqueue_update(update)
+            return result
+        self.fixture.model_gateway.provider.complete=owner_arrives
+        gateway_request=self.fixture.model_gateway.recovery_request
+        self.fixture.model_gateway.recovery_request=lambda path,payload: (423,{'error':{'message':'old backend has no handoff'}}) if path.endswith('/owner_yield') else gateway_request(path,payload)
+        session=runner.start('owner_wake',datetime.now(timezone.utc))
+        self.assertFalse(runner.run_cycle(session))
+        self.assertEqual(store.get_state('autonomy_error'),'local_recovery_interrupted')
+        with store.connection:store.connection.execute("UPDATE recovery_attempts SET state='held',hold_reason='provider_uncertain'")
+        self.fixture.model_gateway.recovery_request=gateway_request
+        self.assertTrue(coordinator.reconcile_one())
+        self.assertEqual(store.get_state('autonomy_error'),'')
+        self.assertFalse(coordinator.has_pending())
+        self.assertEqual(store.connection.execute("SELECT outcome FROM cycle_tool_attempts WHERE tool_name='python.run'").fetchone()[0],'uncertain')
+        self.assertEqual(store.connection.execute('SELECT state FROM model_turn_receipts').fetchone()[0],'accepted')
+        self.assertTrue(store.claim_update(update['update_id']))
+        self.assertEqual(controller.handle_update(update),'Persisted fixture answer.')
+        self.assertEqual(len(self.fixture.provider_calls),2)
+
+    def test_late_provider_receipt_recovers_without_second_request(self):
+        self.late_provider_receipt_scenario()
+
+    def test_late_provider_receipt_import_preserves_newer_pause_without_dispatch(self):
+        self.late_provider_receipt_scenario(paused=True)
+
+    def test_owner_handoff_after_late_receipt_keeps_failed_tools_and_pause(self):
+        self.late_provider_receipt_scenario(paused=True,owner_handoff=True)
+
+    def late_provider_receipt_scenario(self,*,paused=False,owner_handoff=False):
+        import threading
+        agent,controller,coordinator,runner=self.coordinated_agent();store=self.fixture.store
+        original=self.fixture.model_gateway.complete
+        waiting=threading.Event();finish=threading.Event();threads=[]
+        self.addCleanup(finish.set)
+        provider=self.fixture.model_gateway.provider.complete
+        def delayed(payload):
+            waiting.set()
+            if not finish.wait(10):raise TimeoutError('fixture did not release result')
+            return provider(payload)
+        self.fixture.model_gateway.provider.complete=delayed
+        def detached(authorization,payload,*,recovery=None):
+            thread=threading.Thread(target=lambda:original(authorization,payload,recovery=recovery),daemon=True)
+            threads.append(thread);thread.start()
+            if not waiting.wait(5):raise TimeoutError('provider did not start')
+            return 504,{'error':{'message':'fixture response transport timed out'}}
+        self.fixture.model_gateway.complete=detached
+        session=runner.start('owner_wake',datetime.now(timezone.utc))
+        self.assertFalse(runner.run_cycle(session))
+        self.assertEqual(store.get_state('autonomy_error'),'local_recovery_interrupted')
+        self.assertFalse(coordinator.reconcile_one())
+        finish.set()
+        for thread in threads:thread.join(5);self.assertFalse(thread.is_alive())
+        self.fixture.model_gateway.complete=original
+        if paused:
+            if owner_handoff:
+                for _ in range(3):
+                    attempt=store.begin_cycle_tool(store.research_tool_context(),'python.run')
+                    store.finish_cycle_tool(attempt,False)
+            controller._command('/pause')
+            owner_revision=store.get_state('owner_control_revision')
+            runner.recover()
+        self.assertEqual(len(self.fixture.provider_calls),1)
+        self.assertTrue(coordinator.reconcile_one())
+        self.assertEqual(len(self.fixture.provider_calls),1)
+        if paused:
+            self.assertFalse(coordinator.reconcile_one())
+            self.assertEqual(store.get_state('paused'),'1')
+            self.assertEqual(store.get_state('owner_control_revision'),owner_revision)
+            self.assertEqual(store.get_state('active_session_id'),'')
+            self.assertTrue(coordinator.has_pending())
+            if owner_handoff:
+                # A new owner message can retire the old input without
+                # declaring any failed program successful or executing it.
+                controller.handle_update({'message':{'from':{'id':17},'chat':{'id':17,'type':'private'},
+                    'text':'Keep the failed attempts held; answer my new question when I wake.'}})
+                self.assertTrue(coordinator.reconcile_one())
+                self.assertFalse(coordinator.has_pending())
+                self.assertEqual(len(self.fixture.provider_calls),1)
+                self.assertEqual(store.get_state('paused'),'1')
+                self.assertEqual(store.get_state('owner_control_revision'),owner_revision)
+                self.assertEqual(store.get_state('active_session_id'),'')
+                self.assertEqual(store.get_state('active_cycle_id',''),'')
+                self.assertEqual(store.get_state('autonomy_error'),'local_recovery_interrupted')
+                self.assertEqual(store.connection.execute("SELECT count(*) FROM cycle_tool_attempts WHERE tool_name='python.run' AND outcome='uncertain'").fetchone()[0],3)
+                self.assertEqual(store.connection.execute('SELECT state FROM model_turn_receipts').fetchone()[0],'accepted')
+                self.assertEqual(store.connection.execute('SELECT count(*) FROM recovery_owner_yields').fetchone()[0],1)
+            return
+        self.assertTrue(coordinator.reconcile_one())
+        self.assertFalse(coordinator.has_pending())
+        self.assertEqual(store.get_state('autonomy_error'),'')
+        self.assertEqual(store.connection.execute('SELECT state FROM model_turn_receipts').fetchone()[0],'completed')
+        self.assertEqual(len(self.fixture.provider_calls),1)
+
+    def test_paused_handoff_cancellation_keeps_new_authority_and_makes_no_calls(self):
+        agent,controller,coordinator,runner=self.coordinated_agent();store=self.fixture.store
+        self.responses.insert(0,{'id':'interrupted-step','choices':[{'index':0,'message':{'role':'assistant','content':None,
+            'tool_calls':[{'id':'not-executed','type':'function','function':{'name':'recent_activity','arguments':'{}'}}]},
+            'finish_reason':'tool_calls'}],'usage':{'prompt_tokens':20,'completion_tokens':5,'cost':.000001}})
+        update={'update_id':996,'message':{'from':{'id':17},'chat':{'id':17,'type':'private'},'text':'Saved owner question'}}
+        original=self.fixture.model_gateway.provider.complete
+        def arrives(payload):
+            result=original(payload)
+            if len(self.fixture.provider_calls)==1:store.enqueue_update(update)
+            return result
+        self.fixture.model_gateway.provider.complete=arrives
+        request=self.fixture.model_gateway.recovery_request
+        self.fixture.model_gateway.recovery_request=lambda path,payload: (423,{'error':{'message':'old backend'}}) if path.endswith('/owner_yield') else request(path,payload)
+        session=runner.start('owner_wake',datetime.now(timezone.utc))
+        self.assertFalse(runner.run_cycle(session))
+        self.assertTrue(store.claim_update(996));controller.handle_update(update);store.complete_update(996)
+        controller.handle_update({'message':{'from':{'id':17},'chat':{'id':17,'type':'private'},'text':'/pause'}})
+        self.fixture.model_gateway.recovery_request=request
+        runner.recover()
+        revision=store.get_state('owner_control_revision')
+        self.assertTrue(coordinator.reconcile_one())
+        self.assertFalse(coordinator.has_pending())
+        self.assertEqual(store.get_state('paused'),'1')
+        self.assertEqual(store.get_state('owner_control_revision'),revision)
+        self.assertEqual(store.get_state('active_session_id'),'')
+        self.assertEqual(store.get_state('active_cycle_id',''),'')
+        self.assertEqual(store.get_state('autonomy_error'),'local_recovery_interrupted')
+        self.assertEqual(len(self.fixture.provider_calls),1)
+        self.assertEqual(store.connection.execute("SELECT count(*) FROM recovery_effects WHERE kind='tool'").fetchone()[0],0)
+        self.assertEqual(store.connection.execute('SELECT state FROM model_turn_receipts').fetchone()[0],'accepted')
+        controller.handle_update({'message':{'from':{'id':17},'chat':{'id':17,'type':'private'},'text':'/wake'}})
+        self.assertEqual(controller.flush_queued(),'Persisted fixture answer.')
+        self.assertEqual(len(self.fixture.provider_calls),2)
+
+    def test_owner_arrives_between_authorization_and_dispatch(self):
+        for kind in ('provider','tool'):
+            with self.subTest(kind=kind):
+                if kind=='tool':
+                    self.fixture.stop();self.setUp()
+                agent,controller,coordinator,runner=self.coordinated_agent();store=self.fixture.store
+                if kind=='tool':
+                    self.responses.insert(0,{'id':'tool-choice','choices':[{'index':0,'message':{'role':'assistant','content':None,
+                        'tool_calls':[{'id':'undispatched','type':'function','function':{'name':'recent_activity','arguments':'{}'}}]},'finish_reason':'tool_calls'}],
+                        'usage':{'prompt_tokens':20,'completion_tokens':5,'cost':.000001}})
+                update={'update_id':995,'message':{'from':{'id':17},'chat':{'id':17,'type':'private'},'text':'Owner arrives before dispatch'}}
+                original=self.fixture.model_gateway.recovery_request
+                def arriving(path,payload):
+                    result=original(path,payload)
+                    if path.endswith('/authorize') and payload['effect']['kind']==kind and result[0]==200:store.enqueue_update(update)
+                    return result
+                self.fixture.model_gateway.recovery_request=arriving
+                session=runner.start('owner_wake',datetime.now(timezone.utc))
+                self.assertFalse(runner.run_cycle(session))
+                self.assertEqual(store.get_state('autonomy_error',''),'')
+                self.assertFalse(coordinator.has_pending())
+                self.assertEqual(store.connection.execute("SELECT count(*) FROM recovery_effects WHERE state='cancelled'").fetchone()[0],1)
+                self.assertEqual(store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0],0)
+                self.assertEqual(len(self.fixture.provider_calls),1 if kind=='tool' else 0)
+                self.fixture.model_gateway.recovery_request=original
+                self.assertTrue(store.claim_update(update['update_id']))
+                self.assertEqual(controller.handle_update(update),'Persisted fixture answer.')
+                self.assertEqual(len(self.fixture.provider_calls),2 if kind=='tool' else 1)
+
     def test_first_journaled_turn_preserves_legacy_history_tombstones_costs_and_held_messages(self):
         agent,controller,coordinator,runner=self.coordinated_agent()
         runtime=self.fixture.client.start_runtime(agent.agent_id,agent.conversation_id,controller_tools=False)
@@ -349,6 +584,48 @@ class LocalRecoveryProtocolTests(unittest.TestCase):
         retained=self.command('recovery_inspect',binding=value['binding'])
         self.assertEqual(retained['phase'],'held');self.assertEqual(retained['hold_reason'],'projection_conflict')
         self.assertEqual(len(self.fixture.provider_calls),2)
+
+    def test_legacy_rate_limit_retirement_then_fresh_wake_preserves_history_and_holds(self):
+        from unittest.mock import patch
+        from andrewbot.store import Store
+        from andrewbot.model import ProviderRequestError
+        from andrewbot.memory_backup import create_paired_recovery_snapshot
+        spec=importlib.util.spec_from_file_location('rate_retirement_fixture',ROOT/'scripts/retire_rate_limited_input.py')
+        repair=importlib.util.module_from_spec(spec);spec.loader.exec_module(repair)
+        agent,controller,coordinator,runner=self.coordinated_agent()
+        self.fixture.kill()
+        home=self.fixture.root;backend=home/'.letta/lc-local-backend';(home/'backend').rename(backend)
+        self.fixture.environment['LETTA_LOCAL_BACKEND_DIR']=str(backend);self.fixture.restart()
+        store=self.fixture.store
+        for index in range(15):store.add_message(17,'user','Old held fixture '+str(index),queued=3)
+        for index in range(10):store.reserve_usage('provider-'+format(index,'064x'),'2026-10','2026-10-16',.01)
+        session=runner.start('owner_wake',datetime.now(timezone.utc))
+        # Reproduce the old gateway: the HTTP error is logged, but no rejection
+        # receipt is committed and the reservation remains admitted.
+        with patch.object(self.fixture.model_gateway.provider,'complete',side_effect=ProviderRequestError('http_error',429)), \
+             patch.object(RecoveryRecords,'reject_provider',side_effect=ValueError('legacy gateway has no rejection receipt')):
+            self.assertFalse(runner.run_cycle(session))
+        row=dict(store.connection.execute("SELECT * FROM recovery_attempts WHERE state='active' ORDER BY rowid DESC LIMIT 1").fetchone())
+        controller._command('/pause')
+        with store.connection:store.connection.execute("UPDATE recovery_attempts SET state='held',hold_reason='provider_uncertain' WHERE admission_id=?",(row['admission_id'],))
+        self.fixture.kill();store.close()
+        transcript=next((backend/'conversations').glob('*/messages.jsonl'));before=transcript.read_bytes()
+        snapshot_directory=tempfile.TemporaryDirectory();self.addCleanup(snapshot_directory.cleanup)
+        snapshot=Path(snapshot_directory.name)/'paired-before'
+        create_paired_recovery_snapshot(home/'controller.sqlite3',home,snapshot,workers_quiescent=True)
+        value=repair.plan(home/'controller.sqlite3',home,row['admission_id'])
+        repair.retire_backend(value);repair.retire_controller(value)
+        self.assertEqual(transcript.read_bytes(),before)
+        self.fixture.store=Store(home/'controller.sqlite3');self.fixture.model_gateway.store=self.fixture.store
+        self.fixture.restart();agent,controller,coordinator,runner=self.coordinated_agent()
+        self.assertFalse(coordinator.has_pending());controller._command('/wake')
+        session=runner.start('owner_wake',datetime.now(timezone.utc))
+        self.assertTrue(runner.run_cycle(session))
+        self.assertEqual(len(self.fixture.provider_calls),1)
+        self.assertEqual(self.fixture.store.uncertain_message_count(17),15)
+        self.assertEqual(self.fixture.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0],10)
+        self.assertTrue(transcript.read_bytes().startswith(before))
+        self.assertEqual(self.command('recovery_inspect',binding=value['binding'])['phase'],'held')
 
     def test_confirmed_tool_survives_backend_and_controller_loss_then_one_continuation(self):
         from andrewbot.recovery_dispatch import RecoveryDispatch

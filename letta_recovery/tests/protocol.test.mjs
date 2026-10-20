@@ -104,3 +104,18 @@ test('disconnect_during_resume_validation_cannot_schedule_an_effect',async t=>{
  assert.equal(f.protocol.store.load(f.binding).attempts,undefined);
  assert.equal(f.protocol.jobs.size,0);assert.equal(f.provider,0);
 });
+
+test('late_provider_command_imports_only_evidence_and_does_not_grant_execution',async t=>{
+ const f=fixture(t),claim=await admitted(f);
+ f.protocol.sdk.executeProviderStep=async()=>{throw Error('fixture response lost');};
+ await f.protocol.execution.advance(f.binding,claim);
+ const item=f.protocol.store.load(f.binding).steps.at(-1);
+ await f.command('recovery_release',{claim_id:claim.claim_id,fence:claim.fence});
+ f.protocol.execution.gate.result=async()=>({state:'confirmed',admission_id:item.admission_id,kind:'provider',request_sha:item.request_sha,
+  result:textResponse,result_sha:digest(textResponse),usage:{settled:true}});
+ f.protocol.sdk.checkScope=async()=>{throw Error('owner_blocked');};
+ const reconciled=await f.command('recovery_reconcile_provider',{expected_revision:f.protocol.store.load(f.binding).revision,effect_admission_id:item.admission_id});
+ assert.equal(f.protocol.store.load(f.binding).phase,'provider_confirmed');assert.equal(f.protocol.jobs.size,0);assert.equal(f.provider,0);
+ await assert.rejects(f.command('recovery_resume',{attempt_id:'no-dispatch',expected_revision:reconciled.revision,claim_id:reconciled.claim_id,fence:reconciled.fence}),/owner_blocked/);
+ assert.equal(f.provider,0);assert.equal(f.protocol.jobs.size,0);
+});

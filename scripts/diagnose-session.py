@@ -138,6 +138,10 @@ def main():
         # attempts older than the selected session's diagnostic window.
         report['global_reservation_count']=db.execute('SELECT count(*) FROM budget_reservations').fetchone()[0]
         report['global_reservations']=rows('SELECT reservation_id,month,day,cost_usd,created_at FROM budget_reservations ORDER BY created_at DESC LIMIT 20')
+        if 'runner_operations' in tables:
+            report['runner_result_recovery']={
+                'operations':{name:db.execute('SELECT count(*) FROM runner_operations WHERE state=?',(name,)).fetchone()[0] for name in ('prepared','admitted','cancelled','imported')},
+                'saved_imports':db.execute('SELECT count(*) FROM runner_imports').fetchone()[0]}
         if 'recovery_attempts' in tables:
             columns={row[1] for row in db.execute('PRAGMA table_info(recovery_attempts)')}
             reason=',hold_reason' if 'hold_reason' in columns else ''
@@ -145,6 +149,8 @@ def main():
             report['local_recovery_effects']=rows('SELECT kind,state,count(*) AS count FROM recovery_effects GROUP BY kind,state')
             # A database snapshot cannot establish the running service's flag.
             report['local_recovery_automatic_resume']=None
+        if 'recovery_provider_rejections' in tables:
+            report['provider_rejections']=rows('SELECT r.admission_id,r.attempt,r.http_status,r.rejected_at_ms,r.retry_at_ms,e.state AS effect_state FROM recovery_provider_rejections r JOIN recovery_effects e ON e.admission_id=r.admission_id ORDER BY r.rejected_at_ms DESC LIMIT 20')
         if 'external_action_receipts' in tables:
             report['action_recovery'] = rows(
                 'SELECT action_id,adapter,operation,state,session_id,cycle_id,created_at,checked_at '
@@ -169,6 +175,8 @@ def main():
             report['letta_recovery_metadata'] = collect_recovery_metadata(args.letta_home, receipts)
             from recovery_projection_metadata import collect_projection_metadata
             report['journaled_projection_metadata'] = collect_projection_metadata(args.letta_home, receipts)
+            from recovery_projection_metadata import collect_checkpoint_metadata
+            report['journaled_checkpoint_metadata'] = collect_checkpoint_metadata(args.letta_home, receipts)
         if 'cycle_recovery_checkpoints' in tables:
             report['recovery_checkpoints'] = rows(
                 'SELECT k.*,c.session_id,c.status AS cycle_status FROM cycle_recovery_checkpoints k '
@@ -179,6 +187,12 @@ def main():
                 'SELECT t.cycle_id,t.outcome,count(*) AS attempts FROM cycle_tool_attempts t '
                 'JOIN cycles c ON c.cycle_id=t.cycle_id WHERE c.session_id LIKE ? '
                 'GROUP BY t.cycle_id,t.outcome ORDER BY c.started_at DESC LIMIT 30', (args.session + '%',))
+            from recovery_projection_metadata import KNOWN_TOOLS
+            report['uncertain_tool_metadata'] = [
+                {**row,'tool_name':row['tool_name'] if row['tool_name'] in KNOWN_TOOLS else 'other'}
+                for row in rows('SELECT t.tool_name,t.outcome,t.started_at,t.finished_at FROM cycle_tool_attempts t '
+                    'JOIN cycles c ON c.cycle_id=t.cycle_id WHERE c.session_id LIKE ? AND t.outcome<>? '
+                    'ORDER BY t.started_at DESC LIMIT 20',(args.session+'%','returned'))]
         if "research_entries" in tables:
             report["saved_research_entries"] = rows(
                 "SELECT record_id,revision,status,created_at,updated_at FROM research_entries "
@@ -226,9 +240,9 @@ def main():
         if args.brief:
             usage = report.get('usage', [])
             report = {key: report[key] for key in ('integrity', 'lifecycle', 'letta_metadata', 'letta_recovery_metadata', 'recovery_checkpoints',
-                                                  'journaled_projection_metadata', 'recovery_tool_attempts', 'action_recovery', 'model_turn_receipts', 'telegram_receipts', 'media_delivery_receipts',
+                                                  'journaled_projection_metadata','journaled_checkpoint_metadata','uncertain_tool_metadata', 'recovery_tool_attempts', 'action_recovery', 'model_turn_receipts', 'telegram_receipts', 'media_delivery_receipts',
                                                   'local_recovery_attempts','local_recovery_effects','local_recovery_automatic_resume',
-                                                  'global_reservation_count','global_reservations') if key in report} | {
+                                                  'runner_result_recovery','provider_rejections','global_reservation_count','global_reservations') if key in report} | {
                 'recent_owner_messages': report['recent_owner_messages'][:3],
                 'events': report.get('events', [])[-12:],
                 'usage_summary': {'settled_requests': len(usage), 'last_request': usage[-1] if usage else None},

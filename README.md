@@ -4,6 +4,8 @@ Andrew is a self-hosted persistent AI agent prototype with a trusted Python cont
 
 ## Project status
 
+The [2026-10-20 deployed-source snapshot](deployment/2026-10-20/README.md) records the enabled runner recovery release, exact controller/service source hashes, and remaining live verification. The [runner recovery operations guide](docs/runner-result-recovery-operations.md) covers coordinated installation, credentials, backup and restore.
+
 See [the verified feature status](docs/FEATURE_STATUS.md) for the dated distinction between source implementation, local test results, VPS installation, live integration checks, and autonomous enablement. Treat VPS state as a point-in-time snapshot and refresh it before deployment.
 
 [Gmail setup](docs/GMAIL.md) covers the OAuth integration: installed and connected, with read access and separately owner-enabled permissions for drafts, sending and moving messages to Trash. Expanded OAuth consent completed; permanent deletion is unavailable. Message reading, token refresh and model-directed Gmail use still await verification.
@@ -20,7 +22,7 @@ The [self-managed credits and autonomous media guide](docs/SELF_MANAGED_CREDITS_
 
 ```sh
 PYTHONPATH=prototype python3 -m unittest discover -s prototype/tests -q
-python3 -m unittest discover -s scripts/tests -q
+PYTHONPATH=prototype:scripts:scripts/tests python3 -m unittest discover -s scripts/tests -q
 systemd-analyze verify systemd/andrew-control.service systemd/andrew-egress.socket systemd/andrew-egress.service systemd/andrew-runner.socket systemd/andrew-runner.service
 ```
 

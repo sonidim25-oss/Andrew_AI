@@ -44,6 +44,15 @@ class ControllerTests(unittest.TestCase):
         self.store.close()
         self.temp.cleanup()
 
+    def test_error_status_cannot_be_overridden_by_stale_reply_progress(self):
+        self.store.set_state('autonomy_error','local_recovery_interrupted')
+        self.store.set_state('model_turn_origin','owner')
+        self.store.set_state('model_turn_progress',json.dumps({'phase':'processing the model response','at':datetime.now(timezone.utc).timestamp()}))
+        result=self.controller._command('/status')
+        self.assertIn('automatic activity stopped after an error',result)
+        self.assertNotIn('preparing a reply',result)
+        self.assertNotIn('Reply progress:',result)
+
     def test_ignores_non_owner_updates(self):
         result = self.controller.handle_update({
             "update_id": 1,

@@ -82,8 +82,7 @@ class RunnerServiceTests(unittest.TestCase):
         self.assertLessEqual(len(result["stdout"].encode()), 16 * 1024)
         required = {"status", "stdout", "stderr", "artifacts", "safe_error", "visit"}
         self.assertTrue(required <= set(result) <= required | {'output_truncated'})
-        if 'output_truncated' in result:
-            self.assertIs(result['output_truncated'], True)
+        self.assertIs(result.get('output_truncated'), True)
 
     def test_timeout_removes_named_container(self):
         module = runner_module(self)

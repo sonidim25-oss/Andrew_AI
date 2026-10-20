@@ -35,6 +35,9 @@ def bindings():
     policy=hashlib.sha256()
     for path in POLICY_FILES:
         policy.update(str(path).encode()+b'\0'+protected_read(path)+b'\0')
+    if RUNNER_ADOPTION.exists():
+        runner_adoption()
+        policy.update(str(RUNNER_ADOPTION).encode()+b'\0'+protected_read(RUNNER_ADOPTION)+b'\0')
     config=dict(line.split('=',1) for line in protected_read(POLICY_FILES[0]).decode().splitlines() if '=' in line and not line.startswith('#'))
     return {'code':code_digest(Path('/opt/andrew/prototype/andrewbot')),
             'service_code':code_digest(Path('/opt/andrew/runtime-services/andrewbot')),
@@ -52,3 +55,30 @@ def validate_runtime_proof():
     try: check_proof(json.loads(protected_read(PROOF)),bindings())
     except (OSError,KeyError,ValueError):
         raise ValueError('external runtime requires current administrator acceptance evidence') from None
+
+
+RUNNER_ADOPTION = Path('/etc/andrew/runner-receipt-adoption.json')
+
+
+def runner_adoption(*, controller_directory=Path('/opt/andrew/prototype/andrewbot'),
+                    service_directory=Path('/opt/andrew/runtime-services/andrewbot')):
+    """An adopted store cannot start under an older or partial code rollout."""
+    if not RUNNER_ADOPTION.exists():
+        if RUNNER_ADOPTION.is_symlink():raise ValueError('Invalid runner adoption record')
+        return None
+    record=json.loads(protected_read(RUNNER_ADOPTION))
+    if (record.get('contract')!='runner_result_recovery_v1' or record.get('version')!=1
+            or record.get('mode') not in {'disabled','enabled'}
+            or controller_directory is not None and record.get('controller_code')!=code_digest(controller_directory)
+            or service_directory is not None and record.get('service_code')!=code_digest(service_directory)):
+        raise ValueError('Runner adoption requires its exact coordinated packages')
+    for key in ('controller_store_id','runner_store_id'):
+        import uuid
+        if str(uuid.UUID(record[key])).replace('-','')!=record[key].replace('-',''):
+            raise ValueError('Invalid runner adoption identity')
+    for field in ('key_fingerprint','backend_release_sha256'):
+        if not isinstance(record.get(field),str) or len(record[field])!=64 or any(c not in '0123456789abcdef' for c in record[field]):
+            raise ValueError('Invalid runner adoption digest')
+    for key in ('controller_uid','runner_uid'):
+        if type(record.get(key)) is not int or record[key]<0:raise ValueError('Invalid runner adoption UID')
+    return record

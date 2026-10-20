@@ -8,6 +8,7 @@ from pathlib import Path
 from functools import wraps
 from zoneinfo import ZoneInfo
 from .latency import wall_age_seconds
+from .telegram_menu import owner_control
 
 
 def database_locked(method):
@@ -26,6 +27,9 @@ class Store:
         self.path.parent.chmod(0o700)
         self.connection = sqlite3.connect(self.path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
+        self.connection.create_function('andrew_owner_control', 3,
+            lambda payload, owner_id, after: int(owner_control(json.loads(payload), owner_id, after)),
+            deterministic=True)
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA synchronous=FULL")
         self.connection.execute("PRAGMA foreign_keys=ON")
@@ -252,7 +256,7 @@ class Store:
                 attempt_id TEXT PRIMARY KEY,
                 cycle_id TEXT NOT NULL REFERENCES cycles(cycle_id),
                 tool_name TEXT NOT NULL,
-                outcome TEXT NOT NULL CHECK(outcome IN ('started','returned','uncertain')),
+                outcome TEXT NOT NULL CHECK(outcome IN ('started','returned','uncertain','not_executed')),
                 started_at TEXT NOT NULL,
                 finished_at TEXT
             );
@@ -346,6 +350,12 @@ class Store:
         self.backfill_session_history()
         from .recovery_records import initialize_schema
         initialize_schema(self)
+        from .runner_recovery import initialize_schema as initialize_runner_schema
+        try:
+            initialize_runner_schema(self)
+        except BaseException:
+            self.connection.close()
+            raise
         try:
             self.path.chmod(0o600)
         except FileNotFoundError:
@@ -786,8 +796,8 @@ class Store:
     @database_locked
     def pending_owner_input(self, owner_id):
         # Search the entire durable inbox, including messages beyond its first page.
-        return self.connection.execute(
-            "SELECT 1 FROM telegram_inbox WHERE json_extract(payload,'$.message.from.id')=? "
+        rows=self.connection.execute(
+            "SELECT update_id,json_extract(payload,'$.message.text') AS text FROM telegram_inbox WHERE json_extract(payload,'$.message.from.id')=? "
             "AND json_extract(payload,'$.message.chat.id')=? "
             "AND json_extract(payload,'$.message.chat.type')='private' "
             "AND json_type(payload,'$.message.text')='text' "
@@ -796,9 +806,12 @@ class Store:
             "AND json_type(payload,'$.message.forward_from') IS NULL "
             "AND json_type(payload,'$.message.forward_from_chat') IS NULL "
             "AND json_type(payload,'$.message.forward_sender_name') IS NULL "
-            "AND update_id NOT IN (SELECT update_id FROM telegram_claims) LIMIT 1",
+            "AND update_id NOT IN (SELECT update_id FROM telegram_claims) ",
             (owner_id, owner_id),
-        ).fetchone() is not None or self.connection.execute(
+        ).fetchall()
+        from .telegram_menu import is_model_input
+        prompt_after=int(self.get_state("telegram_wake_prompt_after_update_id","-1")) if self.get_state("telegram_wake_prompt_until","") else None
+        return any(is_model_input(row["text"],update_id=row["update_id"],prompt_after=prompt_after) for row in rows) or self.connection.execute(
             "SELECT 1 FROM messages WHERE owner_id=? AND role='user' AND queued IN (1,2) LIMIT 1",
             (owner_id,),
         ).fetchone() is not None
@@ -1142,14 +1155,14 @@ class Store:
                 "AND state='uncertain' AND checked_at<=?", (now, action_id, now - interval)).rowcount == 1
 
     @database_locked
-    def cycle_uncertain_effects(self, cycle_id):
+    def cycle_uncertain_effects(self, cycle_id, *, ignore_attempt_id=None):
         names = ('gmail.send', 'gmail.draft', 'gmail.delete', 'python.run', 'node.run', 'shell.run',
                  'browser.open', 'browser.control', 'browser.account', 'voice.generate', 'image.generate',
                  'image.edit', 'profile.propose_avatar')
         marks = ','.join('?' for _ in names)
         return bool(self.connection.execute(
-            f"SELECT 1 FROM cycle_tool_attempts WHERE cycle_id=? AND outcome<>'returned' AND tool_name IN ({marks}) LIMIT 1",
-            (cycle_id, *names)).fetchone())
+            f"SELECT 1 FROM cycle_tool_attempts WHERE cycle_id=? AND outcome IN ('started','uncertain') AND tool_name IN ({marks}) AND (? IS NULL OR attempt_id!=?) LIMIT 1",
+            (cycle_id, *names, ignore_attempt_id, ignore_attempt_id)).fetchone())
 
     @database_locked
     def hold_confirmed_actions(self, session_id, cycle_id):
@@ -1171,7 +1184,7 @@ class Store:
                 return False
             # Every unfinished tool needs a supported receipt. Opaque code,
             # local storage failures and unrelated calls cannot be inferred safe.
-            if self.connection.execute("SELECT 1 FROM cycle_tool_attempts t WHERE t.cycle_id=? AND t.outcome<>'returned' "
+            if self.connection.execute("SELECT 1 FROM cycle_tool_attempts t WHERE t.cycle_id=? AND t.outcome IN ('started','uncertain') "
                 "AND NOT EXISTS(SELECT 1 FROM external_action_receipts r WHERE r.attempt_id=t.attempt_id "
                 "AND r.adapter='gmail' AND t.tool_name='gmail.' || r.operation) LIMIT 1", (cycle_id,)).fetchone():
                 return False
@@ -1213,7 +1226,7 @@ class Store:
                 'SELECT 1 FROM telegram_claims LIMIT 1', "SELECT 1 FROM telegram_outbox WHERE delivery_state='sending' LIMIT 1",
                 'SELECT 1 FROM diary_delivery_claims LIMIT 1', "SELECT 1 FROM external_action_receipts WHERE state='uncertain' LIMIT 1",
                 "SELECT 1 FROM cycles WHERE status='running' LIMIT 1",
-                "SELECT 1 FROM cycle_tool_attempts WHERE cycle_id=? AND outcome<>'returned' LIMIT 1")
+                "SELECT 1 FROM cycle_tool_attempts WHERE cycle_id=? AND outcome IN ('started','uncertain') LIMIT 1")
             for query in checks:
                 if self.connection.execute(query, (hold['cycle_id'],) if '?' in query else ()).fetchone():
                     return False
@@ -1304,7 +1317,7 @@ class Store:
                     or row['owner_revision'] != self.get_state('owner_control_revision', '0')):
                 return None
             if self.connection.execute(
-                "SELECT 1 FROM cycle_tool_attempts WHERE cycle_id=? AND (outcome<>'returned' OR ?='prepared') LIMIT 1",
+                "SELECT 1 FROM cycle_tool_attempts WHERE cycle_id=? AND (outcome IN ('started','uncertain') OR (?='prepared' AND outcome<>'not_executed')) LIMIT 1",
                 (row['cycle_id'], row['phase']),
             ).fetchone():
                 return None
@@ -1384,35 +1397,14 @@ class Store:
         return [(row["update_id"], json.loads(row["payload"])) for row in rows]
 
     @database_locked
-    def pending_owner_controls(self, owner_id, buttons=(), model_commands=()):
-        text = "lower(trim(COALESCE(json_extract(payload,'$.message.text'),'')))"
-        clauses, values = [f"{text} GLOB '/*'"], [owner_id, owner_id]
-        for button in buttons:
-            clauses.append(f'{text}=?')
-            values.append(button.lower())
-        if self.get_state('telegram_wake_prompt_until', ''):
-            clauses.append('update_id>?')
-            values.append(int(self.get_state('telegram_wake_prompt_after_update_id', '-1')))
-        exclusion = ''
-        if model_commands:
-            for whitespace in (9, 10, 11, 12, 13):
-                text = f"replace({text},char({whitespace}),' ')"
-            text = f'trim({text})'
-            command = f"substr({text},1,instr({text} || ' ',' ')-1)"
-            base_command = f"substr({command},1,instr({command} || '@','@')-1)"
-            exclusion = f"AND {base_command} NOT IN ({','.join('?' for _ in model_commands)}) "
-            values.extend(model_commands)
+    def pending_owner_controls(self, owner_id):
+        prompt_after = (int(self.get_state('telegram_wake_prompt_after_update_id', '-1'))
+                        if self.get_state('telegram_wake_prompt_until', '') else None)
         rows = self.connection.execute(
-            "SELECT update_id,payload FROM telegram_inbox WHERE "
-            "json_extract(payload,'$.message.from.id')=? AND json_extract(payload,'$.message.chat.id')=? "
-            "AND json_extract(payload,'$.message.chat.type')='private' "
-            "AND json_type(payload,'$.message.forward_origin') IS NULL "
-            "AND json_type(payload,'$.message.forward_from') IS NULL "
-            "AND json_type(payload,'$.message.forward_from_chat') IS NULL "
-            "AND json_type(payload,'$.message.forward_sender_name') IS NULL "
-            "AND json_type(payload,'$.message.text')='text' "
-            "AND update_id NOT IN (SELECT update_id FROM telegram_claims) AND (" + ' OR '.join(clauses) + ') ' +
-            exclusion + "ORDER BY update_id LIMIT 50", values).fetchall()
+            "SELECT update_id,payload FROM telegram_inbox "
+            "WHERE andrew_owner_control(payload,?,?) "
+            "AND update_id NOT IN (SELECT update_id FROM telegram_claims) "
+            "ORDER BY update_id LIMIT 50", (owner_id, prompt_after)).fetchall()
         return [(row['update_id'], json.loads(row['payload'])) for row in rows]
 
     @database_locked
@@ -2298,3 +2290,23 @@ class Store:
             result["diary_ids"] = diaries
             results.append(result)
         return results
+
+
+    @database_locked
+    def record_runner_research_result(self, attempt_id, context, *, outcome):
+        """Record saved linkage inside the caller's atomic receipt import."""
+        if not self.connection.in_transaction or outcome!='returned':
+            raise ValueError('Runner research transaction required')
+        row=self.connection.execute('SELECT * FROM cycle_tool_attempts WHERE attempt_id=?',(attempt_id,)).fetchone()
+        if row is None or row['cycle_id']!=context['cycle_id'] or row['outcome']!='returned':
+            raise ValueError('Runner research identity mismatch')
+        from .recovery_identity import canonical
+        encoded=canonical(context)
+        old=self.connection.execute('SELECT context_json FROM runner_research_results WHERE attempt_id=?',(attempt_id,)).fetchone()
+        if old is not None:
+            if old['context_json']!=encoded:raise ValueError('Runner research identity mismatch')
+            return
+        self._research_event('tool_used',context['research_id'],row['tool_name'],outcome,
+                             session_id=context['session_id'],cycle_id=context['cycle_id'])
+        event_id=self.connection.execute('SELECT last_insert_rowid()').fetchone()[0]
+        self.connection.execute('INSERT INTO runner_research_results VALUES(?,?,?)',(attempt_id,encoded,event_id))

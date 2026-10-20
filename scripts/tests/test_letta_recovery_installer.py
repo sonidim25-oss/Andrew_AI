@@ -18,6 +18,16 @@ installer=importlib.util.module_from_spec(spec);spec.loader.exec_module(installe
 
 
 class RecoveryInstallerTests(unittest.TestCase):
+    def test_partial_candidate_resume_accepts_only_original_or_reviewed_file_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target=Path(directory);(target/'a.py').write_text('old a');(target/'b.py').write_text('old b')
+            old=installer.tree_hashes(target);(target/'a.py').write_text('new a');(target/'b.py').write_text('new b')
+            new=installer.tree_hashes(target);(target/'b.py').write_text('old b')
+            with patch.object(installer,'TARGET',target):
+                installer.verify_partial_candidate({'deployed_files':old,'controller_files':new})
+                (target/'a.py').write_text('unreviewed')
+                with self.assertRaises(ValueError):installer.verify_partial_candidate({'deployed_files':old,'controller_files':new})
+
     def test_initial_activation_installs_disabled_override_after_both_stops(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);target=root/'target';target.mkdir();(target/'recovery.py').write_text('old')
@@ -174,6 +184,46 @@ class RecoveryInstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'disabled activation'):installer.enable({'directory':directory},service=service)
         service.assert_not_called()
 
+    def test_handoff_enable_revalidates_exact_halted_state_before_service_changes(self):
+        for changed in (False,True):
+            with self.subTest(changed=changed),tempfile.TemporaryDirectory() as directory:
+                root=Path(directory);target=root/'target';target.mkdir()
+                (root/'activated.json').write_text(json.dumps({'release':str(root/'release')}))
+                proof={'admission_id':'selected-scope','backend_revision':9}
+                (root/'owner-handoff-repair.json').write_text(json.dumps(proof))
+                candidate={'directory':str(root),'backend_manifest_sha256':'a'*64,'controller_files':{}}
+                h=Mock();inspection=Mock();inspection.plan.return_value={**proof,'backend_revision':10} if changed else proof
+                service=Mock()
+                with patch.multiple(installer,TARGET=target,CONTROL_DROPIN=root/'control.conf'),\
+                     patch.object(installer,'verify_candidate'),patch.object(installer,'verify_release',return_value='a'*64),\
+                     patch.object(installer,'helper',side_effect=lambda name:inspection if name=='inspect_owner_handoff' else h):
+                    if changed:
+                        with self.assertRaisesRegex(ValueError,'Handoff state changed'):installer.enable(candidate,service=service)
+                        service.assert_not_called()
+                    else:
+                        self.assertTrue(installer.enable(candidate,service=service)['owner_controls_preserved'])
+                        h.idle.assert_not_called()
+                inspection.plan.assert_called_once_with(installer.DATABASE,installer.BACKEND_HOME,'selected-scope')
+
+    def test_late_provider_enable_revalidates_receipt_before_service_changes(self):
+        for changed in (False,True):
+            with self.subTest(changed=changed),tempfile.TemporaryDirectory() as directory:
+                root=Path(directory);target=root/'target';target.mkdir()
+                (root/'activated.json').write_text(json.dumps({'release':str(root/'release')}))
+                proof={'admission_id':'selected-scope','mode':'late_provider_receipt','backend_revision':9}
+                (root/'owner-handoff-repair.json').write_text(json.dumps(proof))
+                candidate={'directory':str(root),'backend_manifest_sha256':'a'*64,'controller_files':{}}
+                h=Mock();inspection=Mock();inspection.plan.return_value={**proof,'backend_revision':10} if changed else proof
+                service=Mock()
+                with patch.multiple(installer,TARGET=target,CONTROL_DROPIN=root/'control.conf'), \
+                     patch.object(installer,'verify_candidate'),patch.object(installer,'verify_release',return_value='a'*64), \
+                     patch.object(installer,'helper',side_effect=lambda name:inspection if name=='inspect_owner_handoff' else h):
+                    if changed:
+                        with self.assertRaisesRegex(ValueError,'state changed'):installer.enable(candidate,service=service)
+                        service.assert_not_called()
+                    else:self.assertTrue(installer.enable(candidate,service=service)['owner_controls_preserved'])
+                inspection.plan.assert_called_once_with(installer.DATABASE,installer.BACKEND_HOME,'selected-scope',late_provider=True)
+
     def test_unknown_deployment_rejected_before_service_change(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);deployed=root/'deployed';deployed.mkdir();(deployed/'store.py').write_text('# unknown deployment')
@@ -186,7 +236,8 @@ class RecoveryInstallerTests(unittest.TestCase):
 
     def test_initial_activation_refuses_automatic_resume_before_any_service_call(self):
         service=Mock()
-        with self.assertRaisesRegex(ValueError,'disabled'):installer.activate({},enable_resume=True,service=service)
+        with tempfile.TemporaryDirectory() as directory,patch.object(installer,'TARGET',Path(directory)):
+            with self.assertRaisesRegex(ValueError,'disabled'):installer.activate({},enable_resume=True,service=service)
         service.assert_not_called()
 
     def test_changed_candidate_refuses_activation_before_any_service_call(self):

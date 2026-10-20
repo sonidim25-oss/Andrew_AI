@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from .latency import LatencyMetrics, wall_age_seconds
 from .workers import ModelWorker
 
-from .telegram_menu import BUTTON_COMMANDS
+from .telegram_menu import owner_control
 from .telegram import deliver_saved_message
 
 
@@ -112,18 +112,9 @@ class ControllerDispatch:
 
     def _owner_control(self, update, owner_id):
         """Route local commands and time-entry replies without starting model work."""
-        message = update.get('message') or {}
-        text = message.get('text') or ''
-        if not isinstance(text, str):
-            return False
-        command = BUTTON_COMMANDS.get(text.strip(), text.strip()).split(maxsplit=1)
-        return bool((message.get('from') or {}).get('id') == owner_id
-                    and (message.get('chat') or {}).get('id') == owner_id
-                    and (message.get('chat') or {}).get('type') == 'private'
-                    and not any(key in message for key in ('forward_origin', 'forward_from', 'forward_from_chat', 'forward_sender_name'))
-                    and ((command and command[0].startswith('/') and command[0].split('@', 1)[0].lower() not in {'/voice_reply', '/image_reply'}) or (
-                        self.store.get_state('telegram_wake_prompt_until', '')
-                        and update.get('update_id', -1) > int(self.store.get_state('telegram_wake_prompt_after_update_id', '-1')))))
+        prompt_after = (int(self.store.get_state('telegram_wake_prompt_after_update_id', '-1'))
+                        if self.store.get_state('telegram_wake_prompt_until', '') else None)
+        return owner_control(update, owner_id, prompt_after)
 
     def _poll_loop(self):
         while not self._poll_stop.is_set() and not self.should_stop():
@@ -156,7 +147,7 @@ class ControllerDispatch:
             # message a local time response before a later /wake executes.
             for _ in range(50):
                 with self._input_lock:
-                    pending = self.store.pending_owner_controls(self.owner_id, BUTTON_COMMANDS, model_commands=('/voice_reply', '/image_reply'))
+                    pending = self.store.pending_owner_controls(self.owner_id)
                     if not pending or self._poll_stop.is_set() or self.should_stop():
                         return
                     self.process_updates(controls_only=True, updates=pending[:1])

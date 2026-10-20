@@ -50,6 +50,7 @@ class RunnerService:
     def __init__(self, config: WorkerConfig):
         self.config = config
         self.healthy = True
+        self.cleanup_verified = False
 
     def _podman_args(self, container_name, timeout=None):
         args = [
@@ -97,12 +98,16 @@ class RunnerService:
         except (UnicodeDecodeError, json.JSONDecodeError):
             return {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "worker_unavailable"}
         required = {"status", "stdout", "stderr", "artifacts", "safe_error"}
-        if not isinstance(value, dict) or set(value) not in (required, required | {"visit"}):
+        if (not isinstance(value, dict) or not required <= set(value) <= required | {"visit", "output_truncated"}
+                or ("output_truncated" in value and type(value["output_truncated"]) is not bool)):
             return {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "worker_unavailable"}
         if value["status"] not in {"ok", "error"} or not isinstance(value["stdout"], str) or not isinstance(value["stderr"], str):
             return {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "worker_unavailable"}
-        value["stdout"] = value["stdout"].encode("utf-8")[:MAX_STREAM_BYTES].decode("utf-8", errors="ignore")
-        value["stderr"] = value["stderr"].encode("utf-8")[:MAX_STREAM_BYTES].decode("utf-8", errors="ignore")
+        for stream in ('stdout', 'stderr'):
+            original = value[stream]
+            value[stream] = original.encode('utf-8')[:MAX_STREAM_BYTES].decode('utf-8', errors='ignore')
+            if value[stream] != original:
+                value['output_truncated'] = True
         value["artifacts"] = [p for p in value["artifacts"] if isinstance(p, str) and not p.startswith("/") and ".." not in p.split("/")][:32] if isinstance(value["artifacts"], list) else []
         if value["safe_error"] not in {None, "invalid_request", "unsupported_tool", "execution_failed", "timeout", "cancelled", "proxy_unavailable", "policy_rejected", "worker_unavailable"}:
             value["safe_error"] = "worker_unavailable"
@@ -115,6 +120,7 @@ class RunnerService:
         return value
 
     def run(self, request: dict, cancel_event=None) -> dict:
+        self.cleanup_verified = False
         payload = self._validate_request(request)
         if not self.healthy:
             return {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "worker_unavailable"}
@@ -126,7 +132,8 @@ class RunnerService:
         except OSError:
             return {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "worker_unavailable"}
         finally:
-            if not self._remove_container(container_name):
+            self.cleanup_verified = self._remove_container(container_name) is True
+            if not self.cleanup_verified:
                 self.healthy = False
         if process.cancelled:
             return {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "cancelled"}
@@ -156,18 +163,30 @@ class RunnerService:
 
 
 class RunnerSocketServer:
-    def __init__(self, runner):
+    def __init__(self, runner, *, receipts=None, controller_uid=None, receipts_enabled=False):
+        if type(receipts_enabled) is not bool or (receipts_enabled and
+                (receipts is None or type(controller_uid) is not int or controller_uid < 0)):
+            raise ValueError('invalid runner receipt configuration')
         self.runner = runner
+        self.receipts = receipts
+        self.controller_uid = controller_uid
+        self.receipts_enabled = receipts_enabled
         self._busy = False
+        self._receipt_storage_failed = False
 
     async def handle(self, reader, writer):
         try:
-            size = struct.unpack("!I", await asyncio.wait_for(reader.readexactly(4), timeout=5))[0]
-            if size == 0 or size > MAX_REQUEST_BYTES:
-                raise ValueError
-            payload = await asyncio.wait_for(reader.readexactly(size), timeout=5)
-            request = json.loads(payload.decode("utf-8"))
-            if self._busy:
+            from .runner_protocol import MAX_ENVELOPE_BYTES, encode_frame, read_sized_frame_async
+            request, wire_size = await asyncio.wait_for(read_sized_frame_async(reader, limit=MAX_ENVELOPE_BYTES), timeout=5)
+            if 'contract' in request or 'action' in request:
+                from .runner_receipt_server import handle_receipt
+                await handle_receipt(self, request, reader, writer)
+                return
+            # Legacy requests retain their worker-frame limit and behavior.
+            if wire_size > MAX_REQUEST_BYTES:
+                raise ValueError('runner request exceeded protocol limits')
+            encode_frame(request, limit=MAX_REQUEST_BYTES)
+            if self._busy or self._receipt_storage_failed:
                 result = {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "worker_unavailable"}
             else:
                 self._busy = True
@@ -207,12 +226,12 @@ class RunnerSocketServer:
                 pass
 
 
-async def serve_systemd_socket(runner):
+async def serve_systemd_socket(runner, **receipt_options):
     if os.environ.get("LISTEN_PID") != str(os.getpid()) or os.environ.get("LISTEN_FDS") != "1":
         raise RuntimeError("systemd socket activation is required")
     listener = socket.fromfd(3, socket.AF_UNIX, socket.SOCK_STREAM)
     listener.setblocking(False)
-    server = await asyncio.start_unix_server(RunnerSocketServer(runner).handle, sock=listener, limit=MAX_REQUEST_BYTES)
+    server = await asyncio.start_unix_server(RunnerSocketServer(runner, **receipt_options).handle, sock=listener, limit=MAX_REQUEST_BYTES)
     async with server:
         await server.serve_forever()
 
@@ -230,8 +249,18 @@ def main():
         config = WorkerConfig(values["IMAGE"], values["WORKSPACE"], values["PROXY_SOCKET"],
                               cgroup_parent=os.environ.get('ANDREW_CGROUP_PARENT'))
         runner = RunnerService(config)
-        runner.recover()
-        asyncio.run(serve_systemd_socket(runner))
+        from .runner_adoption import startup_record, open_receiver
+        record = startup_record('runner')
+        receipts = None
+        try:
+            options = {}
+            if record is not None:
+                receipts = open_receiver(record, os.environ.get('CREDENTIALS_DIRECTORY',''))
+                options = dict(receipts=receipts,controller_uid=record['controller_uid'],receipts_enabled=record['mode']=='enabled')
+            runner.recover()
+            asyncio.run(serve_systemd_socket(runner, **options))
+        finally:
+            if receipts is not None:receipts.close()
     except KeyboardInterrupt:
         return 0
     except Exception as error:

@@ -13,6 +13,7 @@ Environment=HOME=/var/lib/andrew/runtime
 Environment=ANDREW_CGROUP_PARENT=/system.slice/%n
 EnvironmentFile=/etc/andrew/runner-environment.conf
 Environment=ANDREW_RUNNER_CONFIG=/etc/andrew/runner.conf
+LoadCredentialEncrypted=andrew-runner-receipts-key:/etc/credstore.encrypted/andrew-runner-receipts-key
 ExecStart=/usr/bin/python3 -m andrewbot.runner_service
 Restart=on-failure
 RestartSec=3

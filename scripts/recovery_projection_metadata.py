@@ -1,10 +1,58 @@
 """Offline structural evidence for transcript conflicts; never prints content."""
 from collections import Counter
+import hashlib
 import json
 import os
 from pathlib import Path
 
 from letta_recovery_metadata import _open_directory, _read
+
+KNOWN_TOOLS=frozenset({'sleep','wake_at','continue_activity','check_budget','recent_activity',
+    'save_diary_entry','memory_search','memory_add_experience','memory_propose_personality_edit',
+    'python.run','node.run','shell.run','browser.open','browser.control','browser.account',
+    'session_search','session_read','gmail.status','gmail.read','gmail.search','gmail.send',
+    'gmail.draft','gmail.delete','gmail.reconcile','research.list','research.get',
+    'research.observations','research.create','research.update','research.focus',
+    'skills.list','skills.load','media.status','media.get','image.generate','image.edit',
+    'voice.generate','profile.propose_avatar'})
+PHASES=frozenset({'input_committed','provider_admitted','provider_backoff','provider_confirmed',
+    'tool_prepared','tool_admitted','tool_confirmed','continuation_ready','terminal_committed','held'})
+REASONS=frozenset({'legacy_unproven','binding_mismatch','unsupported_contract','provider_uncertain',
+    'tool_uncertain','authority_lost','state_corrupt','storage_limit','owner_blocked',
+    'configuration_changed','restore_required','projection_conflict'})
+
+def checkpoint_structure(snapshot,receipt):
+    def label(value,known):return value if value in known else 'other'
+    states={'prepared','admitted','rejected','confirmed','cancelled'}
+    tools=snapshot.get('tools',[]);steps=snapshot.get('steps',[])
+    if not isinstance(tools,list) or not isinstance(steps,list) or len(tools)>256 or len(steps)>256:
+        raise ValueError('invalid checkpoint arrays')
+    return {'status':'read','input_matches':snapshot.get('binding',{}).get('client_message_id')==receipt.get('client_message_id'),
+        'phase':label(snapshot.get('phase'),PHASES),
+        'held_phase':label(snapshot.get('held_phase'),PHASES) if snapshot.get('held_phase') else None,
+        'hold_reason':label(snapshot.get('hold_reason'),REASONS) if snapshot.get('hold_reason') else None,
+        'revision':snapshot.get('revision') if type(snapshot.get('revision')) is int else None,
+        'terminal_present':isinstance(snapshot.get('terminal'),dict),
+        'provider_states':dict(Counter(label(item.get('state'),states) for item in steps)),
+        'tool_states':dict(Counter(label(item.get('state'),states) for item in tools)),
+        'tools':[{'name':label(item.get('name'),KNOWN_TOOLS),'state':label(item.get('state'),states)} for item in tools]}
+
+def collect_checkpoint_metadata(home,receipts):
+    records=[]
+    for receipt in receipts[:6]:
+        identity={key:receipt[key] for key in ('agent_id','conversation_id')}
+        key=hashlib.sha256(json.dumps(identity,sort_keys=True,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
+        for root in (Path(home)/'.letta',Path(home)/'.letta/lc-local-backend'):
+            fd=None
+            try:
+                fd=_open_directory(root/'local-recovery-v1/conversations')
+                status,snapshot=_read(fd,key+'.json')
+                if status=='read':records.append(checkpoint_structure(snapshot,receipt))
+            except (OSError,ValueError,TypeError,AttributeError):
+                pass
+            finally:
+                if fd is not None:os.close(fd)
+    return {'evidence_only':True,'records':records,'status':'read' if records else 'not_found'}
 
 
 def transcript_structure(conversation, rows):

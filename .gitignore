@@ -32,3 +32,8 @@ logs/
 *.oci
 
 .artifacts/
+
+# Local recovery evidence and publication staging
+.runner-implementation/
+.superpowers/
+.worktrees/

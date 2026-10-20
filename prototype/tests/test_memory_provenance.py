@@ -1,3 +1,4 @@
+from backup_fixture import isolate_backup_adoption
 import json
 from pathlib import Path
 import sqlite3
@@ -12,6 +13,7 @@ from andrewbot.store import Store
 
 class MemoryProvenanceTests(unittest.TestCase):
     def setUp(self):
+        isolate_backup_adoption(self)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.path = Path(self.directory.name) / 'controller.sqlite3'

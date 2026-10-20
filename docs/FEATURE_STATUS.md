@@ -1,5 +1,13 @@
 # Andrew Feature Status
 
+## Current checkpoint: 2026-10-20
+
+Coordinated runner receipt recovery is installed and enabled. Privileged host acceptance passed, including distinct runtime-user credentials. The controller, backend, receiver and receiver socket are active; the adoption record is enabled and the installation fence is absent. Owner pause was preserved, and no wake or replay was requested. A fresh delivered reply and completed autonomous cycle remain unverified. P0 is still open.
+
+The [deployed source snapshot](../deployment/2026-10-20/README.md) records all 119 captured application source files, exact controller/service package hashes and the installed backend extension identity. Maintained recovery tooling also includes the tested installation repairs. Runtime configuration, credentials and databases remain private. See [runner recovery operations](runner-result-recovery-operations.md) and [Memory update.md](../Memory%20update.md) for the next verification steps.
+
+## Historical status: 2026-10-15
+
 **Production observation:** 2026-10-15 at 01:07 UTC. Browser/code runtime commissioning passed and external tools are enabled. The controller and Letta are active with zero automatic restarts; the three runtime sockets and dedicated firewall service are active and enabled. Autonomous and fallback schedules remain enabled, with **09:00 America/Toronto (13:00 UTC)** as the fallback. Saved owner pause/sleep, cycles, IDs, memory and spending state were preserved.
 
 **Latest installation:** `95e4ae4` plus the reliability fixes (uncommitted at installation, captured in the commit containing this record), confirmed by the administrator's module comparison and successful commissioning on 2026-10-15 at 02:38 UTC. Evidence: `/var/lib/andrew/runtime-commissioning/20261015T023521Z`. Network/resource limits, public HTTPS, browser/account fixtures, both isolated Letta callback tests and controller startup validation passed. IDs, owner pause/sleep, cycles, memory and spending rows were preserved. A subsequent read-only check found all five Andrew services active with zero automatic restarts and the controller's five-minute shutdown allowance loaded. This installs the manual-wake and reliability corrections. Gmail permissions and consent remain as previously recorded; real mailbox operations are still untested. See [Gmail setup](GMAIL.md).

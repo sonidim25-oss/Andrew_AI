@@ -138,7 +138,7 @@ def _preserve_newer_ledgers(restored, destination):
     with sqlite3.connect(destination.resolve().as_uri() + '?mode=ro', uri=True) as current:
         if current.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
             return False
-        for key in ('letta_agent_id', 'letta_conversation_id','local_recovery_controller_store_id'):
+        for key in ('letta_agent_id', 'letta_conversation_id','local_recovery_controller_store_id','runner_receipt_store_id'):
             row = current.execute('SELECT value FROM state WHERE key=?', (key,)).fetchone()
             old = restored.get_state(key)
             if row and old and row[0] != old:
@@ -146,7 +146,7 @@ def _preserve_newer_ledgers(restored, destination):
         latest = {row[0]: tuple(row) for row in current.execute('SELECT * FROM usage')}
         if any(latest.get(row['id']) != tuple(row) for row in restored.connection.execute('SELECT * FROM usage')):
             raise ValueError('Restore ledger histories conflict; manual reconciliation required')
-        tables = ('usage', 'budget_reservations', 'media_jobs', 'media_avatar_proposals', 'updates','recovery_attempts','recovery_effects','recovery_results')
+        tables = ('usage', 'budget_reservations', 'media_jobs', 'media_avatar_proposals', 'updates','recovery_attempts','recovery_effects','recovery_results','recovery_provider_rejections','recovery_operator_retirements','recovery_owner_yields')
         available = {row[0] for row in current.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         # Confirmed outcomes are immutable. A divergent receipt history cannot
         # become authoritative merely because its usage rows share a prefix.
@@ -158,7 +158,17 @@ def _preserve_newer_ledgers(restored, destination):
                     raise ValueError('Restore recovery receipts conflict; manual reconciliation required')
         elif restored.connection.execute('SELECT 1 FROM recovery_results LIMIT 1').fetchone():
             raise ValueError('Restore recovery receipts missing; manual reconciliation required')
+        restored_tables={row[0] for row in restored.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for name,keys in (('recovery_provider_rejections',('admission_id','attempt')),('recovery_operator_retirements',('admission_id',)),('recovery_owner_yields',('binding_sha',))):
+            if name not in restored_tables:continue
+            for old_receipt in restored.connection.execute('SELECT * FROM '+name):
+                if name not in available:raise ValueError('Restore rejection receipts missing; manual reconciliation required')
+                columns=[row[1] for row in current.execute('PRAGMA table_info('+name+')')]
+                latest_receipt=current.execute('SELECT '+','.join(columns)+' FROM '+name+' WHERE '+' AND '.join(key+'=?' for key in keys),tuple(old_receipt[key] for key in keys)).fetchone()
+                if latest_receipt is None or any(old_receipt[column]!=latest_receipt[index] for index,column in enumerate(columns)):
+                    raise ValueError('Restore rejection receipts conflict; manual reconciliation required')
         with restored.connection:
+            restored.connection.execute('PRAGMA defer_foreign_keys=ON')
             for name in reversed(tables):
                 if name in available:
                     schema = current.execute("SELECT sql FROM sqlite_master WHERE name=?", (name,)).fetchone()[0]
@@ -171,6 +181,8 @@ def _preserve_newer_ledgers(restored, destination):
                         marks = ','.join('?' for _ in rows[0])
                         columns=','.join(row[1] for row in current.execute('PRAGMA table_info('+name+')'))
                         restored.connection.executemany('INSERT INTO ' + name + '('+columns+') VALUES(' + marks + ')', rows)
+            from .runner_backup import preserve_controller_runner
+            preserve_controller_runner(restored,current)
             # Do not fetch already-processed Telegram inputs again after
             # releasing recovery. Any newer pending inputs are quarantined too.
             for name in ('telegram_inbox', 'telegram_uncertain'):
@@ -206,9 +218,13 @@ def _prepare_recovery_snapshot(serialized, destination, key):
                 try:
                     ledger_available = _preserve_newer_ledgers(restored, destination)
                 except sqlite3.DatabaseError:
+                    if restored.get_state('runner_receipt_store_id','') or Path('/etc/andrew/runner-receipt-adoption.json').exists():
+                        raise ValueError('Adopted runner ledger requires manual reconciliation') from None
                     # Corrupt live data still has encrypted evidence; billing
                     # remains gated until an administrator reconciles it.
                     pass
+            if not ledger_available and (restored.get_state('runner_receipt_store_id','') or Path('/etc/andrew/runner-receipt-adoption.json').exists()):
+                raise ValueError('Runner receipt ledger cannot be verified')
             with restored.connection:
                 db = restored.connection
                 db.execute("UPDATE messages SET queued=3 WHERE role='user' AND queued IN (1,2)")
@@ -228,7 +244,7 @@ def _prepare_recovery_snapshot(serialized, destination, key):
                     db.execute("UPDATE media_avatar_proposals SET state='uncertain' WHERE state IN ('proposed','approved','applying')")
                 if restored.get_state('local_recovery_controller_store_id',''):
                     db.execute("INSERT INTO state VALUES('local_recovery_restore_required','1') ON CONFLICT(key) DO UPDATE SET value='1'")
-                    db.execute("UPDATE recovery_attempts SET state='held' WHERE state IN ('active','evidence')")
+                    db.execute("UPDATE recovery_attempts SET state='held' WHERE state IN ('active','evidence','yielding')")
                 updates = {'restore_recovery_required': '1', 'restore_ledger_preserved': str(int(ledger_available)),
                            'paused': '1', 'sleeping': '0', 'sleep_until': '', 'session_start_requested': '',
                            'active_session_id': '', 'active_session_started_at': '',
@@ -316,6 +332,8 @@ def _recovery_tree(root):
 def _quiescent_database(path):
     path=Path(path)
     if path.is_symlink() or not path.is_file():raise ValueError('Controller database unavailable')
+    journal=Path(str(path)+'-journal')
+    if journal.exists() and journal.stat().st_size:raise ValueError('Database rollback journal is not quiescent')
     wal=Path(str(path)+'-wal')
     if wal.exists() and wal.stat().st_size:raise ValueError('Controller WAL is not quiescent')
     # immutable is used only after workers stop and a nonempty WAL is excluded.
@@ -387,6 +405,9 @@ def restore_paired_recovery_snapshot(snapshot,controller_path,backend_home,*,key
     if workers_quiescent is not True:raise ValueError('Both workers must be stopped before paired restore')
     snapshot,controller_path,backend_home=Path(snapshot),Path(controller_path),Path(backend_home)
     metadata=verify_paired_recovery_snapshot(snapshot)
+    with closing(_quiescent_database(controller_path)) as current:
+        pin=current.execute("SELECT value FROM state WHERE key='runner_receipt_store_id'").fetchone()
+        if pin and pin[0]:raise ValueError('Adopted runner stores require a three-store restore')
     if controller_path.is_symlink() or backend_home.is_symlink():raise ValueError('Unsafe restore target')
     with closing(_quiescent_database(controller_path)):pass
     controller_owner=controller_path.stat();backend_owner=backend_home.stat()
@@ -412,3 +433,8 @@ def restore_paired_recovery_snapshot(snapshot,controller_path,backend_home,*,key
     finally:store.close()
     os.chown(controller_path,controller_owner.st_uid,controller_owner.st_gid)
     return {'restored':True,'reconciliation_required':True,'retained_backend':str(retained)}
+
+
+# Public coordinated APIs keep legacy paired callers compatible.
+from .runner_backup import (create_runner_recovery_snapshot, verify_runner_recovery_snapshot,
+                            restore_runner_recovery_snapshot)

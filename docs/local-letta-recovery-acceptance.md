@@ -215,3 +215,24 @@ backend phase successfully; the focused retirement suite now passes nine tests.
 The backend release is unchanged. No other demonstrated first-wake blocker was
 found. An interrupted retirement still requires manual reconciliation: its
 archive/checkpoint guards intentionally refuse a blind retry after partial work.
+
+
+## 2026-10-18 provider rejection and restart recovery
+
+Combined candidate `candidate-provider-backoff-verified` passed all four acceptance
+stages against the exported deployed controller: backend 56, controller 546
+(2 skipped), scripts 173, and pristine-runtime protocol 33 (16 skipped).
+Candidate SHA: `926110e799c320d853a130888feca3daa92714fb8cddad7bed1a28b1d6c447c0`.
+Backend manifest SHA: `6af14a32cbdee070f9d30cd0be299af2549c28bf216f4d0d8b54f2c391570322`.
+
+Evidence is in
+`.superpowers/sdd/2026-10-18-local-letta-durable-recovery/candidate-provider-backoff-verified/acceptance.json`
+and its four `*-acceptance.txt` logs. The explicit locked-restart regression
+reproduced the prior permanent `state_corrupt` misclassification; after the fix,
+release of the lock permits completion with one tool execution and no retained
+new reservation. The fixture models successive production worker passes.
+Unknown provider attempts still remain held.
+
+See [deployment instructions](provider-rate-limit-recovery.md). Passing these
+checks does not establish a successful live turn; deployment and owner wake
+remain pending.

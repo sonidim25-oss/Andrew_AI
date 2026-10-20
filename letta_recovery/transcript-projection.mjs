@@ -13,7 +13,7 @@ export function projectionOperations(snapshot,readPayload){
   add('provider:'+step.effect_id,compaction?'compaction':'provider',value);
   for(const tool of snapshot.tools.filter(tool=>tool.provider_id===step.effect_id&&['confirmed','cancelled'].includes(tool.state)))
    add('tool:'+tool.effect_id,'tool',tool.state==='cancelled'
-    ?{call_id:tool.call_id,name:tool.name,cancelled:true,result:{status:'cancelled',reason:'lifecycle_stop',executed:false}}
+    ?{call_id:tool.call_id,name:tool.name,cancelled:true,result:{status:'cancelled',reason:snapshot.terminal?.stop_reason==='owner_input_pending'?'owner_input_pending':'lifecycle_stop',executed:false}}
     :{call_id:tool.call_id,name:tool.name,result:read(tool.result_ref)});
  }
  return operations;

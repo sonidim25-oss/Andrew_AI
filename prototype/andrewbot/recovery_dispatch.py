@@ -3,10 +3,20 @@ from .recovery_records import RecoveryRecords,digest
 
 
 class RecoveryDispatch:
-    def __init__(self,store):self.store=store;self.records=RecoveryRecords(store)
+    def __init__(self,store,runner_adapter=None):self.store=store;self.records=RecoveryRecords(store);self.runner_adapter=runner_adapter
     def authorize(self,binding,claim,effect,scope_token):return self.records.admit_effect(binding,claim,effect,scope_token)
     def result(self,admission_id):return self.records.effect_result(admission_id)
     def run_tool(self,metadata,name,arguments,callback):
+        from .runner_protocol import TOOLS
+        with self.store._lock:
+            mapped=self.store.connection.execute('SELECT 1 FROM runner_operations WHERE admission_id=?',(metadata['admission_id'],)).fetchone()
+            origin=self.store.connection.execute('SELECT origin FROM recovery_attempts WHERE admission_id=?',(metadata['claim']['admission_id'],)).fetchone()
+        if (name in TOOLS and origin is not None and origin['origin']=='autonomous'
+                and self.store.get_state('runner_receipt_store_id','') and self.runner_adapter is None):
+            raise ValueError('Recovery unsupported_contract')
+        if mapped or (name in TOOLS and self.runner_adapter is not None and origin is not None and origin['origin']=='autonomous'):
+            if self.runner_adapter is None:raise ValueError('Recovery unsupported_contract')
+            return self.runner_adapter.execute(metadata,name,arguments)
         proof=self.records.effect_result(metadata['admission_id'])
         if proof['state']=='confirmed':
             with self.store._lock:self.records._validate_dispatch(metadata,{'name':name,'arguments':arguments},{'tool'})

@@ -34,7 +34,7 @@ export async function handleRawFrame(data,{runtime,socket,connectionId,sdk}){
   const result=await service.handleRecoveryCommand(command);
   socket.send(JSON.stringify({type:command.type+'_response',request_id:command.request_id,success:true,...result}));
  }catch(error){
-  const category=error.message==='stale revision'?'revision_conflict':['binding_mismatch','authority_lost','legacy_unproven','owner_blocked','configuration_changed','projection_conflict','storage_limit','unsupported_contract','restore_required','state_corrupt','provider_uncertain','tool_uncertain'].includes(error.message)?error.message:'recovery_held';
+  const category=error.message==='stale revision'?'revision_conflict':['authority owned','authority unavailable','authority lost'].includes(error.message)?'authority_lost':['binding_mismatch','authority_lost','legacy_unproven','owner_blocked','configuration_changed','projection_conflict','storage_limit','unsupported_contract','restore_required','state_corrupt','provider_uncertain','tool_uncertain'].includes(error.message)?error.message:'recovery_held';
   socket.send(JSON.stringify({type:command.type+'_response',request_id:command.request_id,success:false,error_category:category}));
  }
  return true;

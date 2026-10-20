@@ -1,10 +1,9 @@
 {
   "appserver.py": {
     "original": "afbf8ab950d77291f5566c481bb04b915c0dfb47ec56bb427406d004e31f5b5a",
-    "tested": "e82dee7832cc1cdb9abb13efc4a994fa13ef44ad2f03c045248e0c14214a4c1a",
     "reviewed": {
-      "afbf8ab950d77291f5566c481bb04b915c0dfb47ec56bb427406d004e31f5b5a": [
-        "f732cfcb669c2776d8b33344749011a3e928ad50"
+      "10c935b94abf83d3f674a75c788b0cdc304d24fbeb0cd8577624ff23e659ab73": [
+        "pre-local-recovery-source"
       ],
       "617099b713c9a7f4055d5e4dcbd51c2f36ff09d027bc0a9bfcf4f16c926d376f": [
         "34fca841b8ba0db29bf2126464723f8d5af16380",
@@ -13,8 +12,11 @@
         "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
         "927d9e399a0cbab106e820075838bad54b30d73b"
       ],
-      "bbac174d1b5134de9b76947e6ae2cb65efd24cc163463f785cc738ff156b4a8e": [
-        "locally-tested-incident-recovery-2026-10-16"
+      "645945e17844595b6eec01b3badd5c4a91674ddaf5a0da3604bf361939b87956": [
+        "fc0950c-installed-baseline"
+      ],
+      "64d25b20b4f0232e8f481801ffea66dd440e9ff7f382b10bef295deb2d25a9ba": [
+        "81ee6be-installed-media"
       ],
       "76b1e9f07d5d24ab6b151ddc1c19868fd173e5c8df004a11b1ebd847a543c976": [
         "c6c09cb0e383c48908ee082ddd42a5514be78f19"
@@ -22,19 +24,17 @@
       "775defb3023ec659ccb98879d0563b2728f0e3fee7676ceb76e51e725c699de9": [
         "25b1ffc-installed-P0"
       ],
-      "645945e17844595b6eec01b3badd5c4a91674ddaf5a0da3604bf361939b87956": [
-        "fc0950c-installed-baseline"
-      ],
-      "64d25b20b4f0232e8f481801ffea66dd440e9ff7f382b10bef295deb2d25a9ba": [
-        "81ee6be-installed-media"
-      ],
       "956cf8324fc063a95457952c88a9dae4aa323bbaabf92355063ab17740971847": [
         "f43f9e8aa804c549ee2fe8225f133987cdce5d56"
       ],
-      "10c935b94abf83d3f674a75c788b0cdc304d24fbeb0cd8577624ff23e659ab73": [
-        "pre-local-recovery-source"
+      "afbf8ab950d77291f5566c481bb04b915c0dfb47ec56bb427406d004e31f5b5a": [
+        "f732cfcb669c2776d8b33344749011a3e928ad50"
+      ],
+      "bbac174d1b5134de9b76947e6ae2cb65efd24cc163463f785cc738ff156b4a8e": [
+        "locally-tested-incident-recovery-2026-10-16"
       ]
-    }
+    },
+    "tested": "628daeeaf575719783ec5dcd8984507df1434115495561a6be65e78cbf8db0a1"
   },
   "browser_history.py": {
     "original": "a6640c5533e6f84992bb5f68fe74d44d80a57f25a5a5c43bb4ee068b74a60fbc",
@@ -48,87 +48,102 @@
     },
     "tested": "d08b88c47117907370d521d3593a125c9f0d80e84f38238b9351e423bf100835"
   },
+  "configuration.py": {
+    "original": "c0265f879f8b7ff662b40eb2f0405fa80080b8f7a6c7581c716173e290f072b7",
+    "tested": "96da496d7f2d0a3ebe7cec5bdc821d1f03e0bcf3d6912d0bcd0ed4a198ddeea4"
+  },
   "controller.py": {
     "original": "5981f21f7de608c5b443eb7b60e7656e22134a318928456f69458f7c9a5b518a",
-    "tested": "98d71e66615db4cb970218d4f24faae8ac6e0b9e62b2f06e44266433d9c168ee",
     "reviewed": {
+      "4ee67591b306c56fd5070bf6403702e0b284f0ecdfd536074d3e09f7d0bee2ac": [
+        "25b1ffc-installed-P0"
+      ],
       "5981f21f7de608c5b443eb7b60e7656e22134a318928456f69458f7c9a5b518a": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
       ],
-      "af5abc3c5bab567d17de4762198a69c5f9c0cd9188dd1930c5098c683bb36b62": [
-        "34fca841b8ba0db29bf2126464723f8d5af16380"
+      "6752a93923b405cb4cdc794e1d0f8e2ec9bfef30cf1a9bb63b7e1ac9472aaa6d": [
+        "d5f1ac7a571235c0558d7a2e83c2119b448e95f3"
+      ],
+      "6c17f2c3281004f27e5cb7fcd0bef65647dff5029a24a498a24caf68ea9bdbb5": [
+        "70e06b6b73c9d42eaa79e0f6d4f9a283e2eaf27c"
+      ],
+      "6cf9063287f58bbb5e26dea8aeb4ecaa7dd12b51e709602cd89b6e44f52121c4": [
+        "927d9e399a0cbab106e820075838bad54b30d73b"
       ],
       "8452d73f34f7f9af77d5cbc91f3eab4056055d6dea8505e2d06aa85b602c9341": [
         "3acf8c31312207ab353836e7553836ffcbd7426d",
         "c4fd0621f95751237ecaad365c308f91e1206a55"
       ],
-      "6752a93923b405cb4cdc794e1d0f8e2ec9bfef30cf1a9bb63b7e1ac9472aaa6d": [
-        "d5f1ac7a571235c0558d7a2e83c2119b448e95f3"
+      "8f75ceef7fa3666c3c426b9815a183bbccf3d744d56c0f02a1b60d2ee364699c": [
+        "81ee6be-installed-media"
       ],
-      "6cf9063287f58bbb5e26dea8aeb4ecaa7dd12b51e709602cd89b6e44f52121c4": [
-        "927d9e399a0cbab106e820075838bad54b30d73b"
-      ],
-      "ba3d09096d6b1394f33237e3f7a216493aa696df9855b55083bcef786c6fef94": [
-        "c6c09cb0e383c48908ee082ddd42a5514be78f19"
+      "98d71e66615db4cb970218d4f24faae8ac6e0b9e62b2f06e44266433d9c168ee": [
+        "d22b891-pre-provider-backoff"
       ],
       "ab15adfc231e7bd44b1417bd38e62d1b209ea9a7cce8fe48c075afbfafee715c": [
         "previous-reviewed-manifest"
       ],
-      "4ee67591b306c56fd5070bf6403702e0b284f0ecdfd536074d3e09f7d0bee2ac": [
-        "25b1ffc-installed-P0"
+      "af5abc3c5bab567d17de4762198a69c5f9c0cd9188dd1930c5098c683bb36b62": [
+        "34fca841b8ba0db29bf2126464723f8d5af16380"
+      ],
+      "ba3d09096d6b1394f33237e3f7a216493aa696df9855b55083bcef786c6fef94": [
+        "c6c09cb0e383c48908ee082ddd42a5514be78f19"
       ],
       "c6103fa236e862f265bb7dfd61d0aac83002840440abc373404f39fdd4fa50c3": [
         "fc0950c-installed-baseline"
       ],
-      "8f75ceef7fa3666c3c426b9815a183bbccf3d744d56c0f02a1b60d2ee364699c": [
-        "81ee6be-installed-media"
+      "e2141811807bb391fba9d590450273f1469e03bc111aa6482ce98b3a3a5ceb4a": [
+        "pre-local-recovery-source"
       ],
       "ff4e0fd7c1cf53da5e9d7b5c13563df3dd3e3fc56aaa9999e102e5cd5c5c3f07": [
         "6d31d27b3fe9f9985b6bbad80cb32d359e309688"
-      ],
-      "6c17f2c3281004f27e5cb7fcd0bef65647dff5029a24a498a24caf68ea9bdbb5": [
-        "70e06b6b73c9d42eaa79e0f6d4f9a283e2eaf27c"
-      ],
-      "e2141811807bb391fba9d590450273f1469e03bc111aa6482ce98b3a3a5ceb4a": [
-        "pre-local-recovery-source"
       ]
-    }
+    },
+    "tested": "639cb0c1d35fc82d9e0b138fb38e694abfcdb2a937a22c7a7d8959b0c9da2818"
   },
   "diary.py": {
     "original": "fa8d71bc5057859623098c1e650ef69d3fe4de7c2c644c7b4de9e36bf2cbcaf2",
-    "tested": "45ea42644a77cd6c0b5a4f581bdfbd219fcb544145d583a83824abea2f770bcd",
     "reviewed": {
+      "5db0cd5ee78b607cd12125be42214f545cc08a6af6a9a6f32bcc81d23fdcb369": [
+        "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
+        "927d9e399a0cbab106e820075838bad54b30d73b"
+      ],
+      "8d75146d0f059af29ae114145c3b1320e0b93a94ed6fc2d35ef15d9433af3b5f": [
+        "25b1ffc-installed-P0"
+      ],
+      "cab663bd72d290801b8889f79df3231f6889151d1fb2dd86af78fe5d59d942e0": [
+        "b5708ac"
+      ],
       "fa8d71bc5057859623098c1e650ef69d3fe4de7c2c644c7b4de9e36bf2cbcaf2": [
         "f732cfcb669c2776d8b33344749011a3e928ad50",
         "34fca841b8ba0db29bf2126464723f8d5af16380",
         "3acf8c31312207ab353836e7553836ffcbd7426d",
         "c4fd0621f95751237ecaad365c308f91e1206a55"
-      ],
-      "5db0cd5ee78b607cd12125be42214f545cc08a6af6a9a6f32bcc81d23fdcb369": [
-        "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
-        "927d9e399a0cbab106e820075838bad54b30d73b"
-      ],
-      "cab663bd72d290801b8889f79df3231f6889151d1fb2dd86af78fe5d59d942e0": [
-        "b5708ac"
-      ],
-      "8d75146d0f059af29ae114145c3b1320e0b93a94ed6fc2d35ef15d9433af3b5f": [
-        "25b1ffc-installed-P0"
       ]
-    }
+    },
+    "tested": "45ea42644a77cd6c0b5a4f581bdfbd219fcb544145d583a83824abea2f770bcd"
   },
   "dispatch.py": {
     "original": "c3b1b1cafc3629cdba7c4badeb8c7bb2158c8dd13536ecf84dd4c966276cd8ab",
-    "tested": "525c5eb9f79b8843035adc82bd6dcffb62f5b1f97e9ff704bcdbe71ea170394b",
     "reviewed": {
-      "c3b1b1cafc3629cdba7c4badeb8c7bb2158c8dd13536ecf84dd4c966276cd8ab": [
-        "f732cfcb669c2776d8b33344749011a3e928ad50"
+      "0fa4d75d40f983169d7d1da477a8e33528db499d13ca37618f773e3d868c7917": [
+        "c4fd0621f95751237ecaad365c308f91e1206a55"
       ],
       "b39373e0829d3a3425f72f160109e2dbf4996e14e8a9957a1e7d31319f2538ef": [
         "34fca841b8ba0db29bf2126464723f8d5af16380",
         "3acf8c31312207ab353836e7553836ffcbd7426d"
       ],
-      "0fa4d75d40f983169d7d1da477a8e33528db499d13ca37618f773e3d868c7917": [
-        "c4fd0621f95751237ecaad365c308f91e1206a55"
+      "c3b1b1cafc3629cdba7c4badeb8c7bb2158c8dd13536ecf84dd4c966276cd8ab": [
+        "f732cfcb669c2776d8b33344749011a3e928ad50"
+      ],
+      "d0a008f029f957b4e8131f5361d75a1a44ecb334ed0b96911a663c256ebb9d68": [
+        "fc0950c-installed-baseline"
+      ],
+      "ddc0e4881e1eba39fca3486972d29f4aef3abd97f5b07bd0497da2a4ec8dc4f4": [
+        "pre-local-recovery-source"
+      ],
+      "f0241ccb00958c4b19c5c48bc1f677614738e82e45890e68cf808122228a4a53": [
+        "25b1ffc-installed-P0"
       ],
       "f67b31fc163e647552493e063fbf377f800ef4ae21458102e9003bc2cb2025a4": [
         "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
@@ -136,24 +151,45 @@
       ],
       "ffec25f6f5f629f7287c46ce4359c44e0654f18ebe645a6790599b29b3ba9584": [
         "b5708ac"
+      ]
+    },
+    "tested": "c16dd1890108ea0558bc93d9220144e61876f1597a381b7ea9b12176d8ba012c"
+  },
+  "gateway.py": {
+    "original": "8b702d58d2359b963b42bc548d1549789996aeb8535d13fb3ffdcb6666200047",
+    "reviewed": {
+      "0025382d87e640f008ce737fa4961fea127e841268bbdee130ef907f68e35057": [
+        "d22b891-pre-provider-backoff"
       ],
-      "f0241ccb00958c4b19c5c48bc1f677614738e82e45890e68cf808122228a4a53": [
-        "25b1ffc-installed-P0"
+      "14b3a344d4d81374c2c63032cf9ee51ae8126581d10eb612306bc56c0bf5bfd3": [
+        "70e06b6b73c9d42eaa79e0f6d4f9a283e2eaf27c"
       ],
-      "d0a008f029f957b4e8131f5361d75a1a44ecb334ed0b96911a663c256ebb9d68": [
-        "fc0950c-installed-baseline"
+      "8b702d58d2359b963b42bc548d1549789996aeb8535d13fb3ffdcb6666200047": [
+        "f43f9e8aa804c549ee2fe8225f133987cdce5d56"
       ],
-      "ddc0e4881e1eba39fca3486972d29f4aef3abd97f5b07bd0497da2a4ec8dc4f4": [
+      "9088181c7b47480e942299a11ef724ae35660df3b4fbb434842ef7e99d93bd37": [
         "pre-local-recovery-source"
       ]
-    }
+    },
+    "tested": "20ae309db302e4a353fb0d42367777135edb963940887d5e36b78223c88d219a"
+  },
+  "latency.py": {
+    "original": null,
+    "reviewed": {
+      "1de09fcfc1d0c9accf047ac91129767b975f3ef134c390a8dddff7835b75cd19": [
+        "fc0950c-installed-baseline"
+      ]
+    },
+    "tested": "f7901bd84acb96fde0980150a2a16a912254f1f88c0cc9f451d058f48f2ac226"
   },
   "main.py": {
     "original": "3d7d58c1c00cc21f6841525d9db7d8b0554b0239b311908ea5c150cbbaa83527",
-    "tested": "ebd80c58fcafc1aed80c73c9f07b033a9df3cbdf604caff86069e0e07eb9f5c0",
     "reviewed": {
-      "3d7d58c1c00cc21f6841525d9db7d8b0554b0239b311908ea5c150cbbaa83527": [
-        "f732cfcb669c2776d8b33344749011a3e928ad50"
+      "041d5da80b234677c05cce5717997c5a72f78079a096786b4bfdd1e3ba8996fe": [
+        "b5708ac"
+      ],
+      "098b9dd20d8f19a40a3d8bc5db9b272f28e2848eec753226d71a07b971904076": [
+        "fc0950c-installed-baseline"
       ],
       "0cea31ed6597114fe56ec3d8f350d4a208eb3384e49a6984fd00211c866b2fba": [
         "34fca841b8ba0db29bf2126464723f8d5af16380",
@@ -165,32 +201,155 @@
       "32690b2f3f68f499144a37ca830c4c3895e9a1d49779a8ce1bfedd2dc0c2653f": [
         "locally-tested-incident-recovery-2026-10-16"
       ],
+      "3d7d58c1c00cc21f6841525d9db7d8b0554b0239b311908ea5c150cbbaa83527": [
+        "f732cfcb669c2776d8b33344749011a3e928ad50"
+      ],
+      "8c981f32d8d3ec9cd1343a8fe0b8c43fdcf84c94e605ef54b22f5a371ab46223": [
+        "pre-local-recovery-source"
+      ],
       "cf849c0d48da815efa9c7e18640317da60889c9d645f9cf0e76fd80c180262f8": [
         "c6c09cb0e383c48908ee082ddd42a5514be78f19"
-      ],
-      "041d5da80b234677c05cce5717997c5a72f78079a096786b4bfdd1e3ba8996fe": [
-        "b5708ac"
-      ],
-      "de847fa5bb0cfb8158a4f1ca745e5c67856385214d8bb818e9526a76f98ee655": [
-        "25b1ffc-installed-P0"
-      ],
-      "098b9dd20d8f19a40a3d8bc5db9b272f28e2848eec753226d71a07b971904076": [
-        "fc0950c-installed-baseline"
       ],
       "dcba98d6165e998c0773816a0ff88811c3f65b0964579614d673b45d19b05212": [
         "70e06b6b73c9d42eaa79e0f6d4f9a283e2eaf27c"
       ],
-      "8c981f32d8d3ec9cd1343a8fe0b8c43fdcf84c94e605ef54b22f5a371ab46223": [
+      "de847fa5bb0cfb8158a4f1ca745e5c67856385214d8bb818e9526a76f98ee655": [
+        "25b1ffc-installed-P0"
+      ]
+    },
+    "tested": "66948b169ff443c63cde8da6b49368523d9af25f4a0727973c1b016950571c4a"
+  },
+  "media.py": {
+    "original": null,
+    "reviewed": {
+      "02b16e529c1d380adc0259c00cb0582520f77b3a8e016c5c0b05a3ff4a45aa47": [
+        "previous-tested-before-image-enablement"
+      ],
+      "e67a9ce2f9fdcf5e11ea9e5bbda143fb099d873e2f262001fe165315ac86f94c": [
+        "70e06b6b73c9d42eaa79e0f6d4f9a283e2eaf27c"
+      ]
+    },
+    "tested": "af55dbd3ccc3297b4eeeafa2cc5be6b34142d5da6c187b8ec1d934b87cd330a9"
+  },
+  "media_provider.py": {
+    "original": null,
+    "reviewed": {},
+    "tested": "ea77a338e9a5649311e0c913b5c5d88b787a9792da517871cb12e9852e83a9c6"
+  },
+  "memory.py": {
+    "original": "12a5e1e3cc7dfc7a21f37917c9d105f2899061fe6a2a9da289d09a449ca23a71",
+    "reviewed": {
+      "12a5e1e3cc7dfc7a21f37917c9d105f2899061fe6a2a9da289d09a449ca23a71": [
+        "c6c09cb0e383c48908ee082ddd42a5514be78f19"
+      ]
+    },
+    "tested": "6487ad471523f8c064e0e07c500a90b1c3592886e454cce01c140bcc0cd00935"
+  },
+  "memory_backup.py": {
+    "original": "4c75ac36f5c90bc8df0ece579e9c518256379ade000d5e917530b4e229c1e0c2",
+    "reviewed": {
+      "06434e6bee39269884835a5ab1f801454cfae6a641e35b1305781ec5b60cdee9": [
+        "pre-local-recovery-source"
+      ],
+      "2ec2dca8cb389fce81d51ddddbafeb95edacdb7c8c4ada05d08ae0986eecf826": [
+        "d22b891-pre-provider-backoff"
+      ],
+      "4c75ac36f5c90bc8df0ece579e9c518256379ade000d5e917530b4e229c1e0c2": [
+        "70e06b6b73c9d42eaa79e0f6d4f9a283e2eaf27c"
+      ],
+      "6dd96ac231fafa1bc6b1e70e8b0860660335f29a5f21c9f1a15b86244bb3c28e": [
+        "70e06b6b73c9d42eaa79e0f6d4f9a283e2eaf27c"
+      ],
+      "89640c86c5d6c82370741ad1a6ed3b2c0890fb1c001dd65890f29be53b7c107e": [
         "pre-local-recovery-source"
       ]
-    }
+    },
+    "tested": "ee406c07640048940ce8e289e93fb77cc25809d9de7c7a17c86a2e7adfd2fea7"
+  },
+  "memory_backup_cli.py": {
+    "original": "73f2b27a205373f82e2eac0c62101f1a98c90ea2e1d08be2ceca4bf23329f80f",
+    "reviewed": {
+      "73f2b27a205373f82e2eac0c62101f1a98c90ea2e1d08be2ceca4bf23329f80f": [
+        "70e06b6b73c9d42eaa79e0f6d4f9a283e2eaf27c"
+      ]
+    },
+    "tested": "143f608dbaaa8fb1b1499bcabf4d1faf819b62208f05f1da85d475f050852419"
+  },
+  "model.py": {
+    "original": "33e34307ad82c12c0f1709b623472c50f2f11871684b74d030868f239ecc2453",
+    "reviewed": {
+      "33e34307ad82c12c0f1709b623472c50f2f11871684b74d030868f239ecc2453": [
+        "d1660fa-baseline"
+      ],
+      "372a77e2b83109f19d901681d839509257c78b02af6c656f6d18bf6b520af51d": [
+        "d22b891-pre-provider-backoff"
+      ]
+    },
+    "tested": "6317727ca6a3ed3e92841f11104f7a06af73f8a2de9c6f8c84aa005a946c4160"
+  },
+  "process_limits.py": {
+    "original": "882f32d92829068265f22c3eeef94efec1da1e06fbbc3f7f6cfe1eff8b32b135",
+    "reviewed": {
+      "882f32d92829068265f22c3eeef94efec1da1e06fbbc3f7f6cfe1eff8b32b135": [
+        "d1660fa-baseline"
+      ]
+    },
+    "tested": "4b87317f24984288410be7e0203a5e45d1ad4b5e7c14e4a6af09e75cb1b354c7"
+  },
+  "recovery.py": {
+    "original": null,
+    "reviewed": {
+      "212730fc9bb5bfb67d723123129b25eda60173d31c23e68ed4719ada87c19b2c": [
+        "d22b891-pre-provider-backoff"
+      ],
+      "3e0763c61ca064e745c183ea467e43d6d950ad3c78071187d5425a15e8222ca0": [
+        "pre-local-recovery-source"
+      ]
+    },
+    "tested": "ff899c8a9d2e9543dcec634c7672bb2fca5d634d94429c65d8f4c5a1028b2333"
+  },
+  "recovery_dispatch.py": {
+    "original": null,
+    "tested": "cd59944b86d260dc524f9d134bc208fd8dab7beacf034aae92dc608db004f3c3"
+  },
+  "recovery_records.py": {
+    "original": null,
+    "reviewed": {
+      "34200cb25fce373e233a1d90b04f16c77f7db62e19ffef145d3dd1598334fe6c": [
+        "d22b891-pre-provider-backoff"
+      ],
+      "93f9a1bbf5f67448704897a32adaf271c130646901386856059f96de87394122": [
+        "pre-local-recovery-source"
+      ]
+    },
+    "tested": "d05a72a10d3be606a9377705c59895a9d4ec31718dc20dc527e615f811320663"
+  },
+  "runner_client.py": {
+    "original": "c49bf7290f85b816b9fd057dde7372beaa8f128b77e5f7ce372eb929fa0d71f6",
+    "reviewed": {
+      "c49bf7290f85b816b9fd057dde7372beaa8f128b77e5f7ce372eb929fa0d71f6": [
+        "d1660fa-baseline"
+      ]
+    },
+    "tested": "eebc39188040429936e064c3005b44f53aabe1c09c16d158e9ec9927e07c7a48"
+  },
+  "runner_service.py": {
+    "original": "9570ad4dd2ce5617d13055076508af66dd3f88df00bf61bbf8f515eebccaee2f",
+    "reviewed": {
+      "9570ad4dd2ce5617d13055076508af66dd3f88df00bf61bbf8f515eebccaee2f": [
+        "55026819e5eaa11876694dd2e0253a3b10b50a13"
+      ],
+      "db4c4ed2e3c5647278a514a7942b921a33b2083b4e7e80cc971cbd2a486b72fb": [
+        "25b1ffc-installed-P0"
+      ]
+    },
+    "tested": "2c3c7dc983db37622efa64cb105ffe6e17628888bb0298f77ca9097dafe184a0"
   },
   "sessions.py": {
     "original": "e9801014987431ec9149c38019cab0499f93ec8b377ab79a639cfd805ca819dc",
-    "tested": "c57312d5b9a7c3b3893fd17ae9b6ba6fec835a5d3dba51d7778770d63f13f3df",
     "reviewed": {
-      "e9801014987431ec9149c38019cab0499f93ec8b377ab79a639cfd805ca819dc": [
-        "f732cfcb669c2776d8b33344749011a3e928ad50"
+      "0cea0bd8026023587aae974b46f0591133e0fc2df015ae0691c1cc1470e6aae6": [
+        "previous-reviewed-manifest"
       ],
       "3997c176a5c8c6ed59b2c8c6b7b4959017c4c39cca092bbf2dd680e094a3ad04": [
         "34fca841b8ba0db29bf2126464723f8d5af16380",
@@ -199,46 +358,51 @@
         "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
         "927d9e399a0cbab106e820075838bad54b30d73b"
       ],
-      "a0dcd5be2316cbc682bc2fc3cc5b835c52b61eea1b95db0999dd593d11b2fde4": [
-        "c6c09cb0e383c48908ee082ddd42a5514be78f19"
-      ],
-      "0cea0bd8026023587aae974b46f0591133e0fc2df015ae0691c1cc1470e6aae6": [
-        "previous-reviewed-manifest"
+      "9fc054852294e1bf1506811f17960d5ea2647ea38f39c9682d45d627cd65df43": [
+        "pre-local-recovery-source"
       ],
       "a0235ba3379dbcf015c7dc78d42da64dd350c5dad4e628f1484ebe7192432b91": [
         "25b1ffc-installed-P0"
       ],
-      "9fc054852294e1bf1506811f17960d5ea2647ea38f39c9682d45d627cd65df43": [
-        "pre-local-recovery-source"
+      "a0dcd5be2316cbc682bc2fc3cc5b835c52b61eea1b95db0999dd593d11b2fde4": [
+        "c6c09cb0e383c48908ee082ddd42a5514be78f19"
+      ],
+      "e9801014987431ec9149c38019cab0499f93ec8b377ab79a639cfd805ca819dc": [
+        "f732cfcb669c2776d8b33344749011a3e928ad50"
       ]
-    }
+    },
+    "tested": "118a8a8fa5615e41a00d60e68728a73a9a1fd4871607bf35dff098c1fb2cf500"
+  },
+  "skills.py": {
+    "original": null,
+    "reviewed": {},
+    "tested": "956d219644893e5aa19597bd8c61f10f5e152368254e45a7b3c068aa1cf2b2ea"
   },
   "store.py": {
     "original": "10548624b22ea55f2c67a1ee3a6eddea078660aba68a747048e051ca01257afd",
-    "tested": "9cff57fec7d4a7d18ca297ec14bcbec1b1ea2038fef7891e0a874075e5b653de",
     "reviewed": {
+      "0ad53894ecfdd82f10e702f703cb83f180dec00f8649df40404c7543902de731": [
+        "b5708ac"
+      ],
       "10548624b22ea55f2c67a1ee3a6eddea078660aba68a747048e051ca01257afd": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
-      ],
-      "5b21b595b929f518c08a5d8791e07c98c96bdaf9e3045afe210e0965888192fa": [
-        "34fca841b8ba0db29bf2126464723f8d5af16380"
       ],
       "2b18f3a55953e1dcd3d843af606b2fff10b25d7138d751e3d35a053deeff6dc3": [
         "3acf8c31312207ab353836e7553836ffcbd7426d",
         "c4fd0621f95751237ecaad365c308f91e1206a55"
       ],
-      "494e6f0615bfd967abbe838b5320e1beb5abda663a3bdb1720a4c6fc7e2237fa": [
-        "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
-        "927d9e399a0cbab106e820075838bad54b30d73b"
+      "44c4f8d9ace93f44fc223d2c8dc8cf83cd546961fbe92f23893efb926a90f1d6": [
+        "previous-reviewed-manifest"
       ],
       "464e42fe997b241b03398a5da9e3fc1c46f5c7da7c4d05dc016852528287a2c2": [
         "c6c09cb0e383c48908ee082ddd42a5514be78f19"
       ],
-      "44c4f8d9ace93f44fc223d2c8dc8cf83cd546961fbe92f23893efb926a90f1d6": [
-        "previous-reviewed-manifest"
+      "494e6f0615bfd967abbe838b5320e1beb5abda663a3bdb1720a4c6fc7e2237fa": [
+        "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
+        "927d9e399a0cbab106e820075838bad54b30d73b"
       ],
-      "0ad53894ecfdd82f10e702f703cb83f180dec00f8649df40404c7543902de731": [
-        "b5708ac"
+      "5b21b595b929f518c08a5d8791e07c98c96bdaf9e3045afe210e0965888192fa": [
+        "34fca841b8ba0db29bf2126464723f8d5af16380"
       ],
       "5e22e4c8dbd15c5915b29f220705f58a180e667c64a620a4e00f1f588d2097d2": [
         "25b1ffc-installed-P0"
@@ -252,47 +416,38 @@
       "f0c31e37d34cb4ece3e6bb2a27231696ee8f2dbdfd525fb4e720c89a2ad06279": [
         "pre-local-recovery-source"
       ]
-    }
+    },
+    "tested": "95c7ea87eac3efcb516882ad5d2fdbb19db78ed573eb26244a8c8c5eeb0f9be7"
   },
   "telegram.py": {
     "original": "f4b356b42cff1ae8ef69fdf9c25c3f910110dd5dcc254d35643f6558cf16e0d0",
-    "tested": "fde914b03be15f001e0b4ee3024e7909baad58772f7bbe812e1dd98c2c190990",
     "reviewed": {
-      "f4b356b42cff1ae8ef69fdf9c25c3f910110dd5dcc254d35643f6558cf16e0d0": [
-        "f732cfcb669c2776d8b33344749011a3e928ad50"
+      "1d76eaacf856b55915369ed0998ca339e93abce83a923d4d4d69dd3b79553867": [
+        "25b1ffc-installed-P0"
+      ],
+      "421f12321c650567488b2e929bad59a2bbbf76f7ef26ea494b2666b507079a45": [
+        "fc0950c-installed-baseline"
+      ],
+      "48dc50395d6ff046f48ceb62663ceff7c0fadc40385397ac46cf37142ab93f73": [
+        "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
+        "927d9e399a0cbab106e820075838bad54b30d73b"
       ],
       "a2887fe87994be163330d96bd36b26c709aaedb7dad793d0305d4711592f0558": [
         "34fca841b8ba0db29bf2126464723f8d5af16380",
         "3acf8c31312207ab353836e7553836ffcbd7426d",
         "c4fd0621f95751237ecaad365c308f91e1206a55"
       ],
-      "48dc50395d6ff046f48ceb62663ceff7c0fadc40385397ac46cf37142ab93f73": [
-        "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
-        "927d9e399a0cbab106e820075838bad54b30d73b"
-      ],
       "c6a4e6574d93a64d91cdb28c707ab873b7b85970e5783495ad65cd37ae46ff68": [
         "b5708ac"
       ],
-      "1d76eaacf856b55915369ed0998ca339e93abce83a923d4d4d69dd3b79553867": [
-        "25b1ffc-installed-P0"
-      ],
-      "421f12321c650567488b2e929bad59a2bbbf76f7ef26ea494b2666b507079a45": [
-        "fc0950c-installed-baseline"
+      "f4b356b42cff1ae8ef69fdf9c25c3f910110dd5dcc254d35643f6558cf16e0d0": [
+        "f732cfcb669c2776d8b33344749011a3e928ad50"
       ]
-    }
-  },
-  "memory.py": {
-    "original": "12a5e1e3cc7dfc7a21f37917c9d105f2899061fe6a2a9da289d09a449ca23a71",
-    "tested": "6487ad471523f8c064e0e07c500a90b1c3592886e454cce01c140bcc0cd00935",
-    "reviewed": {
-      "12a5e1e3cc7dfc7a21f37917c9d105f2899061fe6a2a9da289d09a449ca23a71": [
-        "c6c09cb0e383c48908ee082ddd42a5514be78f19"
-      ]
-    }
+    },
+    "tested": "fde914b03be15f001e0b4ee3024e7909baad58772f7bbe812e1dd98c2c190990"
   },
   "telegram_menu.py": {
     "original": "0df485e19b19a304dc26e47a7c585c6a741081be413794da1ca42c3900dbbe79",
-    "tested": "98fb056518e788060842c4310250bb513fdd0fe043a11b2415e317d131112019",
     "reviewed": {
       "0df485e19b19a304dc26e47a7c585c6a741081be413794da1ca42c3900dbbe79": [
         "c6c09cb0e383c48908ee082ddd42a5514be78f19"
@@ -300,153 +455,16 @@
       "dbb4e13a9ce6fdadf25af10960baeab518af8c40fb85dfbaad971e4a4ef4b4eb": [
         "25b1ffc-installed-P0"
       ]
-    }
-  },
-  "runner_service.py": {
-    "original": "9570ad4dd2ce5617d13055076508af66dd3f88df00bf61bbf8f515eebccaee2f",
-    "tested": "64bcc2fb3ca750edffad235e4b7b8ec57f25ffc42c1c45f5d2fa7f74429f7f32",
-    "reviewed": {
-      "9570ad4dd2ce5617d13055076508af66dd3f88df00bf61bbf8f515eebccaee2f": [
-        "55026819e5eaa11876694dd2e0253a3b10b50a13"
-      ],
-      "db4c4ed2e3c5647278a514a7942b921a33b2083b4e7e80cc971cbd2a486b72fb": [
-        "25b1ffc-installed-P0"
-      ]
-    }
-  },
-  "configuration.py": {
-    "original": "c0265f879f8b7ff662b40eb2f0405fa80080b8f7a6c7581c716173e290f072b7",
-    "tested": "96da496d7f2d0a3ebe7cec5bdc821d1f03e0bcf3d6912d0bcd0ed4a198ddeea4"
-  },
-  "latency.py": {
-    "original": null,
-    "tested": "f7901bd84acb96fde0980150a2a16a912254f1f88c0cc9f451d058f48f2ac226",
-    "reviewed": {
-      "1de09fcfc1d0c9accf047ac91129767b975f3ef134c390a8dddff7835b75cd19": [
-        "fc0950c-installed-baseline"
-      ]
-    }
-  },
-  "model.py": {
-    "original": "33e34307ad82c12c0f1709b623472c50f2f11871684b74d030868f239ecc2453",
-    "tested": "372a77e2b83109f19d901681d839509257c78b02af6c656f6d18bf6b520af51d",
-    "reviewed": {
-      "33e34307ad82c12c0f1709b623472c50f2f11871684b74d030868f239ecc2453": [
-        "d1660fa-baseline"
-      ]
-    }
-  },
-  "runner_client.py": {
-    "original": "c49bf7290f85b816b9fd057dde7372beaa8f128b77e5f7ce372eb929fa0d71f6",
-    "tested": "48871beb4c9484606a29d4a7f406d82af29150452915a6c7da491fa1b0a553a8",
-    "reviewed": {
-      "c49bf7290f85b816b9fd057dde7372beaa8f128b77e5f7ce372eb929fa0d71f6": [
-        "d1660fa-baseline"
-      ]
-    }
-  },
-  "process_limits.py": {
-    "original": "882f32d92829068265f22c3eeef94efec1da1e06fbbc3f7f6cfe1eff8b32b135",
-    "tested": "4b87317f24984288410be7e0203a5e45d1ad4b5e7c14e4a6af09e75cb1b354c7",
-    "reviewed": {
-      "882f32d92829068265f22c3eeef94efec1da1e06fbbc3f7f6cfe1eff8b32b135": [
-        "d1660fa-baseline"
-      ]
-    }
+    },
+    "tested": "8180f3c40de9e74ef7193c0e577809c80ef22ab34a2feca85b8e85f29f0a30f3"
   },
   "workers.py": {
     "original": null,
-    "tested": "8458f39035ef12b5e4f8e817fb3abc9c552e54077b654b81010b9efb2ba8f47e",
     "reviewed": {
       "78408c0dc6401a3f4712033b95596f33a1ecdac0b4ac761f9961b4b19779203d": [
         "fc0950c-installed-baseline"
       ]
-    }
-  },
-  "media.py": {
-    "original": null,
-    "reviewed": {
-      "02b16e529c1d380adc0259c00cb0582520f77b3a8e016c5c0b05a3ff4a45aa47": [
-        "previous-tested-before-image-enablement"
-      ],
-      "e67a9ce2f9fdcf5e11ea9e5bbda143fb099d873e2f262001fe165315ac86f94c": [
-        "70e06b6b73c9d42eaa79e0f6d4f9a283e2eaf27c"
-      ]
     },
-    "tested": "864c55654b82c61477dcefda1e2c32f9d896d089574be1992ba57b6a61753e9f"
-  },
-  "media_provider.py": {
-    "original": null,
-    "reviewed": {},
-    "tested": "ea77a338e9a5649311e0c913b5c5d88b787a9792da517871cb12e9852e83a9c6"
-  },
-  "skills.py": {
-    "original": null,
-    "reviewed": {},
-    "tested": "a8322265d44f747d929f27bb1634ca74987e344e09a1e3e92bd2b9893c5b0637"
-  },
-  "gateway.py": {
-    "original": "8b702d58d2359b963b42bc548d1549789996aeb8535d13fb3ffdcb6666200047",
-    "tested": "0025382d87e640f008ce737fa4961fea127e841268bbdee130ef907f68e35057",
-    "reviewed": {
-      "8b702d58d2359b963b42bc548d1549789996aeb8535d13fb3ffdcb6666200047": [
-        "f43f9e8aa804c549ee2fe8225f133987cdce5d56"
-      ],
-      "14b3a344d4d81374c2c63032cf9ee51ae8126581d10eb612306bc56c0bf5bfd3": [
-        "70e06b6b73c9d42eaa79e0f6d4f9a283e2eaf27c"
-      ],
-      "9088181c7b47480e942299a11ef724ae35660df3b4fbb434842ef7e99d93bd37": [
-        "pre-local-recovery-source"
-      ]
-    }
-  },
-  "memory_backup.py": {
-    "original": "4c75ac36f5c90bc8df0ece579e9c518256379ade000d5e917530b4e229c1e0c2",
-    "tested": "2ec2dca8cb389fce81d51ddddbafeb95edacdb7c8c4ada05d08ae0986eecf826",
-    "reviewed": {
-      "4c75ac36f5c90bc8df0ece579e9c518256379ade000d5e917530b4e229c1e0c2": [
-        "70e06b6b73c9d42eaa79e0f6d4f9a283e2eaf27c"
-      ],
-      "6dd96ac231fafa1bc6b1e70e8b0860660335f29a5f21c9f1a15b86244bb3c28e": [
-        "70e06b6b73c9d42eaa79e0f6d4f9a283e2eaf27c"
-      ],
-      "06434e6bee39269884835a5ab1f801454cfae6a641e35b1305781ec5b60cdee9": [
-        "pre-local-recovery-source"
-      ],
-      "89640c86c5d6c82370741ad1a6ed3b2c0890fb1c001dd65890f29be53b7c107e": [
-        "pre-local-recovery-source"
-      ]
-    }
-  },
-  "memory_backup_cli.py": {
-    "original": "73f2b27a205373f82e2eac0c62101f1a98c90ea2e1d08be2ceca4bf23329f80f",
-    "tested": "c44ba08aacd8febfa167986d934d6ed8a30f198e86cf66e91ea985fbdbb6f43a",
-    "reviewed": {
-      "73f2b27a205373f82e2eac0c62101f1a98c90ea2e1d08be2ceca4bf23329f80f": [
-        "70e06b6b73c9d42eaa79e0f6d4f9a283e2eaf27c"
-      ]
-    }
-  },
-  "recovery.py": {
-    "original": null,
-    "tested": "212730fc9bb5bfb67d723123129b25eda60173d31c23e68ed4719ada87c19b2c",
-    "reviewed": {
-      "3e0763c61ca064e745c183ea467e43d6d950ad3c78071187d5425a15e8222ca0": [
-        "pre-local-recovery-source"
-      ]
-    }
-  },
-  "recovery_dispatch.py": {
-    "original": null,
-    "tested": "1b30897318fd334136062a7fe99df67a5716db6f68c6a9735d73d498e7cf4e72"
-  },
-  "recovery_records.py": {
-    "original": null,
-    "tested": "34200cb25fce373e233a1d90b04f16c77f7db62e19ffef145d3dd1598334fe6c",
-    "reviewed": {
-      "93f9a1bbf5f67448704897a32adaf271c130646901386856059f96de87394122": [
-        "pre-local-recovery-source"
-      ]
-    }
+    "tested": "8458f39035ef12b5e4f8e817fb3abc9c552e54077b654b81010b9efb2ba8f47e"
   }
 }

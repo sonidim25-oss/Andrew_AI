@@ -215,6 +215,8 @@ def replace(path, data, gid, mode=0o640):
 
 
 def main():
+    if TARGET==Path('/opt/andrew/prototype/andrewbot') and Path('/etc/andrew/runner-receipt-adoption.json').exists():
+        raise SystemExit('Adopted runner stores require the coordinated runner installer')
     if os.geteuid() != 0:
         raise SystemExit('Run this installer with sudo in your server terminal.')
     manifest = json.loads((ROOT / 'scripts/p1-fix-manifest.json').read_text())

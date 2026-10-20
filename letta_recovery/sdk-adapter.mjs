@@ -1,4 +1,5 @@
 import {join} from 'node:path';
+import {request as httpRequest} from 'node:http';
 import {canonical,digest} from './contracts.mjs';
 import {assertNotRestored} from './adoption.mjs';
 import {atomicWrite,readJSON} from './payload-store.mjs';
@@ -6,7 +7,9 @@ import {withTranscriptBaseline} from './transcript-write.mjs';
 
 // Transport credentials never enter a checkpoint, projection or model payload.
 export class LocalSDKAdapter{
- constructor({backend,resolveModel,root,assertAdoptable}){this.assertAdoptable=assertAdoptable;this.backend=backend;this.resolveModel=resolveModel;this.root=root;this.scopes=new Map();}
+ constructor({backend,resolveModel,root,assertAdoptable,providerTimeoutMs=660000}){
+  if(!Number.isSafeInteger(providerTimeoutMs)||providerTimeoutMs<1||providerTimeoutMs>3600000)throw Error('configuration_changed');
+  this.providerTimeoutMs=providerTimeoutMs;this.assertAdoptable=assertAdoptable;this.backend=backend;this.resolveModel=resolveModel;this.root=root;this.scopes=new Map();}
  async connection(binding){
   const resolved=await this.resolveModel(binding);
   const url=new URL(resolved.model.baseUrl);
@@ -15,9 +18,30 @@ export class LocalSDKAdapter{
  }
  async request(binding,path,payload,headers={}){
   const connection=await this.connection(binding);
+  if(path==='/chat/completions')return this.providerRequest(connection,payload,headers);
   const response=await fetch(connection.url+path,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+connection.key,...headers},body:JSON.stringify(payload),signal:AbortSignal.timeout(120000),redirect:'error'});
   if(!response.ok)throw Error('owner_blocked');
   const text=await response.text();if(Buffer.byteLength(text)>16777216)throw Error('storage_limit');return JSON.parse(text);
+ }
+ async providerRequest(connection,payload,headers){
+  // node:http avoids fetch's independent header/body deadlines for long local
+  // provider calls. One explicit deadline covers the request and full body.
+  const url=new URL(connection.url+'/chat/completions');
+  if(url.protocol!=='http:'||!['127.0.0.1','[::1]'].includes(url.hostname)||url.username||url.password||url.search||url.hash)throw Error('configuration_changed');
+  const body=Buffer.from(JSON.stringify(payload));
+  return new Promise((resolve,reject)=>{
+   const request=httpRequest(url,{method:'POST',agent:false,headers:{'Content-Type':'application/json','Authorization':'Bearer '+connection.key,
+    ...headers,'Content-Length':body.length},signal:AbortSignal.timeout(this.providerTimeoutMs)},response=>{
+    if(response.statusCode<200||response.statusCode>=300){response.destroy();reject(Error('owner_blocked'));return;}
+    const chunks=[];let bytes=0;
+    response.on('data',chunk=>{
+     bytes+=chunk.length;if(bytes>16777216){response.destroy(Error('storage_limit'));return;}chunks.push(chunk);
+    });
+    response.on('error',reject);
+    response.on('end',()=>{try{resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));}catch(error){reject(error);}});
+   });
+   request.on('error',reject);request.end(body);
+  });
  }
  setScope(binding,scope){this.scopes.set(digest(binding),scope);}
  scope(binding){const scope=this.scopes.get(digest(binding));if(!scope)throw Error('authority_lost');return scope;}
@@ -25,6 +49,7 @@ export class LocalSDKAdapter{
  async settlement(binding,claim,terminal_id){return this.request(binding,'/recovery/settlement',{binding,claim,terminal_id,scope_token:this.scope(binding).scope_token});}
  async checkScope(binding,claim){return this.request(binding,'/recovery/check_scope',{binding,claim,scope_token:this.scope(binding).scope_token});}
  gate(){return {
+  ownerYield:async(binding,claim)=>this.request(binding,'/recovery/owner_yield',{binding,claim,scope_token:this.scope(binding).scope_token}),
   authorize:async(binding,claim,effect)=>{
    assertNotRestored(this.root);const scope=this.scope(binding),admission=await this.request(binding,'/recovery/authorize',{binding,claim,effect,scope_token:scope.scope_token});
    return {...admission,binding,claim,scope_token:scope.scope_token};

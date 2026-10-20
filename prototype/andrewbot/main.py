@@ -29,6 +29,7 @@ from .media import MediaService, MediaWorker, load_media_policy
 from .media_provider import OpenRouterMedia
 from .dispatch import ControllerDispatch
 from .latency import LatencyMetrics
+from .skills import SkillCatalog
 
 
 def close_controller_resources(dispatch, gateway_thread, history, store):
@@ -131,6 +132,12 @@ def run(validate_only=False):
         store.close()
         return 2 if validate_only else 0
     try:
+        SkillCatalog().validate()
+    except ValueError:
+        logging.error('Startup validation failed: trusted skill documents unavailable or changed')
+        store.close()
+        return 2
+    try:
         memory_backup_key = systemd_credential_bytes("andrew-memory-backup-key")
     except Exception as error:
         logging.error("Startup validation failed: memory backup credential (%s)", type(error).__name__)
@@ -183,6 +190,9 @@ def run(validate_only=False):
     )
     media = MediaService(store, root / "media-artifacts", owner_id, media_policy)
     agent.media_tools_enabled = media_policy.enabled
+    from .runner_adoption import startup_record, mount_controller
+    receipt_record = startup_record('controller')
+    runner = None
     tool_runtime = None
     if env_enabled("ANDREW_ISOLATED_RUNTIME_ENABLED", False):
         runner = RunnerClient(os.environ.get("ANDREW_RUNNER_SOCKET", "/run/andrew/runner.sock"))
@@ -215,6 +225,8 @@ def run(validate_only=False):
         recovery=RecoveryCoordinator(store,controller,enabled=True)
         agent.local_recovery=controller.local_recovery=recovery
         model_gateway.recovery_tool_handler=controller.execute_tool
+    if receipt_record is not None:
+        mount_controller(controller,runner,receipt_record)
     check = "Letta provider and persistent agent initialization"
     try:
         agent.initialize()

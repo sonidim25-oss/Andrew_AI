@@ -8,6 +8,7 @@ import struct
 import subprocess
 import sys
 import time
+import threading
 import uuid
 from .browser_protocol import MAX_WIRE, validate_action
 from .runner_service import WorkerConfig, RunnerService
@@ -20,19 +21,43 @@ class BrowserProcess:
         self.name = None
         self.deadline = 0
         self.healthy = True
+        self._lifecycle_lock = threading.RLock()
 
     def close(self):
-        if self.process:
-            self.process.kill()
-            self.process.stdin.close()
-            self.process.stdout.close()
-            self.process.wait(timeout=5)
-            self.process = None
-        if self.name:
-            if not RunnerService(self.config)._remove_container(self.name): self.healthy = False
-            self.name = None
+        with self._lifecycle_lock:
+            self._close_locked()
+
+    def _close_locked(self):
+        process, name = self.process, self.name
+        self.process = self.name = None
+        try:
+            if process:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                process.stdin.close()
+                process.stdout.close()
+                process.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            self.healthy = False
+            raise
+        finally:
+            if name and not RunnerService(self.config)._remove_container(name):
+                self.healthy = False
+
+    def reap_idle(self):
+        with self._lifecycle_lock:
+            # A request may have replaced an expired session before the reaper
+            # acquired ownership. Recheck the current identity under the lock.
+            if self.process and time.monotonic() >= self.deadline:
+                self._close_locked()
 
     def run(self, request):
+        with self._lifecycle_lock:
+            return self._run_locked(request)
+
+    def _run_locked(self, request):
         validate_action(request,private=True)
         if self.process and (time.monotonic() >= self.deadline or self.process.poll() is not None): self.close()
         if not self.healthy: raise ValueError('browser cleanup requires administrator recovery')
@@ -83,6 +108,16 @@ class BrowserServer:
         self.process = process
         self.busy = False
 
+    async def reap_idle(self):
+        if self.busy or not self.process.process or time.monotonic() < self.process.deadline:
+            return False
+        # Reserve admission before scheduling cleanup, just like a request.
+        self.busy = True
+        future = asyncio.get_running_loop().run_in_executor(None, self.process.reap_idle)
+        future.add_done_callback(lambda _: setattr(self, 'busy', False))
+        await asyncio.shield(future)
+        return True
+
     async def handle(self, reader, writer):
         try:
             size = struct.unpack('!I',await asyncio.wait_for(reader.readexactly(4),5))[0]
@@ -115,8 +150,7 @@ async def serve(process):
     async def reap():
         while True:
             await asyncio.sleep(1)
-            if process.process and not handler.busy and time.monotonic() >= process.deadline:
-                await asyncio.to_thread(process.close)
+            await handler.reap_idle()
     reaper = asyncio.create_task(reap())
     try:
         server = await asyncio.start_unix_server(handler.handle,sock=listener,limit=MAX_WIRE)

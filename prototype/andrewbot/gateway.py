@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -76,6 +77,9 @@ class ModelGateway:
         from .recovery_records import digest
         dispatch = RecoveryDispatch(self.store)
         try:
+            if path == '/v1/recovery/owner_yield':
+                if set(payload)!={'binding','claim','scope_token'}:raise ValueError('Invalid recovery command')
+                return 200,dispatch.records.prepare_owner_yield(payload['binding'],payload['claim'],payload['scope_token'])
             if path == '/v1/recovery/authorize':
                 if set(payload) != {'binding','claim','effect','scope_token'}:
                     raise ValueError('Invalid recovery command')
@@ -144,6 +148,8 @@ class ModelGateway:
                 proof = recovery_records.effect_result(recovery['admission_id'])
                 if proof['state'] == 'confirmed':
                     return 200, proof['result']
+                if proof['state'] == 'rejected' and proof['retry_at_ms'] > int(time.time()*1000):
+                    return 429, {'error': {'message': 'Provider rate limited; waiting for retry', 'type': 'rate_limit_error'}}
             except (ValueError, KeyError, TypeError):
                 return 423, {'error': {'message': 'Recovery dispatch blocked', 'type': 'recovery_blocked'}}
         if any(self.store.get_state(key,'0')=='1' for key in ('restore_recovery_required','local_recovery_restore_required')):
@@ -270,6 +276,14 @@ class ModelGateway:
             # Never log exception text, response bodies, headers, or request content.
             logging.warning('%s', event)
             self.store.add_activity(event)
+            if recovery_records is not None and isinstance(error, ProviderRequestError) and error.safe_category=='http_error' and error.http_status==429:
+                try:
+                    proof=recovery_records.reject_provider(recovery['admission_id'],http_status=429,retry_after=error.retry_after)
+                except Exception:
+                    logging.warning('Provider rejection receipt could not be saved; request remains held')
+                    return self.uncertain_response()
+                self.store.set_state('model_turn_progress',json.dumps({'phase':'waiting for provider rate limit','at':datetime.now(timezone.utc).timestamp()}))
+                return 429, {'error': {'message': 'Provider rate limited; retry scheduled', 'type': 'rate_limit_error', 'retry_at_ms': proof['retry_at_ms']}}
             # Keep the reservation: the request may have reached the provider
             # even though its response was lost.
             return self.uncertain_response()
@@ -378,7 +392,7 @@ def make_server(gateway, host="127.0.0.1", port=8284):
             self._json(200, {"object": "list", "data": [{"id": gateway.model_id, "object": "model", "owned_by": "andrew-controller"}]})
 
         def do_POST(self):
-            if self.path not in {"/v1/chat/completions", "/v1/recovery/authorize", "/v1/recovery/result", "/v1/recovery/check_scope", "/v1/recovery/check_evidence", "/v1/recovery/settlement", "/v1/recovery/tool"}:
+            if self.path not in {"/v1/chat/completions", "/v1/recovery/authorize", "/v1/recovery/result", "/v1/recovery/check_scope", "/v1/recovery/check_evidence", "/v1/recovery/settlement", "/v1/recovery/tool", "/v1/recovery/owner_yield"}:
                 self._json(404, {"error": {"message": "not found"}})
                 return
             if not hmac.compare_digest(self.headers.get("Authorization", ""), f"Bearer {gateway.gateway_token}"):

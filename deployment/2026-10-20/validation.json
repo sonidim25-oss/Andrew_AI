@@ -1,0 +1,41 @@
+{
+  "captured_deployed_files_verified": 119,
+  "checks": {
+    "controller": {
+      "log_sha256": "966ea811d62085ca0fa1c50ce38b9e61ecd0e2b05a8e83d0d5784024cdcfeba6",
+      "skipped": 2,
+      "status": "passed",
+      "tests": 687
+    },
+    "node": {
+      "log_sha256": "27c9b529c9f9358d540a504c3efd1c6df9220f058fa16b5e5b3794a716cf8d5e",
+      "skipped": 0,
+      "status": "passed",
+      "tests": 84
+    },
+    "pristine": {
+      "log_sha256": "3ed6b4c117fb8940c27318380508690376ca5cbf39ab94e7af97e42eff774a24",
+      "skipped": 37,
+      "status": "passed",
+      "tests": 54
+    },
+    "scripts": {
+      "log_sha256": "9c4fdf78c7e2649e291136ccb105e1456629037a94abf8aff607f0d41f18308c",
+      "skipped": 0,
+      "status": "passed",
+      "tests": 241
+    }
+  },
+  "credential_pattern_matches": 0,
+  "date": "2026-10-20",
+  "live_verification": {
+    "autonomous_cycle_completed": false,
+    "reply_delivered": false
+  },
+  "private_logs": "Raw logs remain on the deployment host and are excluded from Git.",
+  "publication_source_tree": "e1658a885cd39d6a91191063a1e67462b40e47fd",
+  "python_compilation": "passed",
+  "review_follow_up": "Isolated the automatic-resume installer test from the host adoption record by using a temporary target; focused test and full installer suite passed. Runtime protection unchanged.",
+  "reviewed_source_tree": "f09df8d6856244c6bcb86ca777d2234613f54231",
+  "whitespace_observations": "Preserved two Markdown hard breaks and three existing extra final blank lines, including exact deployed runtime bytes."
+}

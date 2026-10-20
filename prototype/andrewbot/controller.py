@@ -5,7 +5,7 @@ from .latency import record_failure
 from .budget import budget_snapshot
 from .configuration import OUTPUT_TOKEN_COST_ESTIMATE, ModelConfig, load_model_config
 from .diary import format_diary_entry, parse_diary_command, validate_diary_content
-from .telegram_menu import BUTTON_COMMANDS, HELP_TEXT
+from .telegram_menu import normalize_owner_text, HELP_TEXT
 from .appserver import AppServerClient, LettaTurnError, LettaTurnCancelled
 from .memory import ResearchJournal, SessionHistory, validate_memory_text, note_untrusted_memory_source
 from .gmail_tools import GMAIL_TOOL_NAMES, GMAIL_ACTION_CONTEXT
@@ -37,6 +37,7 @@ class Controller:
         self.fallback_enabled = bool(fallback_enabled) and self.autonomous_enabled
         self.memory_service = memory_service
         self.tool_runtime = tool_runtime
+        self.runner_recovery = None
         self.visit_history = visit_history
         self.gmail_tools = gmail_tools
         self.conversation_idle_seconds = max(0, int(conversation_idle_seconds))
@@ -92,6 +93,7 @@ class Controller:
         return True, "ok"
 
     def handle_update(self, update, allow_time_entry=True):
+        from .telegram_menu import is_model_input
         message = update.get("message") or {}
         sender = message.get("from") or {}
         chat = message.get("chat") or {}
@@ -102,16 +104,17 @@ class Controller:
             return None
         if not isinstance(text, str) or not text.strip():
             return None
-        text = text.strip()
-        text = BUTTON_COMMANDS.get(text, text)
+        text = normalize_owner_text(text)
         command = text.split(maxsplit=1)[0].split("@", 1)[0].lower()
         media_reply_kind = {'/voice_reply': 'voice', '/image_reply': 'image'}.get(command)
         if media_reply_kind:
             if self.media is None or not self.media.policy.enabled:
                 return 'Media generation is disabled.'
+            if media_reply_kind == 'voice' and not self.media.policy.voice_enabled:
+                return 'Voice generation is disabled.'
             if len(text.split(maxsplit=1)) != 2:
                 return 'Add your question after ' + command
-        if command.startswith("/") and not media_reply_kind:
+        if not is_model_input(text):
             self.store.set_state("telegram_wake_prompt_until", "")
             return self._command(command, text, update_id=update.get("update_id"))
         prompt_until = self.store.get_state("telegram_wake_prompt_until", "")
@@ -328,9 +331,12 @@ class Controller:
             coordinator=getattr(self,'local_recovery',None)
             token=TOOL_CANCELLATION.set(coordinator._active_cancel if coordinator is not None else None)
             try:
-                return RecoveryDispatch(self.store).run_tool(
+                return RecoveryDispatch(self.store,self.runner_recovery).run_tool(
                     recovery, name, arguments, lambda: self.execute_tool(name, arguments))
             finally:TOOL_CANCELLATION.reset(token)
+        if (name in {'python.run','node.run','shell.run'} and self.store.get_state('runner_receipt_store_id','')
+                and self.store.get_state('model_turn_origin','')=='autonomous'):
+            raise ValueError('Journaled runner admission is required')
         if name in (AppServerClient.EXTERNAL_TOOL_NAMES | {'gmail.read', 'research.list', 'research.get'}):
             note_untrusted_memory_source()
         known = (AppServerClient.SAFE_CONTROLLER_TOOL_NAMES | AppServerClient.EXTERNAL_TOOL_NAMES
@@ -500,7 +506,11 @@ class Controller:
             return self.tool_runtime.execute(name, arguments)
         if name == "save_diary_entry":
             if not self.autonomous_enabled or not self.store.get_state("active_session_id", ""):
-                raise ValueError("diary entries can only be saved during an active autonomous session")
+                # This precondition rejects the request before any diary write.
+                # Return the rejection so durable dispatch can save its exact
+                # outcome instead of leaving an admitted, apparently lost tool.
+                return json.dumps({"status": "error", "error": "diary_requires_autonomous_session",
+                    "executed": False, "message": "Diary entry was not saved. This tool requires an active autonomous session; answer the owner without saving a diary."})
             content = validate_diary_content(arguments.get("content"))
             event_ids = arguments.get("event_ids", [])
             if (not isinstance(event_ids, list) or len(event_ids) > 20
@@ -552,7 +562,60 @@ class Controller:
                          f"failures={row['failures']}; last success age={duration(row['last_success_age_seconds'])}")
         return '\n'.join(lines)
 
+    def _status(self):
+        with self.store._lock:
+            state = ("paused" if self.store.get_state("paused", "0") == "1" else
+                     "sleeping" if self.store.get_state("sleeping", "0") == "1" else
+                     "awake; automatic activity stopped after an error" if self.store.get_state('autonomy_error', '') else
+                     "awake, waiting for your follow-up" if self.store.conversation_waiting(datetime.now(timezone.utc)) else
+                     "awake, working independently" if self.store.get_state('active_session_id', '') else "awake")
+            _, day = self._periods()
+            cycles = self.store.cycle_count(day)
+            wake_at = self.store.get_state("sleep_until", "")
+            if wake_at:
+                try:
+                    wake_display = datetime.fromisoformat(wake_at).astimezone(ZoneInfo(self.timezone_name)).strftime("%Y-%m-%d %H:%M %Z")
+                except (ValueError, ZoneInfoNotFoundError):
+                    wake_display = "unavailable"
+            else:
+                wake_display = "not set"
+            session = self.store.get_state("active_session_status", "idle")
+            if self.store.get_state('autonomy_error', ''):
+                session = 'error (' + self.store.get_state('autonomy_error') + ')'
+            queues = self.store.health_snapshot(self.owner_id)
+            uncertain = queues['held_messages']
+            if (self.store.get_state('model_turn_origin', '') == 'owner'
+                    and not self.store.get_state('autonomy_error','')
+                    and self.store.get_state('sleeping', '0') != '1'
+                    and self.store.get_state('paused', '0') != '1'):
+                state = 'awake, preparing a reply to you'
+            latest_diary = self.store.diary_entry()
+            diary_state = (f"{latest_diary['local_date']} ({latest_diary['delivery_state']})"
+                           if latest_diary else "none")
+            schedule = "enabled" if self.autonomous_enabled else "disabled"
+            fallback = "enabled" if self.fallback_enabled else "disabled"
+            letter_status = ''
+            if self.store.get_state('founding_letter_record_id', ''):
+                receipt = ('receipt verified' if self.store.get_state('founding_letter_delivered', '0') == '1'
+                           else 'delivery pending')
+                letter_status = f' Owner letter: {receipt}.'
+            from .recovery_records import RecoveryRecords
+            waiting = RecoveryRecords(self.store).waiting_provider()
+            provider_status = ''
+            if waiting:
+                retry_time = datetime.fromtimestamp(waiting['retry_at_ms']/1000, timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+                provider_status = f" Provider rate limited (HTTP 429); retry eligible at {retry_time}; rejected attempts: {waiting['attempt']}."
+                if not self.store.get_state('autonomy_error','') and self.store.get_state('paused', '0')!='1' and self.store.get_state('sleeping', '0')!='1':
+                    state = 'awake, waiting for the provider rate limit'
+            return (f"Andrew is {state}. Session: {session}. Autonomous schedule: {schedule}; fallback: {fallback}. "
+                    f"Next self-scheduled wake: {wake_display}. "
+                    f"Autonomous cycles today: {cycles}. Queued messages: {queues['queued_messages']}; "
+                    f"processing: {queues['active_messages']}; held from interrupted attempts: {uncertain}. "
+                    f"Latest diary: {diary_state}." + self._reply_progress() + provider_status + letter_status)
+
     def _reply_progress(self):
+        if self.store.get_state('autonomy_error','') or any(self.store.get_state(key,'0')=='1' for key in ('paused','sleeping')):
+            return ''
         try:
             progress = json.loads(self.store.get_state('model_turn_progress', '') or '{}')
             phase = progress.get('phase')
@@ -761,45 +824,7 @@ class Controller:
             return (f"Requeued {count} message(s). Their previous delivery may have reached Andrew, "
                     "so a retry could produce a duplicate answer.")
         if command == "/status":
-            state = ("paused" if self.store.get_state("paused", "0") == "1" else
-                     "sleeping" if self.store.get_state("sleeping", "0") == "1" else
-                     "awake; automatic activity stopped after an error" if self.store.get_state('autonomy_error', '') else
-                     "awake, waiting for your follow-up" if self.store.conversation_waiting(datetime.now(timezone.utc)) else
-                     "awake, working independently" if self.store.get_state('active_session_id', '') else "awake")
-            _, day = self._periods()
-            cycles = self.store.cycle_count(day)
-            wake_at = self.store.get_state("sleep_until", "")
-            if wake_at:
-                try:
-                    wake_display = datetime.fromisoformat(wake_at).astimezone(ZoneInfo(self.timezone_name)).strftime("%Y-%m-%d %H:%M %Z")
-                except (ValueError, ZoneInfoNotFoundError):
-                    wake_display = "unavailable"
-            else:
-                wake_display = "not set"
-            session = self.store.get_state("active_session_status", "idle")
-            if self.store.get_state('autonomy_error', ''):
-                session = 'error (' + self.store.get_state('autonomy_error') + ')'
-            queues = self.store.health_snapshot(self.owner_id)
-            uncertain = queues['held_messages']
-            if (self.store.get_state('model_turn_origin', '') == 'owner'
-                    and self.store.get_state('sleeping', '0') != '1'
-                    and self.store.get_state('paused', '0') != '1'):
-                state = 'awake, preparing a reply to you'
-            latest_diary = self.store.diary_entry()
-            diary_state = (f"{latest_diary['local_date']} ({latest_diary['delivery_state']})"
-                           if latest_diary else "none")
-            schedule = "enabled" if self.autonomous_enabled else "disabled"
-            fallback = "enabled" if self.fallback_enabled else "disabled"
-            letter_status = ''
-            if self.store.get_state('founding_letter_record_id', ''):
-                receipt = ('receipt verified' if self.store.get_state('founding_letter_delivered', '0') == '1'
-                           else 'delivery pending')
-                letter_status = f' Owner letter: {receipt}.'
-            return (f"Andrew is {state}. Session: {session}. Autonomous schedule: {schedule}; fallback: {fallback}. "
-                    f"Next self-scheduled wake: {wake_display}. "
-                    f"Autonomous cycles today: {cycles}. Queued messages: {queues['queued_messages']}; "
-                    f"processing: {queues['active_messages']}; held from interrupted attempts: {uncertain}. "
-                    f"Latest diary: {diary_state}." + self._reply_progress() + letter_status)
+            return self._status()
         if command == "/budget":
             snapshot = budget_snapshot(
                 self.store,

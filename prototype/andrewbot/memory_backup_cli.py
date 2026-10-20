@@ -18,12 +18,35 @@ def _parser():
     restore.add_argument("snapshot_filename")
     reconcile = commands.add_parser('reconcile', help='confirm manual billing and action reconciliation after restore')
     reconcile.add_argument('--confirm', required=True, choices=['BILLING_AND_ACTIONS_RECONCILED'])
+    for action in ('runner-snapshot','runner-verify','runner-restore'):
+        command=commands.add_parser(action)
+        command.add_argument('--snapshot',required=True)
+        if action!='runner-verify':
+            command.add_argument('--controller',required=True)
+            command.add_argument('--backend-home',required=True)
+            command.add_argument('--runner-root',required=True)
+            command.add_argument('--workers-stopped',action='store_true',required=True)
     return parser
 
 
 def main(argv=None):
     parser = _parser()
     arguments = parser.parse_args(argv)
+    if arguments.action.startswith('runner-'):
+        from .runner_backup import create_runner_recovery_snapshot,verify_runner_recovery_snapshot,restore_runner_recovery_snapshot
+        try:
+            if arguments.action=='runner-verify':verify_runner_recovery_snapshot(arguments.snapshot)
+            else:
+                fields=dict(workers_quiescent=arguments.workers_stopped)
+                if arguments.action=='runner-restore':
+                    fields['key']=systemd_credential_bytes('andrew-runner-receipts-key')
+                    restore_runner_recovery_snapshot(arguments.snapshot,arguments.controller,arguments.backend_home,arguments.runner_root,**fields)
+                else:create_runner_recovery_snapshot(arguments.controller,arguments.backend_home,arguments.runner_root,arguments.snapshot,**fields)
+            print('Coordinated runner recovery operation verified; restore fences remain in effect.')
+            return 0
+        except Exception as error:
+            print(f'Runner recovery operation failed ({type(error).__name__}).',file=sys.stderr)
+            return 1
     if arguments.action == "restore":
         if (arguments.snapshot_filename != arguments.snapshot_filename.split("/")[-1]
                 or not _SNAPSHOT_NAME.fullmatch(arguments.snapshot_filename)):

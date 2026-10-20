@@ -233,33 +233,67 @@ def load_accepted_candidate(directory):
     return candidate
 
 
-def activate(candidate,enable_resume=False,*,service=_service,retire_projection=None):
+def verify_partial_candidate(candidate):
+    actual=tree_hashes(TARGET,ignore_bytecode=True)
+    old=candidate['deployed_files'];new=candidate['controller_files']
+    if not set(old)&set(new)<=set(actual)<=set(old)|set(new):raise ValueError('Partial deployment file set differs')
+    if any(value not in {old.get(name),new.get(name)} for name,value in actual.items()):raise ValueError('Partial deployment contains unreviewed source')
+
+
+def activate(candidate,enable_resume=False,*,service=_service,retire_projection=None,retire_rate_limit=None,owner_handoff=None,late_provider=False,repair_local_diary=None,resume_diary=False):
+    if TARGET==Path('/opt/andrew/prototype/andrewbot') and Path('/etc/andrew/runner-receipt-adoption.json').exists():raise ValueError('Adopted runner stores require the coordinated runner installer')
     if enable_resume:raise ValueError('Initial activation must keep automatic resume disabled')
     verify_candidate(candidate,require_acceptance=True)
     directory=Path(candidate['directory']);h=helper('install-p1-fixes')
     if ROLLBACK_DROPIN.exists():raise ValueError('A retained rollback override requires reconciliation; no services changed')
-    if tree_hashes(TARGET,ignore_bytecode=True)!=candidate['deployed_files']:raise ValueError('Deployed package changed; no services changed')
+    if resume_diary:verify_partial_candidate(candidate)
+    elif tree_hashes(TARGET,ignore_bytecode=True)!=candidate['deployed_files']:raise ValueError('Deployed package changed; no services changed')
     for name,expected in candidate['originals'].items():
         path=TARGET/name;actual=sha(path) if path.exists() else None
-        if path.is_symlink() or actual!=expected:raise ValueError('Deployed controller changed; no services changed')
+        allowed={expected,candidate['controller_files'].get(name)} if resume_diary else {expected}
+        if path.is_symlink() or actual not in allowed:raise ValueError('Deployed controller changed; no services changed')
     for name,path in [('backend',BACKEND_DROPIN),('controller',CONTROL_DROPIN)]:
         if path.is_symlink():raise ValueError('Symlink in service override')
-        (directory/(name+'-override-before.json')).write_text(json.dumps({'content':path.read_text() if path.exists() else None}))
+        if not resume_diary:(directory/(name+'-override-before.json')).write_text(json.dumps({'content':path.read_text() if path.exists() else None}))
+    diary_proof=None
+    if repair_local_diary:
+        if resume_diary:
+            diary_proof=json.loads((directory/'local-diary-proof.json').read_text())
+            helper('reconcile_local_diary').verify_recorded(DATABASE,BACKEND_HOME,diary_proof,directory/'paired-before')
+        else:
+            diary_proof=helper('reconcile_local_diary').plan(DATABASE,BACKEND_HOME,repair_local_diary)
+            (directory/'local-diary-proof.json').write_text(json.dumps(diary_proof,sort_keys=True)+'\n')
     service('stop','andrew-control.service');service('stop','andrew-letta.service')
     try:
         for unit in ('andrew-control.service','andrew-letta.service'):service('assert-stopped',unit)
         checkpoint_controller_wal(DATABASE)
-        create_paired_recovery_snapshot(DATABASE,BACKEND_HOME,directory/'paired-before',workers_quiescent=True)
+        if resume_diary:verify_paired_recovery_snapshot(directory/'paired-before')
+        else:create_paired_recovery_snapshot(DATABASE,BACKEND_HOME,directory/'paired-before',workers_quiescent=True)
+        if diary_proof:
+            if resume_diary:recorded=helper('reconcile_local_diary').verify_recorded(DATABASE,BACKEND_HOME,diary_proof,directory/'paired-before')
+            else:recorded=helper('reconcile_local_diary').record_result(DATABASE,BACKEND_HOME,diary_proof,directory/'paired-before')
+            (directory/'local-diary-result-recorded.json').write_text(json.dumps(recorded,sort_keys=True)+'\n')
+        if owner_handoff:
+            handoff=helper('inspect_owner_handoff').plan(DATABASE,BACKEND_HOME,owner_handoff,**({'late_provider':True} if late_provider else {}))
+            (directory/'owner-handoff-repair.json').write_text(json.dumps(handoff,sort_keys=True)+'\n')
         if retire_projection:
             repair=helper('retire_unstarted_projection')
             retirement=repair.plan(DATABASE,BACKEND_HOME,retire_projection)
             repair.retire(retirement,directory/'paired-before')
             (directory/'retired-projection.json').write_text(json.dumps({'admission_id':retire_projection,
                 'archive':retirement['archive'],'checkpoint_sha256':retirement['files'][retirement['checkpoint']]}))
-        if tree_hashes(TARGET,ignore_bytecode=True)!=candidate['deployed_files']:raise ValueError('Deployed package changed during activation; services remain stopped')
+        if retire_rate_limit:
+            repair=helper('retire_rate_limited_input')
+            retirement=repair.plan(DATABASE,BACKEND_HOME,retire_rate_limit)
+            repair.retire(retirement,directory/'paired-before')
+            (directory/'retired-rate-limit.json').write_text(json.dumps({'admission_id':retire_rate_limit,
+                'archive':retirement['archive'],'checkpoint_sha256':retirement['files'][retirement['checkpoint']]}))
+        if resume_diary:verify_partial_candidate(candidate)
+        elif tree_hashes(TARGET,ignore_bytecode=True)!=candidate['deployed_files']:raise ValueError('Deployed package changed during activation; services remain stopped')
         for name,expected in candidate['originals'].items():
             path=TARGET/name
-            if path.is_symlink() or (sha(path) if path.exists() else None)!=expected:raise ValueError('Controller changed during activation; services remain stopped')
+            allowed={expected,candidate['controller_files'].get(name)} if resume_diary else {expected}
+            if path.is_symlink() or (sha(path) if path.exists() else None) not in allowed:raise ValueError('Controller changed during activation; services remain stopped')
         release=ARTIFACTS/candidate['backend_manifest_sha256']
         if release.exists():
             if verify_release(release)!=candidate['backend_manifest_sha256']:raise ValueError('Installed recovery artifact differs')
@@ -329,7 +363,17 @@ def enable(candidate,*,service=_service):
     if verify_release(activated['release'])!=candidate['backend_manifest_sha256']:raise ValueError('Installed backend changed')
     if tree_hashes(TARGET,ignore_bytecode=True)!=candidate['controller_files']:raise ValueError('Installed controller changed')
     h=helper('install-p1-fixes');readiness=h.load_readiness();readiness.validate_runtime_proof()
-    helper('install-autonomy-media').idle()
+    if (directory/'local-diary-proof.json').exists():
+        proof=json.loads((directory/'local-diary-proof.json').read_text())
+        if not (directory/'local-diary-finalized.json').is_file():raise ValueError('Diary reconciliation has not finished; automatic recovery remains disabled')
+        marker=json.loads((directory/'local-diary-finalized.json').read_text())
+        helper('reconcile_local_diary').verify_finalized(DATABASE,BACKEND_HOME,proof,marker)
+    handoff_path=directory/'owner-handoff-repair.json'
+    if handoff_path.exists():
+        handoff=json.loads(handoff_path.read_text())
+        current=helper('inspect_owner_handoff').plan(DATABASE,BACKEND_HOME,handoff['admission_id'],**({'late_provider':True} if handoff.get('mode')=='late_provider_receipt' else {}))
+        if current!=handoff:raise ValueError('Handoff state changed before enabling; inspect current state')
+    else:helper('install-autonomy-media').idle()
     code="from andrewbot.appserver import AppServerClient; from andrewbot.recovery import LocalRecoveryClient; c=LocalRecoveryClient(AppServerClient()); c.capabilities(); c.close()"
     h.command('runuser','-u','andrew-control','--','env','PYTHONPATH=/opt/andrew/prototype','/usr/bin/python3','-c',code)
     service('stop','andrew-control.service');service('assert-stopped','andrew-control.service')
@@ -345,19 +389,79 @@ def enable(candidate,*,service=_service):
     return {'enabled':True,'owner_controls_preserved':True,'wake_requested':False}
 
 
+def finalize_local_diary(candidate):
+    directory=Path(candidate['directory']);proof=json.loads((directory/'local-diary-proof.json').read_text())
+    recorded=json.loads((directory/'local-diary-result-recorded.json').read_text())
+    repair=helper('reconcile_local_diary')
+    if recorded.get('evidence_sha')!=repair.digest(proof):raise ValueError('Diary evidence changed')
+    result=subprocess.run(['runuser','-u','andrew-control','--','env','PYTHONPATH=/opt/andrew/prototype','/usr/bin/python3','-c',Path(repair.__file__).read_text(),'finalize'],
+        input=json.dumps({'database':str(DATABASE),'proof':proof}),text=True,capture_output=True,timeout=60)
+    if result.returncode:raise ValueError('Diary finalization failed; services remain stopped and receipts retained')
+    marker=json.loads(result.stdout);repair.verify_finalized(DATABASE,BACKEND_HOME,proof,marker)
+    (directory/'local-diary-finalized.json').write_text(json.dumps(marker,sort_keys=True)+'\n')
+    return marker
+
+
+def start_installed_candidate(candidate,result,readiness,original_proof,before,*,diary=False):
+    directory=Path(candidate['directory']);h=helper('install-p1-fixes')
+    try:
+        h.renew_proof(readiness,original_proof,before,directory)
+        _service('start','andrew-letta.service');h.wait_for_letta()
+        code="from andrewbot.appserver import AppServerClient; from andrewbot.recovery import LocalRecoveryClient; c=LocalRecoveryClient(AppServerClient()); c.capabilities(); c.close(); print('Recovery capability verified; no input admitted')"
+        h.command('runuser','-u','andrew-control','--','env','PYTHONPATH=/opt/andrew/prototype','/usr/bin/python3','-c',code)
+        _service('start','andrew-control.service');h.verify_controller_startup(directory)
+        if diary:result['diary_reconciliation']=finalize_local_diary(candidate)
+    except Exception:
+        _service('stop','andrew-control.service');_service('stop','andrew-letta.service')
+        raise
+    (directory/'activated.json').write_text(json.dumps(result,sort_keys=True)+'\n')
+    return result
+
+
+def resume_local_diary(directory):
+    candidate=load_accepted_candidate(directory);directory=Path(candidate['directory'])
+    if (directory/'activated.json').exists():raise ValueError('Candidate already installed; use its separate enable step')
+    proof=json.loads((directory/'local-diary-proof.json').read_text())
+    helper('reconcile_local_diary').verify_recorded(DATABASE,BACKEND_HOME,proof,directory/'paired-before')
+    verify_partial_candidate(candidate)
+    readiness=helper('install-p1-fixes').load_readiness()
+    original=json.loads((directory/'runtime-proof-before.json').read_text());actual=readiness.bindings()
+    before={key:original[key] for key in actual};readiness.check_proof(original,before)
+    if any(actual[key]!=before[key] for key in before if key!='code'):raise ValueError('Runtime bindings changed during interrupted diary installation')
+    result=activate(candidate,repair_local_diary=proof['admission_id'],resume_diary=True)
+    return start_installed_candidate(candidate,result,readiness,original,before,diary=True)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--backend-release',type=Path)
     parser.add_argument('--apply',action='store_true')
+    parser.add_argument('--resume-local-diary',type=Path,help='Finish the same accepted diary installation after its receipt committed; never record or execute the tool again')
     parser.add_argument('--resume-apply',type=Path,help='Retry activation of an unchanged accepted candidate after a pre-snapshot failure')
     parser.add_argument('--retire-unstarted-projection',help='Retain one exact projection-failed input proven to have no effects; requires --apply')
+    parser.add_argument('--retire-rate-limited-input',help='Explicitly retire one legacy input with unique HTTP 429 evidence; requires --apply')
+    parser.add_argument('--repair-late-provider',help='Update one exact halted checkpoint with a settled late provider result; requires --apply')
+    parser.add_argument('--repair-local-diary',help='Reconcile one exact failed owner diary request from its empty local destination; requires --apply')
+    parser.add_argument('--repair-owner-handoff',help='Preserve authority for one exact halted owner-handoff input; requires --apply')
     parser.add_argument('--rollback',type=Path,help='Candidate directory from the installation')
     parser.add_argument('--enable',type=Path,help='Verified candidate directory after initial disabled activation')
     args=parser.parse_args()
+    if args.resume_local_diary and any((args.backend_release,args.apply,args.enable,args.rollback,args.resume_apply,args.repair_local_diary,args.repair_late_provider,args.repair_owner_handoff,args.retire_unstarted_projection,args.retire_rate_limited_input)):
+        parser.error('--resume-local-diary cannot be combined with another action')
+    if args.repair_local_diary and (not args.apply or not args.backend_release or args.enable or args.rollback or args.resume_apply or args.repair_late_provider or args.repair_owner_handoff or args.retire_unstarted_projection or args.retire_rate_limited_input):
+        parser.error('--repair-local-diary requires --backend-release and --apply without another repair')
+    if args.repair_late_provider and (not args.apply or not args.backend_release or args.enable or args.rollback or args.resume_apply or args.repair_owner_handoff or args.retire_unstarted_projection or args.retire_rate_limited_input):
+        parser.error('--repair-late-provider requires --backend-release and --apply without another repair')
+    if args.repair_owner_handoff and (not args.apply or not args.backend_release or args.enable or args.rollback or args.resume_apply or args.retire_unstarted_projection or args.retire_rate_limited_input):
+        parser.error('--repair-owner-handoff requires --backend-release and --apply without another repair')
     if args.resume_apply and (args.backend_release or args.enable or args.rollback):parser.error('--resume-apply cannot be combined with another action')
     if args.retire_unstarted_projection and (not args.apply or not args.backend_release or args.enable or args.rollback or args.resume_apply):
         parser.error('--retire-unstarted-projection requires --backend-release and --apply')
+    if args.retire_rate_limited_input and (not args.apply or not args.backend_release or args.enable or args.rollback or args.resume_apply or args.retire_unstarted_projection):
+        parser.error('--retire-rate-limited-input requires --backend-release and --apply, without another retirement')
     if os.geteuid()!=0:raise SystemExit('Run with sudo in your server terminal; no services changed.')
+    if args.resume_local_diary:
+        print(json.dumps(resume_local_diary(args.resume_local_diary),sort_keys=True));return
     if args.enable:
         candidate=json.loads((args.enable/'candidate.json').read_text());print(json.dumps(enable(candidate)));return
     if args.rollback:
@@ -365,8 +469,17 @@ def main():
     if not args.backend_release and not args.resume_apply:parser.error('--backend-release or --resume-apply is required')
     h=helper('install-p1-fixes');readiness=h.load_readiness()
     proof=readiness.protected_read(readiness.PROOF);before=readiness.bindings();readiness.check_proof(json.loads(proof),before)
-    if args.retire_unstarted_projection:
+    if args.repair_local_diary:
+        helper('reconcile_local_diary').plan(DATABASE,BACKEND_HOME,args.repair_local_diary)
+    elif args.repair_late_provider:
+        helper('inspect_owner_handoff').plan(DATABASE,BACKEND_HOME,args.repair_late_provider,late_provider=True)
+    elif args.repair_owner_handoff:
+        helper('inspect_owner_handoff').plan(DATABASE,BACKEND_HOME,args.repair_owner_handoff)
+    elif args.retire_unstarted_projection:
         retirement=helper('retire_unstarted_projection').plan(DATABASE,BACKEND_HOME,args.retire_unstarted_projection)
+        helper('install-autonomy-media').idle(allowed_running_cycle=retirement['binding']['cycle_id'])
+    elif args.retire_rate_limited_input:
+        retirement=helper('retire_rate_limited_input').plan(DATABASE,BACKEND_HOME,args.retire_rate_limited_input)
         helper('install-autonomy-media').idle(allowed_running_cycle=retirement['binding']['cycle_id'])
     else:helper('install-autonomy-media').idle()
     if args.resume_apply:
@@ -384,17 +497,13 @@ def main():
     if readiness.bindings()!=before:raise ValueError('Runtime changed during candidate verification; no services changed')
     if not args.apply and not args.resume_apply:
         print('Candidate verified; preview only, no services changed.');return
-    result=activate(candidate,retire_projection=args.retire_unstarted_projection) if args.retire_unstarted_projection else activate(candidate)
-    try:
-        h.renew_proof(readiness,json.loads(proof),before,directory)
-        _service('start','andrew-letta.service');h.wait_for_letta()
-        code="from andrewbot.appserver import AppServerClient; from andrewbot.recovery import LocalRecoveryClient; c=LocalRecoveryClient(AppServerClient()); c.capabilities(); c.close(); print('Recovery capability verified; no input admitted')"
-        h.command('runuser','-u','andrew-control','--','env','PYTHONPATH=/opt/andrew/prototype','/usr/bin/python3','-c',code)
-        _service('start','andrew-control.service');h.verify_controller_startup(directory)
-    except Exception:
-        _service('stop','andrew-control.service');_service('stop','andrew-letta.service')
-        raise
-    (directory/'activated.json').write_text(json.dumps(result,sort_keys=True)+'\n')
+    if args.repair_local_diary:result=activate(candidate,repair_local_diary=args.repair_local_diary)
+    elif args.repair_late_provider:result=activate(candidate,owner_handoff=args.repair_late_provider,late_provider=True)
+    elif args.repair_owner_handoff:result=activate(candidate,owner_handoff=args.repair_owner_handoff)
+    elif args.retire_unstarted_projection:result=activate(candidate,retire_projection=args.retire_unstarted_projection)
+    elif args.retire_rate_limited_input:result=activate(candidate,retire_rate_limit=args.retire_rate_limited_input)
+    else:result=activate(candidate)
+    result=start_installed_candidate(candidate,result,readiness,json.loads(proof),before,diary=bool(args.repair_local_diary))
     print(json.dumps(result,sort_keys=True))
 
 

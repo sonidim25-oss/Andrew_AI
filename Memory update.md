@@ -1,5 +1,759 @@
 # Memory update
 
+## Current checkpoint — 2026-10-20
+
+| Item | Verified status / next action |
+| --- | --- |
+| Installed recovery | Coordinated runner recovery is installed and enabled. Backend release manifest: `94ccc2cc2b2d3609e52674af1676d0861a0eeba171e4bc40f70204a318b62a9d`. |
+| Deployment verification | Exact host acceptance passed, including distinct service-user credentials. The interrupted schema migration was repaired; owner controls were preserved. Controller, backend, receiver and socket are active, with adoption enabled and no installation fence. |
+| Live behavior | Pause was preserved. A fresh delivered owner reply and completed autonomous cycle on this release remain unverified. Earlier delivered replies are historical evidence. |
+| Source synchronization | This checkpoint includes all 119 captured deployed source files, exact controller/service hashes, backend recovery extensions, installation repairs and regression tests. See `deployment/2026-10-20/`. Runtime configuration and databases stay private. |
+| Next action | Complete GitHub publication, then explicitly wake Andrew and verify a normal reply and autonomous completion. |
+| Existing uncertainty | Legacy provider reservations and held tool/message records remain retained; nothing was replayed. |
+| Later work | Browser/destination evidence remains P0; memory consolidation/procedural memory remain P2. P0 is still open. |
+
+The dated entries below are historical evidence. This checkpoint supersedes their older deployment instructions.
+
+## Restore and coordinated packaging implementation — 2026-10-20
+
+Tasks 7–8 have implementation in `/home/daniel/andrew-runner-receipts`.
+Three-store restore preserves current verified execution histories and newer
+controller receipt/attempt/research/message evidence. Durable external, backend
+and receiver fences survive interruptions and are not cleared automatically.
+Eleven new restore cases and fourteen existing backup cases passed.
+
+The coordinated installer stages both Python packages with the pinned backend,
+provisions the encrypted credential without rotation, binds administrator
+adoption and service preflight records, installs with execution disabled, and
+requires matching live capabilities before enablement. Owner pause/revision is
+preserved; no wake is requested. Failed stop/start/install phases retain a fence
+and attempt to stop all affected services. The final review resolved four
+Important issues, each with a failing then passing regression; the independent
+reviewer then passed 78 focused tests and approved the fix delta.
+
+Full acceptance of `candidate-task7-8-reviewed` is running. The earlier
+`candidate-task7-8-offline` snapshot is superseded. Exact-host preparation and
+privileged UID acceptance remain required; sudo currently needs the owner's
+password and installed controller sources are private. Production is unchanged.
+No deployment, enable, wake or replay occurred. P0 remains open.
+
+## Exact held runner confirmation implemented offline — 2026-10-19
+
+Task 6 is implemented and tested in `/home/daniel/andrew-runner-receipts`.
+The backend now accepts `recovery_reconcile_tool` with binding, fresh claim,
+fence, scope, expected revision and effect admission ID. The command carries no
+result bytes. It fetches the exact scoped controller proof and cross-checks the
+full immutable receipt identity, binding, original tool arguments/request,
+worker request, operation/store IDs, formatter, cleanup and result digest.
+Only the matching held runner tool can become confirmed. Other holds and tools
+remain unchanged. Normal successful receipt-backed tool confirmation also saves
+the marker, so a lost acknowledgement can be checked idempotently.
+
+The coordinator imports historical evidence first, checks normal owner/outcome
+and continuation guards before fresh authority, confirms on a separate pass,
+then resumes the same run/input through the normal guarded path. No import or
+confirmation pass invokes a worker or provider. Paused, sleeping, pending owner
+input, changed owner revision and restore fences prevent continuation authority.
+
+Validation passed: 664 controller tests (2 live skips), all 84 Node tests,
+4 new real-backend receipt cases, 19 existing real-backend protocol cases and
+7 existing process-crash regression tests. New cases prove a lost runner reply
+survives backend restart, exactly one fake worker execution feeds exactly one
+continuation, normal receipt confirmation works, owner pause blocks resume, and
+the coordinator completes import/confirmation/continuation on separate passes.
+Separate process exits before/after checkpoint replacement retain the original
+run/input/tool identity and do not repeat execution. Tested source hashes were
+pinned and verified unchanged.
+
+Combined 32-file review patch: `.superpowers/sdd/2026-10-19-runner-result-recovery/task1-6.patch`,
+SHA `5bf68b387fc66f098032c49c24647e8da9d59a4d2124bb7932cdf7ff4315044f`; `git apply --check` passed against the deployment source baseline.
+Exact source/release hashes and logs are in `task6-implementation-evidence.json`.
+The isolated backend build is an integration artifact, not an installable rollout.
+No production deployment, enable, wake, replay or task commit occurred. Task 7
+three-store restore and Task 8 coordinated adoption/credential/rollout acceptance
+remain. This checkpoint does not close P0.
+
+## Controller runner admission and atomic import implemented offline — 2026-10-19
+
+Owner directed continuation. Tasks 4–5 now have implementation in
+`/home/daniel/andrew-runner-receipts`; the production/deployment runtime files are
+unchanged. The new `runner_recovery.py` owns immutable operation mappings,
+pre-grant cancellation and exact result import. New execution requires explicit
+store pins, an enabled adapter and the backend receipt capability marker; live
+environment/adoption wiring remains part of the coordinated rollout.
+
+Mapping plus one legacy tool attempt commit while the recovery effect remains
+prepared, before any runner RPC. A ready grant rechecks current owner, scope,
+lease, store identity and existing outcome/budget guards. The normal tool gate
+and mapping admission share one outer transaction; no RPC holds that transaction.
+The new path avoids recursive controller callbacks. A pre-grant owner stop marks
+only the exact mapping/legacy attempt not_executed and fences its effect.
+Admitted requests cannot use this cancellation path or be executed again.
+
+The legacy outcome migration preserves existing tool attempts and external
+receipt foreign keys; failure rolls back the table replacement. Unknown-outcome
+queries explicitly exclude not_executed. Owner yield understands only proven
+runner pre-grant cancellation, and an unrelated admitted tool prevents the
+entire cancellation transaction from committing.
+
+Successful result import atomically saves immutable evidence, the normal tool
+result, its exact legacy settlement and one research observation using saved
+session/cycle/topic/revision. Both normal replies and lost-reply recovery use the
+same importer. Duplicates verify all existing records rather than replaying any
+callback. Invalid/error/missing/prepared/uncertain evidence cannot import as
+success. Proof checks include current store pins, exact identity/digests and the
+original linked research event. Untrusted source state is retained.
+
+Historical import can retain a result after owner pause, sleep, revision/focus
+change or restore fence; it changes none of those controls. Read-only lookup is
+bounded to one existing mapping per pass and occurs before the coordinator's
+held-scope early return. Import does not call the backend/model or grant another
+step. A real subprocess exit before/after import proves all-or-nothing records.
+Three real-socket controller cases prove one execution, lost-reply lookup/import,
+and zero execution if pause arrives after ready.
+
+Focused checks passed: 23 dispatch cases, 11 import cases, 2 migration cases and
+3 real-socket controller cases. Final source-pinned controller regression passed 659 tests (2 live skips),
+and 19 existing real-backend protocol cases passed with no skips. Tested runtime
+and test-file hashes remained unchanged. Combined 24-file review artifact:
+`.superpowers/sdd/2026-10-19-runner-result-recovery/task1-5.patch`, SHA
+`8c1248ddcd30c585db8fdd216056d8859796e73e5e85e35d9c9b7ffa30e15b43`.
+`git apply --check` passed against the captured deployment source baseline.
+Exact hashes/logs: `task4-5-implementation-evidence.json` alongside the patch. No new
+production installation, owner wake, replay or task commit occurred.
+
+Remaining: Task 6 exact held-backend tool confirmation, Task 7 three-store restore
+preservation and Task 8 coordinated capability/credential/readiness adoption and
+deployment acceptance. The legacy Python uncertainty and held messages remain
+outside this contract. This partial isolated tree is not deployment-ready.
+
+## Runner receipt socket handshake implemented offline — 2026-10-19
+
+Owner directed continued implementation. Task 3 is implemented in the isolated
+checkout `/home/daniel/andrew-runner-receipts`. New focused helper modules are
+`runner_socket.py` and `runner_receipt_server.py`; existing client/server APIs
+retain their legacy path and the receipt feature defaults disabled. Deployment
+checkout runtime files and production remain unchanged.
+
+The client checks actual SCM_CREDENTIALS on every response chunk, closes and
+rejects passed file descriptors, rejects missing/truncated credentials and extra
+response frames, and uses a total bounded lookup deadline. A real subprocess
+inheriting its parent's listener proves the actual child sender is checked.
+Distinct listener/service UIDs still require the later privileged Task 8 check.
+
+New operations prepare before ready; only a matching fresh challenge/operation
+identity and live same-boot lease can admit execution on that connection. The
+lease is rechecked after admission commits. Duplicate prepared/admitted/result
+operations return evidence without another grant or worker. Lookup/capabilities
+remain available while a result save is blocked; execution ownership remains held
+through cleanup and durable save, including handler cancellation and disconnect.
+Saved success after disconnect is recoverable; failed cleanup is uncertain.
+Legacy Python/browser frames retain the original serialized 64 KiB limit. The
+new unlimited worker wait does not inherit the five-second connection timeout.
+
+Twenty-seven socket/credential cases and the complete 74-test runner family
+passed. The final full controller regression passed 620 tests (2 live integration
+skips); source hashes remained unchanged. The combined 14-file review patch is
+`.superpowers/sdd/2026-10-19-runner-result-recovery/task1-3.patch`, SHA
+`bc6cf29540eee6630e16ec2b3f6a30d2454459c94c2a482141e0feeca5cc99a0`.
+It passes `git apply --check` against the captured deployment source baseline.
+Exact logs and hashes are in `task3-implementation-evidence.json` alongside it. No receipt credentials were provisioned outside isolated fixtures and no
+production installation, owner wake or replay occurred.
+
+Next is Task 4 controller preparation/admission plus Task 5 atomic import. Before
+coding those integrations, preserve transaction boundaries: the existing
+`begin_tool`/`begin_cycle_tool` helpers commit their own connection contexts and
+must not split the new outer mapping/admission transaction. Extending legacy
+outcomes to `not_executed` requires an FK-preserving migration and explicit
+started/uncertain predicates. Exact prepared cancellation also needs a supported
+owner-yield proof; merely changing an effect to cancelled would currently be
+rejected by `prepare_owner_yield` as unproven. No broad hold clearing is allowed.
+
+## Runner receipts resumed offline — 2026-10-19
+
+Owner explicitly requested continuation after diary installation. Native sequential
+implementation resumed in isolated checkout `/home/daniel/andrew-runner-receipts`,
+based on a copy of the current controller/backend sources. The deployment checkout
+and installed services are unchanged by this implementation. No runner receipt
+feature is enabled, and legacy uncertain operations cannot use new receipts.
+
+Task 1 shared foundation implemented: existing canonical identity functions
+extracted unchanged and re-exported, immutable operation/grant/evidence types,
+bounded synchronous/async frames, strict metadata and pure worker request/result
+formatting. Existing output formatting remains byte-for-byte identical, including
+its 15,000-character limit and untrusted-output suffix. New protocol/format tests
+passed; full controller suite passed 576 tests (2 live integration skips),
+runner/client/runtime/dispatch regression suites passed, and all 77 backend tests
+passed. Local evidence: isolated `.runner-implementation/task1-core-tests.txt`.
+
+Task 2 encrypted receiver store implemented in `runner_receipts.py`: explicit
+store provisioning, private paths, exclusive process-owner lock, SQLite FULL
+commits, AES-GCM results bound to identity/cleanup/digest, immutable identities,
+64 KiB admission reservations, bounded capacity and no receipt deletion. Lookup
+never creates or dispatches operations; duplicate preparation returns existing
+evidence. Startup changes unfinished admissions to uncertain; cleanup failure or
+error output cannot import as success. Seventeen focused tests passed, including
+real subprocess exits before/after admission and result commits, capacity,
+wrong key/UID, symlinks/FIFOs, corruption, retention, commit failure and restart.
+The final exact-source controller regression passed 593 tests (2 live skips);
+all 77 backend tests passed. Source hashes remained unchanged throughout.
+Review patch and evidence are under
+`.superpowers/sdd/2026-10-19-runner-result-recovery/`; the patch passes
+`git apply --check` against the captured deployment source baseline.
+See `docs/runner-result-recovery-implementation.md`.
+
+Next implementation at that checkpoint was Task 3 (now recorded above),
+then fenced controller dispatch/import, exact backend confirmation, three-store
+restore and coordinated rollout. These remaining integrations are required before
+runner receipts are deployment-ready. Do not deploy this isolated partial tree.
+No task commits or production mutations were made; baseline source copies/hashes
+are retained under isolated `.runner-implementation/baseline` and `baseline.json`.
+
+## Local diary repair installed — 2026-10-19
+
+Owner supplied successful installation output for
+`/var/backups/andrew-local-recovery-84a7bdbf611a467c9e95e12847488d7b`.
+Installed backend manifest/release
+`3ed883cb4f78b353b226517bbd11d735b43f067b7b152e8cb2343e0876c7781e`.
+Diary reconciliation succeeded at backend revision 518 with `committed:false`;
+evidence SHA `1476d9167c4221ba6abb55d89b9533e02a7839f9ece833b2ee2078dfde008dda`.
+Automatic resume remains disabled. Next: enable this exact new backup directory,
+then inspect fresh state and verify an actual owner reply. P0 remains open.
+Do not reuse the previous installation's enable directory or replay held messages.
+
+## New owner-turn diary failure — 2026-10-19: repair validated (installation recorded above)
+
+After wake, owner scope `5bb2f4ff78604547b595f4660f31a9c4`, revision 36,
+received one confirmed provider result then called `save_diary_entry` without
+an active autonomous session. The early diary guard raised after durable tool
+admission, leaving no result and a backend tool-uncertain hold at revision 514.
+The owner saw generic `turn_failed`. Exact real-backend reproduction confirmed
+this failure. It is separate from the repaired compaction timeout. Current
+owner messages 50/51 are held after failed reply, alongside fifteen older held
+messages. Do not use `/wake` or `/replay` during repair.
+
+Local fix returns a durable explicit precondition rejection before any diary
+write. Existing held call uses a separate exact local-destination reconciliation
+claim (`diary_not_committed`, not callback unexecuted): no diary for the bounded
+Toronto interval of at most seven dates, main database device/inode/birth-time
+witness predating admission (old ctime only when birth time is unavailable), then service shutdown, WAL
+checkpoint, paired snapshot and repeated identity/destination proof. The root
+read-only diary report confirms current eligibility observations but is not
+itself a quiescent proof. New backend command consumes the exact controller
+receipt, commits an error terminal and projects the tool error without inference
+or callback dispatch. Owner error/controls, uncertain Python attempts and held
+messages remain preserved. Resume of the same accepted candidate is supported
+after the negative receipt commits, including precommit claim/release and lost
+postcommit reply; no receipt or tool is repeated. Independent review found no
+remaining material issue after the precommit resume regression was fixed.
+
+New focused tests passed (controller full suite initially 562 with 2 skips;
+4 Node cases; real-backend reconciliation/fault tests; installer tests). Fresh
+merged full acceptance passed on `candidate-local-diary-dates`, SHA
+`bc19fede38d051afa1e32ac4a9b13d498b9ba9eaba3ef43ebafc6b36b8a47cb6`.
+The unchanged Node/core validation inputs were reused by exact hashes. Final
+acceptance: 77 Node cases, 562 controller cases (2 live skips), 207 recovery
+cases, and 43 pristine protocol cases (26 recovery-only skips). Acceptance-required
+candidate verification succeeded. Production remains unchanged; sudo requires
+the owner’s terminal password, so the prepared root command is the next step.
+Backend release is `release-local-diary-recovery`, manifest
+`3ed883cb4f78b353b226517bbd11d735b43f067b7b152e8cb2343e0876c7781e`.
+Reviewed deployment proposal base is `86c611da94fbbb39f467eb6d47930872ec8e49fe`.
+No new production installation or diary state mutation has occurred.
+See `docs/local-diary-rejection-recovery.md`.
+
+## Owner wake acknowledged — 2026-10-19, after handoff
+
+Owner supplied the real wake acknowledgement: “I’m awake. Messages waiting: 2.
+Held from interrupted attempts: 15; these are not replayed automatically.”
+This confirms `/wake` ran; preceding ordinary messages had arrived while paused.
+Both services remain active and no immediate new recovery/model error appeared
+in the recent controller journal. Two saved messages await/undergo normal owner
+processing; fifteen legacy held messages remain excluded from automatic replay.
+Do not count the local wake acknowledgement as a provider response or proof of
+autonomous completion. Next evidence is Andrew's actual queued-message reply;
+avoid sending more messages/repeated wakes while it is pending. P0 remains open
+until fresh work and remaining recovery scope acceptance are verified.
+
+## Interrupted turn retired and settled live — 2026-10-19
+
+Fresh privileged read-only report after the acknowledged owner message verifies:
+backend `terminal_committed`, revision 498, stop reason `owner_input_pending`,
+`acknowledged: true`, `settled: true`; controller pending recovery scopes zero.
+Binding scopes now two revoked and one yielded; exact owner-yield receipt exists.
+The recovered compaction result remains confirmed and the same 14 provider steps
+and 14 tools remain recorded. All three Python attempts remain uncertain;
+globally admitted recovery effects are empty. Owner remains paused at revision
+34, one new message queued, fifteen legacy held messages preserved.
+
+The handoff is verified, not merely inferred from an acknowledgement. It is now
+appropriate for the owner to use `/wake` (normal owner command, not DB repair),
+then explicitly request fresh work while retaining old attempts and excluding
+/replay. Wake clears pause/error and establishes new authority; it does not
+replay the fifteen held messages. The old queued message said stay paused, so a
+new instruction after wake should clarify that fresh work is now authorized.
+Need actual owner reply and fresh autonomous completion before claiming Andrew
+works independently or P0 is complete. No additional runtime deployment occurred.
+
+## Fresh owner message acknowledged — 2026-10-19, 22:38 Toronto
+
+Owner supplied Andrew's actual acknowledgement: “I’m asleep or paused. Your
+message is saved for when I wake.” This confirms a fresh message reached the
+controller and was queued while paused. The previous diagnostic predates that
+message; it cannot verify the handoff. Next step: rerun the same read-only helper
+while paused to verify terminal owner yield and zero pending recovery scopes,
+with all three uncertain attempts and owner controls preserved. The helper now
+includes yield-receipt presence and safe terminal status metadata. No wake yet.
+
+## Handoff blocker identified — 2026-10-19: no pending new owner input
+
+Fresh expanded report confirms the actual owner-yield guard passes:
+`paused_owner_yield_eligible: true`, `owner_guard: passed`; current agent,
+conversation and configuration match. Model progress is absent. Globally
+admitted effect counts are empty. The sole missing trigger is
+`pending_owner_input: false`: no owner inbox items, zero queued=1/2 messages;
+18 processed user messages (queued=0) and 15 legacy held messages (queued=3).
+The 15 held messages intentionally do not count as fresh owner input and must
+not be replayed to trigger handoff. No evidence of a stale progress/binding
+regression. Need owner to send a fresh ordinary message to Andrew's Telegram
+and report the bot's actual acknowledgement. Do not infer why input is absent
+from the prior statement `done` or intermittent polling warnings. No further
+root diagnostic is needed before obtaining that acknowledgement.
+
+## Handoff did not complete — 2026-10-19: inspect live guard before repair
+
+After the owner reported sending the requested Telegram message and rerunning
+the diagnostic, the fresh 02:34:40 UTC report still shows pending scope
+`80cd6216c25044c1986779edb647d922` held `tool_uncertain`, backend revision 494
+`provider_confirmed`, owner paused at revision 34, three legacy Python attempts
+uncertain. Do not describe this as a completed handoff or recommend wake.
+The prior diagnostic omitted pending owner-input presence and the exact paused
+handoff guard. Extended the read-only helper to report those, progress presence,
+agent/conversation/config matches, aggregate queue/inbox counts and globally
+admitted effect counts. It invokes the actual owner-yield guard over a read-only
+connection; it performs no mutation or model/runner request. Need fresh output
+to distinguish an unreceived owner message, stale progress, binding mismatch or
+an unsettled effect. Telegram journal has intermittent fixed-category polling
+RuntimeErrors; these do not establish whether this message arrived.
+
+## Current hold confirmed — 2026-10-19: installed handoff applicable
+
+Fresh privileged diagnostic identifies the sole current pending autonomous
+scope `80cd6216c25044c1986779edb647d922`, held `tool_uncertain`, backend revision
+494. Original scope remains revoked. Backend is still `provider_confirmed` with
+the exact imported compaction result, no claim and no backend hold. Cycle
+outcomes: seven returned Python operations, three uncertain Python operations,
+two returned browser opens, one returned shell operation and one returned
+recent-activity operation. Owner pause/revision 34 remain unchanged. This matches
+the tested late-receipt + legacy failures + newer-pause handoff case.
+
+Next operational step requires a fresh owner model message in Andrew's Telegram
+while paused. Existing controller saves it; the recovery worker sees pending
+owner input before its held/uncertain early return and yields the old input
+without inference or tool execution. Keep unknown attempts held and do not use
+/replay. Collect a fresh read-only report after handoff before requesting wake.
+No new deployment is required for this installed path. New owner input must be
+supplied by the owner, not injected into the database by the coding agent.
+
+## Remaining hold investigation — 2026-10-19
+
+Owner authorized continuation. Source confirms `_check_outcomes` treats a
+cycle-linked external program returning `Status: error` as uncertain about
+possible earlier side effects. The approved runner-receipt increment explicitly
+covers only new successful journaled operations and cannot retroactively settle
+these three legacy failures. Do not implement it as a purported cure for them.
+
+Existing owner-handoff supports retiring the old input while retaining failed
+attempts. Added an isolated real-backend regression
+`test_owner_handoff_after_late_receipt_keeps_failed_tools_and_pause`; it passed
+against the exact deployed release. Sequence: lost provider reply, exact late
+result import, three uncertain Python attempts, newer pause, no continuation,
+new saved owner input, then handoff. Asserted three attempts still uncertain,
+pause/revision unchanged, no active session/cycle, no pending recovery scope and
+only one provider request. This is test-only; no new runtime change/deployment.
+
+Updated `/home/daniel/andrew-current-recovery-check.py` to report current pending
+scope IDs/states/hold reasons and grouped cycle tool outcomes. Asked owner for a
+fresh privileged read-only report; the currently readable report still predates
+that addition. Do not recommend a live wake before checking the actual current
+scope. If it matches the reproduced case, use installed owner-handoff rather
+than clearing unknown attempts or redeploying another runtime patch.
+
+## Late compaction recovery verified live — 2026-10-19
+
+Fresh privileged read-only report after enable confirms backend phase
+`provider_confirmed`, revision 494 (previously held/provider_uncertain at 491).
+Exact compaction admission
+`4252d848e7437886499b0dd39e9c37bfe60f6f6d1198e18bed9e1efdc9edd4db`
+is confirmed with expected saved result hash
+`53d1d594caf3bae981e3851195f3cdb16071ead967e38a841cb1573abd15a909`.
+`expected_receipt_imported: true`; 14 provider/compaction steps and 14 tools
+remain recorded, no backend claim, no backend hold reason. Owner revision 34
+and pause remain intact; active session empty, active cycle absent, no session
+start requested. This verifies historical receipt import, not a new long
+provider call or autonomous completion. The original repair scope is revoked
+(the import acquires a fresh evidence-only scope); one pending scope remains.
+The install-only preflight now reports `Requires one exact pending handoff`
+for that original revoked scope; this is not evidence that import failed.
+
+Autonomy error remains `local_recovery_interrupted`; three Python execution
+failures and uncertainty remain retained. Do not wake/replay or call P0 complete
+on the basis of provider recovery alone. Further work must identify the current
+pending scope/hold and resolve runner outcome semantics without repeating
+unknown effects. The deployed timeout configuration is validated offline; no
+live long-request timeout test was performed during paused verification.
+
+## Combined fix enabled — 2026-10-19: live evidence pending
+
+Owner supplied `enabled: true`, `owner_controls_preserved: true`,
+`wake_requested: false` for deployment
+`/var/backups/andrew-local-recovery-aa8249194bb04f939a40c2251a2c2800`.
+Both controller and Letta services are active; controller startup checks passed.
+Database/backend receipt verification requires a fresh privileged read-only
+report. The existing report predates installation and cannot prove import.
+No wake or replay has been requested. P0 remains open.
+
+## Combined fix installed — 2026-10-19: enable pending
+
+Owner supplied successful root installer output: `installed: true`,
+`automatic_resume: false`, backend release
+`6cb801c067ef495b965693941ad537b4e311df2f15c7f1f73a7597cfe17fe6cd`.
+Exact deployment evidence: `/var/backups/andrew-local-recovery-aa8249194bb04f939a40c2251a2c2800`;
+paired snapshot is its `paired-before` directory. Next step: enable this exact
+deployment, preserving owner controls and requesting no wake, then collect fresh
+read-only evidence of receipt import and remaining holds. Installation alone
+does not verify recovery, autonomy or P0 completion.
+
+## Paused receipt maintenance — 2026-10-19: validated, ready for root installation
+
+The current owner pause is revision 34; the old provider-held scope is bound to
+revision 33. Fresh read-only evidence reports the paused maintenance preflight
+eligible. The installer now accepts that settled newer pause for importing the
+exact historical receipt, while preserving pause/current revision and denying
+continuation under the old authority. A real-backend test and independent review
+confirm no additional provider request. All 29 focused inspection/installer tests
+passed. Candidate `candidate-provider-timeout-paused`, SHA
+`b63f1a77072a22a71902ea4404e071750cd134e9515e5c79329469841d637138`,
+passed final validation: 196 installer/recovery cases and 41 pristine protocol
+cases (24 expected skips). Acceptance-required candidate verification succeeded.
+Node/core results are reused
+only after exact hash checks prove their runtime and validation inputs unchanged.
+No installation has occurred. The owner explicitly authorized deployment once
+ready; root installation still requires their password-bearing terminal.
+
+The three Python errors are now identified: missing `tempfile` import, missing
+entry accessed through `J[k]`, and calling `.items()` on the list returned by
+`re.findall`. These are generated-program failures, separate from transport.
+Their possible effects stay uncertain; no replay or false success is authorized.
+P0 remains open; runner implementation remains suspended.
+
+## Combined provider fix authorized — 2026-10-19: acceptance passed, installation pending
+
+The owner explicitly authorized longer provider waits, exact late-result receipt
+recovery without resubmission, and keeping genuinely unknown outcomes held.
+Implemented locally: upstream default 600 seconds; backend provider total deadline
+660,000 ms using bounded loopback HTTP without redirects/retries; existing
+control/tool deadlines unchanged. Exact evidence-only provider reconciliation is
+implemented and independently reviewed. Targeted timeout tests and 28
+installer/inspection tests passed. Full acceptance passed against
+`candidate-provider-timeout-verified` (SHA
+`c27d1328a1adeb4148517da52c9dd6c495d76ac0280bc66e42481cd549629a17`)
+and `release-provider-timeout-recovery` (manifest
+`6cb801c067ef495b965693941ad537b4e311df2f15c7f1f73a7597cfe17fe6cd`).
+The first candidate stopped before scripts checks because an existing test pinned
+the old 120-second default. That expectation was updated to the approved
+600-second contract; its focused suite passed. Fresh merged candidate acceptance:
+73 Node tests; 560 controller tests (2 expected skips); 194 installer/recovery
+tests; 40 pristine protocol cases (23 recovery-only cases skipped).
+`verify_candidate(require_acceptance=True)` succeeded. Independent review found
+no important issue in the exact evidence path, transport or installer guards.
+The fresh candidate merges with the previously installed paused-handoff source,
+preserving customizations; reviewed proposal base object is
+`7c8872a2494136215b6695df9d8a3d7d16a3fe3a`. The installer has an exact
+`--repair-late-provider 9a5cbcc3a36744b2be0403fb9fc9147f` mode with repeated
+halted-state/receipt proof and disabled activation. No new installation occurred.
+Three cycle-linked Python execution failures remain uncertain and may block
+continuation after provider evidence import. Do not silently settle them.
+
+## New stop diagnosed — 2026-10-19: late compaction receipt
+
+Fresh evidence identifies autonomous session `7cd5cca0a9fe40baaa566dd6860312e1`,
+cycle `1de5a60a0b804e7fa47ee58ef3ebde5f`, held scope
+`9a5cbcc3a36744b2be0403fb9fc9147f`, revision `33`. Backend revision `491`
+is held `provider_uncertain` from `provider_admitted`. Its last step is
+compaction admission `4252d848e7437886499b0dd39e9c37bfe60f6f6d1198e18bed9e1efdc9edd4db`.
+It began at `01:21:17`; backend HTTP transport aborted at `01:23:17`
+(exactly its configured 120 seconds), but the provider result was saved at
+`01:28:05`. Controller evidence is confirmed, usage settled, 22,787 bytes,
+one stop choice, and both Python and Node result hashes match. No new request
+should be sent. No open current provider reservation remains; ten legacy ones
+are retained. Thirteen ordinary provider results and fourteen tool results were
+saved in this turn, so this is progress followed by a separate recovery gap.
+
+Three cycle-linked Python attempts returned `Status: error`, fixed category
+`execution_failed`, and remain semantically uncertain about possible effects.
+Their controller result receipts are saved; this is distinct from the provider
+transport failure. Do not mark them successful to enable continuation.
+
+Offline reproduction confirms that late settled provider evidence cannot clear
+a backend hold in the installed code. Local repair adds an exact, fenced,
+evidence-only provider/compaction reconciliation command, validates request/result
+hashes and settlement, and does not execute callbacks or inference. Controller
+imports that evidence before continuation guards, leaving owner controls and
+unrelated tool uncertainty intact. Six backend receipt tests (including interrupted commit), the paused evidence-only protocol test and 34
+focused controller cases passed. The real-backend lost-reply scenario passed:
+one original provider request, late result imported, same input completed.
+Independent review found no important issue; separate reviewer tests passed.
+Full controller verification passed: 559 tests, two expected skips.
+See `docs/late-provider-receipt-recovery.md`. This
+repair is not deployed. Runner receipt implementation remains suspended.
+
+## New autonomous stop reported — 2026-10-19: fresh evidence required
+
+After owner-observed reply delivery, the owner reports Andrew awake but automatic
+activity stopped, session error `local_recovery_interrupted`, autonomous cycle
+count `4`, queued/processing `0`, held messages `15`, and no next self-wake.
+This does not identify the failing admission or effect. The previous read-only
+report describes the successfully yielded old checkpoint and cannot diagnose
+this new turn. Obtain fresh current recovery metadata before changing state;
+do not wake/replay repeatedly or assume the prior handoff fix is the cause.
+P0 is unresolved. Runner design/plan preparation pauses again; no runner feature
+runtime implementation or production rollout has occurred. Its approved design
+and prepared plan remain available for later review.
+
+## Runner written design approved — 2026-10-19; plan ready for review
+
+The owner explicitly approved the revised runner result recovery design. An
+implementation plan is ready at
+`docs/superpowers/plans/2026-10-19-runner-result-recovery.md`: eight sequential
+units covering shared protocol/formatter, encrypted ledger, authenticated socket
+handshake, controller dispatch, historical import, held backend confirmation,
+three-store backup/restore and coordinated deployment. Native sequential
+execution is recommended. Each unit specifies interfaces, failing tests and
+acceptance evidence; plan review/execution-method confirmation precedes runtime
+implementation. No runner feature code, dependency, service or production state
+has changed. Owner reply delivery is verified; autonomous completion is not yet
+verified, so P0 remains partial.
+
+## Owner reply delivered — 2026-10-19; next runner increment under design review
+
+The owner confirmed: “Yes, the reply arrived” after the wake instruction.
+This verifies owner-observed reply delivery following the installed cleanup.
+A completed autonomous turn is still unverified; P0 remains partial.
+
+Work resumed on the next approved scope: durable receipts for newly journaled
+Python/Node/shell runner results. Read-only review of the current runner and
+controller found design boundaries requiring explicit treatment: receiver
+preparation versus dispatch admission, ownership until cleanup and persistence
+finish, cleanup failure despite successful-looking output, and exact linkage of
+legacy attempts during evidence import. The written design was revised at
+`docs/superpowers/specs/2026-10-18-runner-result-recovery-design.md`, including
+fault cases and staged offline verification. It explicitly preserves the legacy
+uncertain Python attempt and documents outcomes without an eligible result as
+held. No runner feature code or production state has changed. Written-spec review
+is the next stage; the implementation plan and runtime changes have not started.
+
+## Live cleanup verified — 2026-10-19: explicit wake and reply verification next
+
+Fresh read-only diagnostic confirms paused cancellation completed in production:
+new scope `1383cbc04e10459c8d539345acc2eebc` is `yielded`; the prior scope is
+`revoked`. Backend checkpoint revision `293` is `terminal_committed`, with no
+hold reason, 26 confirmed provider steps, 29 confirmed tools, and one cancelled
+`gmail.read`. The old model receipt remains `accepted` and cycle `interrupted`;
+no completed model turn was fabricated. Owner pause `1` and revision `32` are
+preserved, with no active session or model progress. Ten legacy reservations,
+the legacy uncertain Python attempt, and saved owner message `48` (queued `1`)
+remain retained. `local_recovery_interrupted` remains until explicit owner wake,
+as intended for paused cleanup. Next: ask owner to send `/wake` once, then verify
+the saved message is processed and its reply delivered, followed by completed
+autonomous work. Do not resend or replay held messages. P0 remains open.
+
+## Installed and enabled — 2026-10-19: live cleanup verification pending
+
+Owner confirmed installation of backend
+`7ad5d3883344a4cc8c6b24647f035dc8670990e7afedd384821066045158dac4`
+with candidate/evidence directory
+`/var/backups/andrew-local-recovery-3c5b065ca04c41a5a346102c8ecc48c8`
+and paired snapshot `paired-before`. Enable returned `enabled: true`,
+`owner_controls_preserved: true`, `wake_requested: false`. Read-only systemd
+inspection shows both services active. These facts establish installation and
+enable only. Andrew remains owner-paused at the last verified revision `32`.
+Fresh database/backend evidence is required to confirm the held scope yielded,
+accepted receipt and results retained, prepared tool cancelled, and no dispatch
+while paused. Do not request wake until cleanup is verified. After explicit wake,
+verify a delivered owner reply and completed autonomous work. P0 remains open.
+
+## Reopened live incident — 2026-10-19: owner-message handoff deadlock
+
+The owner reported that sending an ordinary message stopped the apparently
+running agent. The fresh read-only report confirms session
+`2c9e86735bfd457180639678020ba03e`, cycle
+`ea18b7577e9e4d3c82600c137c9c5636`: 26 settled provider requests, 29 confirmed
+journaled tools, and retained transcript progress. At 2026-10-18 23:59:52 UTC,
+`Journaled model turn held (category=owner_blocked)` was followed immediately by
+`Owner message queued while automatic model calls are stopped`. Owner message
+48 is queued. No current provider reservation is open; only the ten older legacy
+reservations remain. The recovery attempt was subsequently held as
+`provider_uncertain`. The extended report confirms backend `owner_blocked` /
+`tool_prepared`, revision 289, with the next `gmail.read` prepared and unexecuted.
+One earlier legacy `python.run` attempt is uncertain and remains preserved;
+this repair does not settle its external effects.
+
+An isolated real-backend reproduction confirmed the handoff deadlock: incoming
+owner input blocks the next autonomous dispatch; the autonomous path sets
+`local_recovery_interrupted`; the owner path refuses the saved message; pending
+recovery cannot resume while that message waits. Prior acceptance exercised
+sequential autonomous/owner turns but missed this arrival during an active turn.
+The status was sampled before the incoming message triggered the stop; its
+running label did not establish completion. P0 remains open.
+
+A separate guard bug is reproduced and patched locally: a binding with confirmed
+provider evidence was still blocked by unrelated legacy reservations unless it
+had previously recorded a 429. The guard now accepts either bound confirmed
+provider evidence or a rejection receipt, while checking any newer admitted
+unknown effects first. The regression proves a newer unknown request remains
+held. This patch is not yet deployed and does not by itself repair the handoff.
+
+The handoff repair is now implemented locally: a durable owner-yield receipt
+fences further dispatch, cancels only proven undispatched work, retains actual results,
+and stops the old cycle without fabricating completion. It then processes the
+saved owner message as a distinct input. Real-backend normal/held handoff tests
+and eight process-loss scenarios passed. Review reproduced two further paths:
+owner arrival between authorization and dispatch, and local controls (including
+time-prompt replies) being mistaken for model input. Both are patched and have
+regression tests. Prepared, unreserved controller effects are cancelled atomically
+with an immutable receipt; genuinely admitted effects remain held. Shared routing
+excludes locally handled controls and time replies while retaining media model
+commands. Real-backend provider/tool authorization-race tests passed. Review of
+the merged candidate found no remaining important issues. Full acceptance passed
+for candidate `ae295e76834f4d59908bf8bcad79e4a3685edda82002fe4b96a657104c8580cc`:
+62 Node tests, 556 controller tests (2 skipped), 186 installer/recovery tests,
+and 38 pristine compatibility cases (21 recovery-only cases skipped). Evidence
+is under `.superpowers/sdd/2026-10-18-local-letta-durable-recovery/candidate-owner-handoff-accepted/`.
+Backend release `release-owner-handoff-final` has manifest SHA
+`7ad5d3883344a4cc8c6b24647f035dc8670990e7afedd384821066045158dac4`.
+Production installation, enable, and a verified live reply remain pending. Candidate preparation preserves
+deployed customizations using reviewed proposal baseline Git object
+`a8c0f7a95c37531e11ca5943cc36a22bfa7da14e` under
+`refs/andrew/deployment-bases/provider-backoff-2026-10-18`. This is an object/ref
+for deployment merging, not a branch checkout or a commit of the current patch.
+The installer has an exact halted-handoff mode that preserves owner revision;
+keep the current owner state unchanged until installation and enable. See
+[owner-message handoff recovery](docs/owner-message-handoff-recovery.md).
+
+
+Deployment preflight subsequently refused because the owner state changed to a
+settled pause: revision `32` (binding `31`), paused `1`, active session empty,
+active cycle absent. The old checkpoint remains held; this is not permission to
+restore revision `31`. The installer/runtime now have a cancellation-only paused
+path: require newer owner authority, settled pause, unchanged runtime/config,
+no active work or restore flags, exact held checkpoint and confirmed effects.
+Normal dispatch guards remain unchanged. The enable proof binds revision `32`.
+Disabled startup may mark the old cycle interrupted without invalidating this
+proof. Cleanup preserves the pause, revision, accepted receipt, saved owner input,
+legacy uncertainty and results; no model/tool dispatch occurs. An explicit wake
+after installation and verified cleanup is required to process the saved message.
+A real-backend paused-cleanup/wake/reply regression passed, 32 focused tests passed,
+and review found no important issues. Full acceptance passed for
+`candidate-owner-handoff-paused`, SHA
+`971982cff5a54d35b1791f586b7e8d69beab293ed371207dfdb66cb7fde18c69`:
+62 Node tests, 557 controller tests (2 skipped), 188 installer/recovery tests,
+and 39 pristine compatibility cases (22 recovery-only cases skipped). It
+supersedes the earlier accepted candidate and uses the same backend release
+`7ad5d3883344a4cc8c6b24647f035dc8670990e7afedd384821066045158dac4`.
+Installation and enable are still pending; keep the owner pause unchanged.
+
+The runner-receipt feature is suspended while this incident is investigated.
+Its scope was approved and a written design draft exists at
+`docs/superpowers/specs/2026-10-18-runner-result-recovery-design.md`; the written
+design is not yet approved. Do not describe this feature as implemented or use it
+to justify clearing the current holds.
+
+## Latest deployment and next task — 2026-10-18
+
+The owner confirmed installation of the combined recovery fixes:
+`installed: true`, `automatic_resume: false`, candidate/evidence directory
+`/var/backups/andrew-local-recovery-b3c2db7a990b451cbcf2b46e5db8dddd`, with
+paired snapshot `paired-before` and installed backend manifest
+`6af14a32cbdee070f9d30cd0be299af2549c28bf216f4d0d8b54f2c391570322`.
+Both services are active according to read-only systemd inspection. After the
+enable/wake instructions, the owner reported: session running, three autonomous
+cycles today, provider wait last changed four seconds ago, zero queued or
+processing messages, and fifteen older held messages. This confirms active
+execution, not yet a completed live turn or closed P0. Leave Andrew running
+during read-only investigation; pause is needed before another installation.
+
+The installed increment covers new journaled model-turn recovery, durable HTTP
+429 backoff, the transcript projection repair, and transient restart ownership
+conflicts. P0 as a whole remains partial: publications/browser/code effects,
+unknown generation/provider outcomes, and legacy actions without receipts still
+need their own evidence. Both P1 items are implemented; P2 remains later work.
+
+Next task has started: investigate external-action recovery, beginning with the
+runner's lost-result window. Source inspection found no durable receiver result
+lookup: `RunnerSocketServer` sends the result directly; `RecoveryDispatch` saves
+the controller receipt only after the callback returns. Proposed first increment
+is durable runner receipts for newly journaled Python/Node/shell operations,
+read-only result lookup, and exact receipt-based reconciliation without executing
+the command again. Browser publications and provider-specific checks remain
+separate follow-ups. Findings, alternatives, and the proposed scope are in
+[runner result recovery investigation](docs/runner-result-recovery-investigation.md).
+No implementation of this next increment has started; its cross-service design
+requires review before changing the controller/runner protocol.
+
+## Current incident — 2026-10-18: HTTP 429 after successful transcript projection
+
+Historical diagnosis and preparation for the installation confirmed above.
+
+Live service inspection confirmed the compacted-projection backend
+`39f3a8fb62298b3b84c736c90de3edd25e05d010950159c3485699831e0e5044` is installed.
+The latest read-only production report proves progress past the previous failure:
+930 retained message entries, all seven active messages present, no missing active
+IDs, and one projected recovery input. The turn started at 15:18:59 UTC and the
+provider returned HTTP 429 at 15:19:11 UTC. The old gateway retained its reservation
+as an unknown outcome; recovery held it as `provider_uncertain`, displayed as
+`local_recovery_interrupted`. No successful autonomous turn is yet confirmed.
+
+Current production state: owner pause is set, admission
+`4177fdeadc1d4b47853b89440e6e1688` is held, cycle
+`fcb564aba000404591b69a9e2d01dd83` is interrupted in execution, and there are 11
+reservations: ten legacy reservations plus this request's $0.0138654 reservation.
+The owner's read-only migration preflight returned `eligible: true` and matched
+the unique HTTP 429 event, ID 338. This is eligibility evidence, not a repair.
+
+The combined fix is prepared in the working tree. It durably records explicit
+HTTP 429 rejections, releases only the rejected attempt's reservation, observes
+`Retry-After` with exponential backoff, and retries the same provider step under
+fresh authority. A crash after rejection recording can resume; a crash before
+recording or an unknown response from a later retry remains held. Pause, owner
+revision, pending owner input, lease loss, and restore fences still prevent
+dispatch. Status now displays rate limiting and the retry eligibility time.
+Backup restoration preserves and checks rejection receipts.
+
+An explicit installation migration archives the selected old rejected input,
+keeps its transcript and original receipts, records operator retirement evidence,
+and releases only its matching reservation. It requires a paired backup and both
+services stopped, one uniquely evidenced provider rejection, and no tool steps
+or provider success. It preserves the ten older reservations and held messages.
+It does not retrospectively mark the old turn completed. A new owner wake is
+required after installation and enable. Interrupted migration requires inspection
+of the paired snapshot and phase evidence; do not rerun by clearing guards.
+
+Candidate: `.superpowers/sdd/2026-10-18-local-letta-durable-recovery/candidate-provider-backoff-verified`,
+built against the owner's fresh production source export. Backend artifact:
+`release-provider-backoff-verified`, manifest SHA
+`6af14a32cbdee070f9d30cd0be299af2549c28bf216f4d0d8b54f2c391570322`.
+Restart validation also reproduced a separate transient-lock classification bug:
+a busy execution lock or stale checkpoint revision could become a permanent
+`state_corrupt` hold. These conflicts now stay pending for the next worker pass;
+unknown provider outcomes still remain held. The forced-lock regression passed. Full rebuilt candidate acceptance passed:
+56 backend tests; 546 controller tests (2 skipped); 173 integration tests; and
+33 original-runtime compatibility tests (16 skipped). Acceptance binds candidate
+SHA `926110e799c320d853a130888feca3daa92714fb8cddad7bed1a28b1d6c447c0`.
+No production code or state was changed by this session. The requested `cp -a ~/.codex ~/.codex-backup` completed.
+
+Deployment and recovery details: [provider rate-limit recovery](docs/provider-rate-limit-recovery.md).
+
 ## Свежая независимая проверка перед deployment
 
 По просьбе владельца выполнена независимая read-only проверка с чистым контекстом. Найден и исправлен реальный permission blocker: backend retirement от `andrew-letta` импортировал controller package, но `/opt/andrew/prototype` имеет mode 0750 и группу `andrew-control`, в которую `andrew-letta` не входит. Импорт перенесён в parent/controller-only функции; backend-child теперь использует только stdlib. Новая subprocess-проверка явно запрещает импорт `andrewbot` и успешно выполняет backend phase; retirement9 прошли. Backend artifact не менялся.
@@ -67,13 +821,14 @@ Installer поддерживает явный `--retire-unstarted-projection 1fa
 | P0: текстовые доставки Telegram | Квитанции отдельных частей ответов и дневников; восстановление после локального сбоя без повторной отправки подтверждённых частей; продолжение только заведомо неотправленного остатка | `2faba07` | Подтверждено владельцем после исправления теста `c14295c` |
 | P0: безопасная проверка запуска | Проверка сохранённого разговора без `runtime_start`, восстановления approvals и запуска очереди до проверки состояния контроллера | `d02477b` | Подтверждено владельцем 2026-10-18 |
 | P0: подтверждённые доставки медиа | Долговечные квитанции Telegram для изображений и голоса; восстановление подтверждённой доставки после локального сбоя без повторной генерации или отправки | Изменения поверх `c888e18` | Подтверждено владельцем 2026-10-18 |
+| P0: локальное долговечное восстановление | Новые журналируемые модельные ходы, точные результаты инструментов, компактация, fencing, HTTP 429 backoff и исправления первого live wake | Backend manifest `6af14a32…` | Установка подтверждена владельцем; текущий ход ожидает provider, успешное live-завершение ещё не подтверждено |
 
 Подробности: [восстановление сессий](docs/session-recovery.md), [архив истории](docs/session-history.md), [происхождение памяти](docs/memory-provenance.md).
 Ранее удалённую историю инструментов восстановить нельзя; архив сохраняет доступную историю и новые события.
 
 ### Что осталось в P0
 
-- **Действительно незавершённые модельные ходы.** Проверены интерфейсы локального Letta 0.34.13: реестр запусков хранится в памяти процесса, статус idle не доказывает завершение, а `runtime_start`/`sync` могут запускать работу восстановления. Проверка при старте исправлена: она больше не присоединяется к runtime. Отдельного безопасного механизма продолжения действительно незавершённого хода пока нет. Проверка исходников и новый изолированный crash-probe подтвердили ограничение Letta 0.34.13: локальный App Server использует `app-server-…`, а запись interrupted-work и цикл автоматического восстановления требуют `conn-…`; реестр запусков локального backend не переживает перезапуск. Нужен отдельный контракт долговечного восстановления в backend; чтение дополнительных полей журналов этого не заменяет. Текущая реализация восстанавливает доказанно завершённый ход, но не делает вывод об успехе по старому ответу, частичному транскрипту или статусу «idle».
+- **Live-проверка установленного восстановления.** Отдельный локальный backend-контракт для новых журналируемых модельных ходов теперь реализован и установлен. Текущий live-ход работает и ожидает provider; его завершение ещё не подтверждено. Старые ходы без точных квитанций и неизвестные эффекты не объявляются успешными по частичному транскрипту или статусу «idle».
 - **Публикации и действия браузера/кода.** Нужны отдельные способы проверить результат на стороне назначения и, где поддерживается, идемпотентность. Завершение модельного хода само по себе не подтверждает неизвестный внешний эффект.
 - **Генерация и неопределённая доставка медиа.** Развёрнутое обновление сохраняет положительные квитанции отправки изображений/голоса и восстанавливает уже подтверждённую доставку после сбоя контроллера. Неизвестные результаты генерации, расходы провайдера, изменение аватара и отправки без сохранённого подтверждения пока остаются удержанными. Обновление `2faba07` относится к текстовым ответам и дневникам; развёртывание квитанций медиа подтверждено владельцем 2026-10-18.
 - **Неопределённые запросы к провайдеру и расчёты.** Проверять исходы и расходы по надёжным доказательствам; существующие резервации не снимаются автоматически текущими адаптерами восстановления.
@@ -233,3 +988,130 @@ OpenClaw использует такую классификацию, чтобы 
 | 5 | Процедурные навыки | Повторное использование приобретённых методов |
 
 Я бы не начинал с пункта 4. Автоматическая консолидация увеличивает сложность и создаёт дополнительные возможности для ошибок. Сначала нужно обеспечить сохранность исходных данных и стабильное восстановление.
+
+Validation note: the paused candidate's first full scripts run reported one
+failure in `test_real_harness_completes_diary_and_sleep_callbacks_before_returning`
+at its post-restart scheduled-wake tick (195 of 196 cases passed). That test
+passed immediately in isolation without source changes. The failed log is
+retained as `scripts-first-attempt-failed.txt`; a full rerun plus pristine
+compatibility check is required before release. The intermittent failure's
+underlying cause is not yet established. The complete rerun passed all 196 cases
+in 366.530 seconds without source changes; pristine compatibility also passed
+(41 cases, 24 expected skips). Both attempts are retained in acceptance evidence.
+
+## Runner restore and coordinated packaging: offline acceptance complete — 2026-10-20
+
+Tasks 7–8 are implemented in `/home/daniel/andrew-runner-receipts`. Three-store
+restore retains current verified execution histories and newer controller
+receipts, linked attempts/research records and held messages. Installation binds
+both complete packages, encrypted credential, backend release and startup guards;
+initial activation disables execution and preserves owner pause. Four material
+review findings plus first-install migration and deployed output-truncation
+compatibility were reproduced, fixed and independently reviewed.
+
+Final frozen offline candidate: `/home/daniel/andrew-autonomy-media/.superpowers/sdd/2026-10-19-runner-result-recovery/candidate-task7-8-final`.
+Validation passed: 84 Node tests; 684 controller tests
+(2 expected live skips); 234 script/integration tests;
+54 pristine compatibility cases
+(37 expected feature skips); actual runtime package imports.
+All acceptance logs, exact source hashes and candidate bindings verified.
+Evidence: `task7-8-implementation-evidence.json`; reviewed patch
+`task1-8-final.patch`, SHA `7d80efdc6dceaf14862105bc24590bae299c86287d812629cf117eb3a2d139b1`.
+
+Production is unchanged. Root is still required to prepare against the private
+installed controller package and run the distinct runtime UID listener probe.
+Then installation, enablement and explicit live wake/reply/autonomous completion
+remain. Existing uncertain attempts and held messages were not replayed.
+P0 remains open; later browser/destination evidence and P2 consolidation remain.
+
+## Actual deployed controller preserved: offline acceptance complete — 2026-10-20
+
+Tasks 7–8 are implemented in `/home/daniel/andrew-runner-receipts`. Three-store
+restore retains current verified execution histories and newer controller
+receipts, linked attempts/research records and held messages. Installation binds
+both complete packages, encrypted credential, backend release and startup guards;
+initial activation disables execution and preserves owner pause. Four material
+review findings plus first-install migration and deployed output-truncation
+compatibility were reproduced, fixed and independently reviewed. Actual copied
+controller owner-routing, voice-disable and trusted skill startup fixes were
+merged and independently reviewed; 55 focused cases passed.
+
+Final frozen offline candidate: `/home/daniel/andrew-autonomy-media/.superpowers/sdd/2026-10-19-runner-result-recovery/candidate-task7-8-host-merged`.
+Validation passed: 84 Node tests; 687 controller tests
+(2 expected live skips); 234 script/integration tests;
+54 pristine compatibility cases
+(37 expected feature skips); actual runtime package imports.
+All acceptance logs, exact source hashes and candidate bindings verified.
+Evidence: `task7-8-host-implementation-evidence.json`; reviewed patch
+`task1-8-host-merged.patch`, SHA `6fa86c4ac8d1c67f72a06541fd6ebf49072df23070a0ba93d3d0e9c9b3fcc140`.
+
+Production is unchanged. Root is still required to prepare against the private
+installed controller package and run the distinct runtime UID listener probe.
+Then installation, enablement and explicit live wake/reply/autonomous completion
+remain. Existing uncertain attempts and held messages were not replayed.
+P0 remains open; later browser/destination evidence and P2 consolidation remain.
+
+## Privileged host preparation passed — 2026-10-20
+
+Owner supplied successful preparation output for
+`/var/backups/andrew-runner-recovery-candidate-v2`. All acceptance checks,
+including distinct runtime UID credentials, reported passed. Production is
+unchanged. The installer will reverify the exact private candidate before
+activation. Next: owner `/pause`, coordinated initially disabled installation,
+then capability-checked enablement. No wake or replay is requested. P0 remains
+open until live reply and autonomous completion are verified; later P0 evidence
+scopes also remain.
+
+## Installation interrupted at controller schema migration — 2026-10-20
+
+Actual accepted packages are installed but all four affected services remain
+stopped with the durable installation fence. Owner inspection confirms pause1,
+execution0, unchanged owner controls, zero receiver rows, original backups
+retained, absent adoption and absent runner controller tables. The service
+working directory shadowed the controller PYTHONPATH in python -c, importing
+the older service Store. Explicit role working directories and schema assertions
+fix future installer invocations.
+
+A separate guarded `scripts/resume-runner-installation.py` loads the immutable
+accepted installer, validates exact code/config/backups/key/pins/empty receiver,
+retains current stores durably, migrates from the explicit controller package,
+creates a fresh three-store snapshot and finishes DISABLED adoption. It never
+starts the controller or replays work. Independent review approved the concrete
+repair; its one parent-directory fsync finding was fixed RED to GREEN.
+17 installer and 5 repair test methods with refusal/fault subcases passed.
+Evidence: `installation-schema-repair-evidence.json`. Actual root repair remains
+pending. Do not rerun --apply against this partially installed candidate.
+
+After successful repair, enable must use the immutable accepted installer from
+a controller working directory (root shell cd /opt/andrew/prototype), because
+the worktree manifest now binds the future installer correction. Explicit owner
+wake, reply delivery and autonomous completion remain unverified. P0 is open.
+
+Repair preflight refused source permissions before any database changes. The
+packager copy retained group-write developer modes 775/664, while the repair
+requires protected root-owned source paths. Future staging now strips group/
+other write bits; regression RED to GREEN and all 18 installer tests passed.
+Existing private root candidate requires chmod -R go-w on its source tree only;
+this preserves all accepted content hashes. Then rerun the same guarded repair.
+Repair tool remains unchanged (SHA 77025e65d2b3af99bf9d20e0509310c30ffd02603bdd96c4a84ef567ab0b3c55).
+
+## Schema repair installed disabled — 2026-10-20
+
+Owner reports installed true, automatic_resume false and execution_enabled false.
+Repair evidence: /var/backups/andrew-runner-recovery-candidate-v2/repair-fd38e9b29ebf4c81bb14382e440a6ea0.
+Read-only host checks independently show backend/receiver/socket active, controller
+inactive, adoption disabled and installation fence absent. Next is capability-
+checked enablement through the immutable accepted installer, invoked by root
+from /opt/andrew/prototype to avoid caller package shadowing. Preserve pause;
+no wake or replay has been requested. Live reply/autonomous completion remain
+unverified, and P0 remains open.
+
+## Runner recovery enabled, live verification pending — 2026-10-20
+
+Owner reports enabled true, owner_controls_preserved true and wake_requested
+false from the immutable accepted installer. Independent read-only checks show
+controller/backend/receiver/socket active, adoption enabled and no installation
+fence. Enablement preserved pause. Next: explicit owner /wake, acknowledge wake,
+then a short normal owner message; confirm a delivered reply and subsequently
+one completed autonomous cycle. Service activity alone does not prove model
+progress. Existing held attempts stay held; no replay occurred. P0 remains open.

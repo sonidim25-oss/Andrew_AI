@@ -137,6 +137,27 @@ class LifecycleTests(unittest.TestCase):
                 self.controller.execute_tool(name, arguments)
         self.assertNotEqual(self.store.get_state("sleeping"), "1")
 
+    def test_diary_without_active_session_returns_explicit_rejection_without_write(self):
+        import json
+        with patch.object(self.store, 'create_diary_entry') as create:
+            result=json.loads(self.controller.execute_tool('save_diary_entry', {'content':'A fixture diary.'}))
+        self.assertEqual(result['status'],'error')
+        self.assertEqual(result['error'],'diary_requires_autonomous_session')
+        self.assertFalse(result['executed'])
+        create.assert_not_called()
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM diary_entries').fetchone()[0],0)
+
+    def test_diary_exception_after_commit_is_not_changed_to_precondition_rejection(self):
+        self.runner.start('scheduled_wake',self.now)
+        add_activity=self.store.add_activity
+        def fail_saved_activity(event):
+            if event.startswith('Diary entry saved ('):raise RuntimeError('fixture lost local acknowledgement')
+            return add_activity(event)
+        with patch.object(self.store,'add_activity',side_effect=fail_saved_activity):
+            with self.assertRaises(RuntimeError):
+                self.controller.execute_tool('save_diary_entry',{'content':'A committed fixture diary.'})
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM diary_entries').fetchone()[0],1)
+
     def test_diary_then_sleep_survives_restart_and_wakes_once(self):
         self.runner.start("scheduled_wake", self.now)
         self.controller.execute_tool("save_diary_entry", {"content": "I explored a small idea and will return after resting."})

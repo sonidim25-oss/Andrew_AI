@@ -1,3 +1,4 @@
+from backup_fixture import isolate_backup_adoption
 import hashlib
 import json
 from pathlib import Path
@@ -13,6 +14,7 @@ from andrewbot.store import Store
 
 class SessionHistoryTests(unittest.TestCase):
     def setUp(self):
+        isolate_backup_adoption(self)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.path = Path(self.directory.name) / 'controller.sqlite3'

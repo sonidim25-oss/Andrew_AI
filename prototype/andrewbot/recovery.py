@@ -6,19 +6,48 @@ import time
 import uuid
 from dataclasses import asdict
 
-from .appserver import AppServerClient, LettaCommandError, LettaTurnCancelled
+from .appserver import AppServerClient, LettaCommandError, LettaTurnCancelled, LettaTurnYielded
 from .recovery_records import RecoveryRecords, canonical, digest, validate_binding
 
 CONTRACT='local_durable_recovery_v1'
 HOLD_REASONS=frozenset({'legacy_unproven','binding_mismatch','unsupported_contract','provider_uncertain',
     'tool_uncertain','authority_lost','state_corrupt','storage_limit','owner_blocked',
-    'configuration_changed','restore_required','projection_conflict'})
+    'configuration_changed','restore_required','projection_conflict','revision_conflict'})
 
 
 class RecoveryInterrupted(RuntimeError):
     def __init__(self,category='authority_lost'):
         self.category=category if category in HOLD_REASONS else 'state_corrupt'
         super().__init__('Local recovery held: '+self.category)
+
+
+def check_recovery_outcomes(store,binding,*,fresh=False,ignore_runner_attempt_id=None):
+    with store._lock:
+        if ignore_runner_attempt_id is not None:
+            mapped=store.connection.execute("SELECT 1 FROM runner_operations o JOIN recovery_effects e ON e.admission_id=o.admission_id JOIN cycle_tool_attempts t ON t.attempt_id=o.legacy_attempt_id WHERE o.legacy_attempt_id=? AND o.binding_sha=? AND o.state='prepared' AND e.state='prepared' AND t.outcome='started'",(ignore_runner_attempt_id,digest(binding))).fetchone()
+            if mapped is None:raise RecoveryInterrupted('binding_mismatch')
+        # Never resolve an admitted effect from its absence in a transcript.
+        unknown=store.connection.execute("SELECT kind FROM recovery_effects WHERE state='admitted' LIMIT 1").fetchone()
+        if unknown:raise RecoveryInterrupted('tool_uncertain' if unknown['kind']=='tool' else 'provider_uncertain')
+        # A durable rejection or confirmed provider result proves that this
+        # binding already passed admission despite unrelated legacy costs.
+        # Neither excuses a newer admitted effect checked above.
+        admitted=store.connection.execute("SELECT 1 FROM recovery_effects e WHERE e.binding_sha=? AND (EXISTS (SELECT 1 FROM recovery_provider_rejections r WHERE r.admission_id=e.admission_id) OR (e.kind IN ('provider','compaction') AND e.state='confirmed' AND EXISTS (SELECT 1 FROM recovery_results r WHERE r.admission_id=e.admission_id))) LIMIT 1",(digest(binding),)).fetchone()
+        for reservation in store.connection.execute('SELECT reservation_id FROM budget_reservations'):
+            reservation_id=reservation['reservation_id']
+            # A distinct newly journaled input is not a replay of a legacy
+            # request. Keep its reserved cost and duplicate guard intact.
+            # Resuming interrupted work still requires global reconciliation.
+            legacy=bool(re.fullmatch(r'(?:provider-[a-f0-9]{64}|[a-f0-9]{32})',reservation_id))
+            linked=store.connection.execute('SELECT 1 FROM recovery_effects WHERE reservation_id=? LIMIT 1',(reservation_id,)).fetchone()
+            if (not fresh and not admitted) or not legacy or linked:raise RecoveryInterrupted('provider_uncertain')
+        if store.cycle_uncertain_effects(binding['cycle_id'],ignore_attempt_id=ignore_runner_attempt_id):raise RecoveryInterrupted('tool_uncertain')
+        if store.connection.execute("SELECT 1 FROM external_action_receipts WHERE state='uncertain' LIMIT 1").fetchone():raise RecoveryInterrupted('tool_uncertain')
+        tables={row[0] for row in store.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for table,condition in (('media_jobs',"state IN ('running','uncertain') OR delivery IN ('sending','uncertain')"),
+                                ('media_avatar_proposals',"state IN ('applying','uncertain')")):
+            if table in tables and store.connection.execute('SELECT 1 FROM '+table+' WHERE '+condition+' LIMIT 1').fetchone():raise RecoveryInterrupted('tool_uncertain')
+
 
 
 class LocalRecoveryClient:
@@ -38,6 +67,9 @@ class LocalRecoveryClient:
     def subscribe(self,binding,attempt_id):return self.command('recovery_subscribe',binding=binding,attempt_id=attempt_id)
     def result_read(self,binding,scope,claim,effect_id):
         return self.command('recovery_result_read',binding=binding,**scope,claim_id=claim['claim_id'],fence=claim['fence'],effect_admission_id=effect_id)
+    def reconcile_tool(self,binding,scope,claim,admission_id,expected_revision):
+        return self.command('recovery_reconcile_tool',binding=binding,**scope,claim_id=claim['claim_id'],
+            fence=claim['fence'],expected_revision=expected_revision,effect_admission_id=admission_id)
     def revoke(self,binding,scope,claim):
         return self.command('recovery_revoke',binding=binding,**scope,claim_id=claim['claim_id'],fence=claim['fence'])
     def release(self,binding,scope,claim):
@@ -74,7 +106,7 @@ class RecoveryCoordinator:
     def _pending(self):
         with self.store._lock:
             return [dict(row) for row in self.store.connection.execute(
-                "SELECT * FROM recovery_attempts WHERE state IN ('active','evidence','held') ORDER BY rowid LIMIT 64")]
+                "SELECT * FROM recovery_attempts WHERE state IN ('active','evidence','held','yielding') ORDER BY rowid LIMIT 64")]
 
     def has_pending(self):return self.enabled and bool(self._pending())
 
@@ -99,28 +131,11 @@ class RecoveryCoordinator:
         with self._active_lock:self._active_client=self._active_scope=self._active_cancel=None
 
     def _check_outcomes(self,binding,*,fresh=False):
-        with self.store._lock:
-            # Never resolve an admitted effect from its absence in a transcript.
-            unknown=self.store.connection.execute("SELECT kind FROM recovery_effects WHERE state='admitted' LIMIT 1").fetchone()
-            if unknown:raise RecoveryInterrupted('tool_uncertain' if unknown['kind']=='tool' else 'provider_uncertain')
-            for reservation in self.store.connection.execute('SELECT reservation_id FROM budget_reservations'):
-                reservation_id=reservation['reservation_id']
-                # A distinct newly journaled input is not a replay of a legacy
-                # request. Keep its reserved cost and duplicate guard intact.
-                # Resuming interrupted work still requires global reconciliation.
-                legacy=bool(re.fullmatch(r'(?:provider-[a-f0-9]{64}|[a-f0-9]{32})',reservation_id))
-                linked=self.store.connection.execute('SELECT 1 FROM recovery_effects WHERE reservation_id=? LIMIT 1',(reservation_id,)).fetchone()
-                if not fresh or not legacy or linked:raise RecoveryInterrupted('provider_uncertain')
-            if self.store.cycle_uncertain_effects(binding['cycle_id']):raise RecoveryInterrupted('tool_uncertain')
-            if self.store.connection.execute("SELECT 1 FROM external_action_receipts WHERE state='uncertain' LIMIT 1").fetchone():raise RecoveryInterrupted('tool_uncertain')
-            tables={row[0] for row in self.store.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            for table,condition in (('media_jobs',"state IN ('running','uncertain') OR delivery IN ('sending','uncertain')"),
-                                    ('media_avatar_proposals',"state IN ('applying','uncertain')")):
-                if table in tables and self.store.connection.execute('SELECT 1 FROM '+table+' WHERE '+condition+' LIMIT 1').fetchone():raise RecoveryInterrupted('tool_uncertain')
+        return check_recovery_outcomes(self.store,binding,fresh=fresh)
 
     def _previous(self,runtime):
         with self.store._lock:
-            rows=self.store.connection.execute("SELECT binding_json FROM recovery_attempts WHERE state='complete' ORDER BY rowid DESC LIMIT 64").fetchall()
+            rows=self.store.connection.execute("SELECT binding_json FROM recovery_attempts WHERE state IN ('complete','yielded') ORDER BY rowid DESC LIMIT 64").fetchall()
         for row in rows:
             binding=json.loads(row['binding_json'])
             if all(binding[key]==runtime[key] for key in ('agent_id','conversation_id')):return binding
@@ -135,10 +150,12 @@ class RecoveryCoordinator:
         terminal=state.get('terminal')
         if not isinstance(terminal,dict):raise RecoveryInterrupted('state_corrupt')
         self.records.complete_scope(scope['admission_id'],binding,terminal)
-        proof=self.records.effect_result(terminal['result_admission_id'])
-        if proof['state']!='confirmed':raise RecoveryInterrupted('provider_uncertain')
-        self._accepted(binding,origin)
-        if origin=='autonomous':
+        yielded=terminal.get('stop_reason')=='owner_input_pending'
+        if not yielded:
+            proof=self.records.effect_result(terminal['result_admission_id'])
+            if proof['state']!='confirmed':raise RecoveryInterrupted('provider_uncertain')
+            self._accepted(binding,origin)
+        if origin=='autonomous' and not yielded:
             event={'kind':'completed','request_id':binding['consumer_id'],'assistant_ids':terminal['assistant_ids'],
                 'terminal':{'type':'turn_finished','stop_reason':'end_turn','run_id':terminal['run_id'],
                     'turn_id':terminal['id'],'terminal_consumer_ids':[binding['consumer_id']]}}
@@ -160,6 +177,9 @@ class RecoveryCoordinator:
         # Acknowledgement does not acknowledge Telegram delivery or clear any other hold.
         client.ack(binding,scope,claim,terminal)
         client.release(binding,scope,claim)
+        if yielded:
+            self.records.finish_owner_yield(scope['admission_id'],binding)
+            raise LettaTurnYielded('Owner input is waiting')
         self._state(scope['admission_id'],'complete',revision=client.inspect(binding)['revision'])
         if terminal.get('lifecycle_stop') in {'sleep','wake_at'}:return str(proof['result'])
         response=proof['result']
@@ -234,17 +254,86 @@ class RecoveryCoordinator:
             return result
         finally:client.close()
 
+    def _late_provider_receipt(self,client,binding,row,state,capability):
+        if (capability.get('late_provider_receipt')!=1 or state.get('phase')!='held'
+                or state.get('hold_reason')!='provider_uncertain' or state.get('state')=='running'):return False
+        ids=state.get('effect_admission_ids')
+        if not isinstance(ids,list) or not ids:return False
+        # Effect IDs come from the bound backend checkpoint; the protocol still
+        # verifies the exact last admitted provider, digest and settled receipt.
+        with self.store._lock:
+            effect=self.store.connection.execute("SELECT * FROM recovery_effects WHERE binding_sha=? AND kind IN ('provider','compaction') ORDER BY rowid DESC LIMIT 1",(digest(binding),)).fetchone()
+            if effect is None or effect['admission_id'] not in ids:return False
+            proof=self.records.effect_result(effect['admission_id'])
+            if not (proof['state']=='rejected' or (proof['state']=='confirmed' and isinstance(proof.get('usage'),dict) and proof['usage'].get('settled') is True)):return False
+        scope=self.records.admit_scope(binding,origin=row['origin'],evidence_only=True)
+        self._activate(client,scope)
+        claim=client.command('recovery_reconcile_provider',binding=binding,expected_revision=state['revision'],effect_admission_id=effect['admission_id'],**scope)
+        client.release(binding,scope,claim)
+        self._state(scope['admission_id'],'active',revision=client.inspect(binding)['revision'])
+        self.store.add_activity('Late provider receipt recovered without request or tool dispatch')
+        return True
+
+    def _runner_tool_receipt(self,client,binding,row,state,capability):
+        if (capability.get('runner_result_recovery_v1')!=1 or capability.get('held_tool_result_v1')!=1
+                or state.get('state')=='running' or not self.controller.autonomous_enabled):return False
+        held=state.get('phase')=='held' and state.get('hold_reason')=='tool_uncertain'
+        repeated=state.get('phase')=='tool_confirmed' and row['state']=='held'
+        if not held and not repeated:return False
+        ids=state.get('effect_admission_ids')
+        if not isinstance(ids,list):return False
+        with self.store._lock:
+            rows=self.store.connection.execute('''SELECT o.admission_id FROM runner_operations o
+                JOIN runner_imports i USING(operation_id) WHERE o.binding_sha=? AND o.state='imported'
+                ORDER BY o.rowid DESC''',(digest(binding),)).fetchall()
+            candidates=[item['admission_id'] for item in rows if item['admission_id'] in ids]
+            if not candidates:return False
+            admission_id=candidates[0]
+            proof=self.records.effect_result(admission_id)
+            if proof.get('state')!='confirmed' or not proof.get('runner_receipt'):return False
+            if repeated and admission_id not in state.get('runner_receipt_admissions',[]):return False
+        # Import is historical. Acquiring new authority and continuing require
+        # the same guards as every other resumed autonomous turn.
+        self._check_outcomes(binding)
+        with self.store._lock:self.records._guard(binding)
+        scope=self.records.admit_scope(binding,origin=row['origin'])
+        self._activate(client,scope)
+        claim=client.claim(binding,state['revision'],scope)
+        try:
+            client.reconcile_tool(binding,scope,claim,admission_id,claim['revision'])
+        finally:client.release(binding,scope,claim)
+        self._state(scope['admission_id'],'active',revision=client.inspect(binding)['revision'])
+        self.store.add_activity('Saved runner result confirmed without executing the tool again')
+        return True
+
     def reconcile_one(self):
         if not self.enabled:return False
         pending=self._pending()
         if not pending:return False
         row=pending[0]
-        if row['origin']!='autonomous' or row['state']=='held':return False
-        binding=validate_binding(json.loads(row['binding_json']));client=self.client_factory()
+        if row['origin']!='autonomous':return False
+        binding=validate_binding(json.loads(row['binding_json']))
+        from .runner_recovery import RunnerRecoveryAdapter,reconcile_pending_runner_result
+        adapter=getattr(self.controller,'runner_recovery',None)
+        if isinstance(adapter,RunnerRecoveryAdapter) and reconcile_pending_runner_result(
+                self.store,adapter.client,binding,expected_runner_uid=adapter.expected_runner_uid):return True
+        client=self.client_factory()
         try:
-            if client.capabilities()['store_id']!=binding['store_id']:raise RecoveryInterrupted('binding_mismatch')
+            capability=client.capabilities()
+            if capability['store_id']!=binding['store_id']:raise RecoveryInterrupted('binding_mismatch')
             state=client.status(binding,row['backend_attempt_id']) if row['backend_attempt_id'] else client.inspect(binding)
             terminal=state.get('phase')=='terminal_committed'
+            if self._late_provider_receipt(client,binding,row,state,capability):return True
+            if self._runner_tool_receipt(client,binding,row,state,capability):return True
+            if (not terminal and capability.get('owner_handoff')==1
+                    and self.store.pending_owner_input(self.controller.owner_id)
+                    and (state.get('phase')!='held' or state.get('hold_reason') in {'owner_blocked','provider_uncertain','tool_uncertain'})):
+                if state.get('state')=='running':return False
+                scope=self.records.admit_scope(binding,origin=row['origin'],yield_only=True)
+                self._activate(client,scope)
+                claim=client.command('recovery_yield',binding=binding,expected_revision=state['revision'],**scope)
+                return self._finish(client,binding,scope,claim,client.inspect(binding),row['origin'])
+            if row['state']=='held' and not terminal:return False
             if not terminal:
                 if not self.controller.autonomous_enabled:return False
                 self._check_outcomes(binding)
@@ -259,6 +348,8 @@ class RecoveryCoordinator:
                 self.store.set_state('autonomy_error','')
                 self.store.promote_completed_model_turn(binding['session_id'])
                 self.store.recover_confirmed_session(binding['session_id'])
+            return True
+        except LettaTurnYielded:
             return True
         except RecoveryInterrupted as error:
             if error.category in {'provider_uncertain','tool_uncertain','state_corrupt','storage_limit','restore_required','projection_conflict','legacy_unproven'}:

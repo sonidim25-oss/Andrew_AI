@@ -1,5 +1,10 @@
 # Local Letta recovery: review and operation
 
+For the current HTTP 429 incident and the combined deployment, use
+[provider rate-limit recovery](provider-rate-limit-recovery.md). It includes the
+new artifact, exact selected-input migration, and verification commands. The
+older deployment examples below describe earlier recovery releases.
+
 This change journals newly admitted local turns and resumes autonomous turns only
 from confirmed controller receipts. It does not recover the older interrupted
 input, infer success from transcript text, or retry an uncertain request/action.

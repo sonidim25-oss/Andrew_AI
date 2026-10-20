@@ -1,3 +1,4 @@
+from backup_fixture import isolate_backup_adoption
 import os
 import contextlib
 import io
@@ -14,6 +15,7 @@ from andrewbot.store import Store
 
 class MemoryBackupTests(unittest.TestCase):
     def setUp(self):
+        isolate_backup_adoption(self)
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.store = Store(self.root / "controller.sqlite3")

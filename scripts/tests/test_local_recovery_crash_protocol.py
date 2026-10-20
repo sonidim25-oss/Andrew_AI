@@ -1,5 +1,6 @@
 """Kill actual backend/controller processes at durable boundaries; no paid destinations."""
 import json
+import fcntl
 import os
 from pathlib import Path
 import signal
@@ -42,7 +43,7 @@ def available_port():
 
 
 class Harness:
-    def __init__(self,test,*,phase=None,moment=None,controller_fault=None,compaction=False):
+    def __init__(self,test,*,phase=None,moment=None,controller_fault=None,compaction=False,rate_limit=False,owner_arrives=False):
         self.test=test;self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
         self.provider_calls=[];self.effects=[];fixture=self;self.compaction=compaction
         class Provider(BaseHTTPRequestHandler):
@@ -51,11 +52,18 @@ class Harness:
                 payload=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 if self.path=='/provider':
                     fixture.provider_calls.append(payload)
+                    if owner_arrives and len(fixture.provider_calls)==1:
+                        import sqlite3
+                        with sqlite3.connect(fixture.root/'controller.sqlite3') as db:
+                            db.execute("INSERT INTO messages(owner_id,role,content,queued,created_at) VALUES(17,'user','New waiting owner input',1,datetime('now'))")
+                    if rate_limit and len(fixture.provider_calls)==1:
+                        encoded=b'{"error":{"code":429,"message":"fixture rate limit"}}'
+                        self.send_response(429);self.send_header('Retry-After','5');self.send_header('Content-Length',str(len(encoded)));self.end_headers();self.wfile.write(encoded);return
                     if compaction and len(fixture.provider_calls)==1:
                         message={'role':'assistant','content':'Historical fixture text. '*150000};reason='stop'
                     elif compaction and payload['messages'][0]['content'].startswith('Your task is to create a detailed summary'):
                         message={'role':'assistant','content':'Exact confirmed compaction summary.'};reason='stop'
-                    elif len(fixture.provider_calls)==(3 if compaction else 1):
+                    elif len(fixture.provider_calls)==(3 if compaction else 2 if rate_limit else 1):
                         message={'role':'assistant','content':None,'tool_calls':[{'id':'crash-call','type':'function','function':{'name':'recent_activity','arguments':'{}'}}]};reason='tool_calls'
                     else:message={'role':'assistant','content':'Exact final fixture answer.'};reason='stop'
                     result={'id':'fixture-'+str(len(fixture.provider_calls)),'choices':[{'index':0,'message':message,'finish_reason':reason}],
@@ -87,12 +95,13 @@ class Harness:
             except ConnectionRefusedError:
                 self.test.assertLess(time.monotonic(),deadline);time.sleep(.02)
 
-    def start_controller(self,mode,fault=None):
+    def start_controller(self,mode,fault=None,*,recovery_once=False):
         for name in ('controller-ready.json','controller-done.json'):(self.root/name).unlink(missing_ok=True)
         command=[sys.executable,str(ROOT/'scripts/tests/recovery_controller_fixture.py'),'--root',str(self.root),
             '--backend-url',self.url,'--provider-url',f'http://127.0.0.1:{self.provider.server_port}','--mode',mode]
         if fault:command+=['--fault',fault]
         if self.compaction:command+=['--compaction']
+        if recovery_once:command+=['--recovery-once']
         log=(self.root/'controller.log').open('a')
         environment={**os.environ,'PYTHONPATH':str(ROOT/'prototype')}
         self.controller=subprocess.Popen(command,cwd=self.root,env=environment,stdout=log,stderr=log);log.close()
@@ -109,12 +118,12 @@ class Harness:
         with sqlite3.connect(self.root/'controller.sqlite3') as db:
             return db.execute('SELECT client_message_id FROM model_turn_receipts').fetchone()[0]
 
-    def recover(self,*,restart_backend=True):
+    def recover(self,*,restart_backend=True,recovery_once=False):
         if self.controller and self.controller.poll() is None:self.controller.kill();self.controller.wait(5)
         if restart_backend:
             if self.backend and self.backend.poll() is None:self.backend.kill();self.backend.wait(5)
             self.environment.pop('NODE_OPTIONS',None);self.environment.pop('ANDREW_TEST_FAULT_ROOT',None);self.start_backend()
-        self.start_controller('recover')
+        self.start_controller('recover',recovery_once=recovery_once)
         return self.wait_file('controller-done.json')
 
     def close(self):
@@ -127,6 +136,66 @@ class Harness:
 
 @unittest.skipUnless(os.environ.get('ANDREW_LOCAL_RECOVERY_TEST_RELEASE'),'requires verified isolated recovery release')
 class LocalRecoveryCrashProtocolTests(unittest.TestCase):
+    def test_owner_handoff_process_loss_never_replays_prepared_tool(self):
+        for fault in ('yield_before','yield_after','handoff_before','handoff_after'):
+            for both in (False,True):
+                with self.subTest(fault=fault,restart_backend=both):
+                    fixture=Harness(self,controller_fault=fault,owner_arrives=True)
+                    fixture.wait_file('controller-fault.json');fixture.controller.wait(5)
+                    result=fixture.recover(restart_backend=both)
+                    self.assertTrue(result['completed'],result)
+                    self.assertEqual(result['receipts'][0]['state'],'accepted')
+                    self.assertEqual(len(fixture.provider_calls),1);self.assertEqual(fixture.effects,[])
+                    self.assertEqual(result['reservations'],0);self.assertEqual(result['held_messages'],1)
+                    fixture.close()
+
+    def test_rejection_restart_waits_for_previous_execution_lock(self):
+        fixture=Harness(self,controller_fault='rejection_after',rate_limit=True)
+        fixture.wait_file('controller-fault.json');fixture.controller.wait(5)
+        path=next((fixture.root/'backend-home/backend/local-recovery-v1/conversations').rglob('*.execution'))
+        with path.open('a') as lock:
+            deadline=time.monotonic()+5
+            while True:
+                try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);break
+                except BlockingIOError:
+                    self.assertLess(time.monotonic(),deadline);time.sleep(.01)
+            result=fixture.recover(restart_backend=False,recovery_once=True)
+            self.assertFalse(result['completed']);self.assertEqual(len(fixture.provider_calls),1)
+        result=fixture.recover(restart_backend=False)
+        self.assertTrue(result['completed'],result)
+        self.assertEqual(len(fixture.provider_calls),3)
+        self.assertEqual(len(fixture.effects),1)
+        self.assertEqual(result['reservations'],0)
+        fixture.close()
+
+    def test_rejection_receipt_process_loss_before_and_after_commit(self):
+        for boundary in ('before','after'):
+            for restart_backend in (False,True):
+                with self.subTest(boundary=boundary,restart_backend=restart_backend):
+                    fixture=Harness(self,controller_fault='rejection_'+boundary,rate_limit=True)
+                    fixture.wait_file('controller-fault.json');fixture.controller.wait(5)
+                    original=fixture.original_input();result=fixture.recover(restart_backend=restart_backend)
+                    self.assertEqual(fixture.original_input(),original)
+                    self.assertEqual(result['held_messages'],1)
+                    if boundary=='before':
+                        self.assertFalse(result['completed']);self.assertEqual(len(fixture.provider_calls),1)
+                        self.assertEqual(result['reservations'],1);self.assertEqual(fixture.effects,[])
+                    else:
+                        self.assertTrue(result['completed']);self.assertEqual(len(fixture.provider_calls),3)
+                        self.assertEqual(result['reservations'],0);self.assertEqual(len(fixture.effects),1)
+                    fixture.close()
+
+    def test_backend_loss_around_backoff_checkpoint_keeps_rejection_evidence(self):
+        for moment in ('before','after'):
+            with self.subTest(moment=moment):
+                fixture=Harness(self,phase='provider_backoff',moment=moment,rate_limit=True)
+                fixture.wait_file('backend-fault.json');fixture.backend.wait(5)
+                fixture.wait_file('controller-done.json')
+                result=fixture.recover()
+                self.assertTrue(result['completed']);self.assertEqual(len(fixture.provider_calls),3)
+                self.assertEqual(result['reservations'],0);self.assertEqual(len(fixture.effects),1)
+                fixture.close()
+
     def test_backend_process_loss_matrix(self):
         for phase in ('input_committed','provider_admitted','provider_confirmed','tool_prepared','tool_admitted',
                       'tool_confirmed','continuation_ready','terminal_committed','projection'):

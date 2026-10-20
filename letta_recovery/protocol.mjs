@@ -19,7 +19,7 @@ export class RecoveryProtocol{
  _status(binding,attemptId){
   const snapshot=this.store.load(binding);if(!snapshot)return {status:'missing',hold_reason:'legacy_unproven'};
   const attempt=attemptId?snapshot.attempts?.[attemptId]:null;
-  return {...this.store.inspect(binding),run_id:snapshot.run_id,attempt_id:attemptId??null,state:attempt?(snapshot.phase==='terminal_committed'?'complete':snapshot.phase==='held'?'held':this.jobs.has(attemptId)?'running':'interrupted'):'missing',effect_admission_ids:[...snapshot.steps,...snapshot.tools].filter(item=>item.admission_id).map(item=>item.admission_id),terminal:snapshot.terminal??null};
+  return {...this.store.inspect(binding),run_id:snapshot.run_id,attempt_id:attemptId??null,state:attempt?(snapshot.phase==='terminal_committed'?'complete':snapshot.phase==='held'?'held':this.jobs.has(attemptId)?'running':'interrupted'):'missing',runner_receipt_admissions:snapshot.tools.filter(item=>item.state==='confirmed'&&item.runner_receipt).map(item=>item.admission_id),effect_admission_ids:[...snapshot.steps,...snapshot.tools].filter(item=>item.admission_id).map(item=>item.admission_id),terminal:snapshot.terminal??null};
  }
  _assertOpen(){if(this.closed)throw Error('authority_lost');}
  _claim(command){
@@ -39,7 +39,7 @@ export class RecoveryProtocol{
  }
  async _handleRecoveryCommand(command){
   this._assertOpen();validateCommand(command);
-  if(command.type==='recovery_capabilities')return {contract:CONTRACT,version:1,store_id:this.storeId};
+  if(command.type==='recovery_capabilities')return {contract:CONTRACT,version:1,store_id:this.storeId,owner_handoff:1,late_provider_receipt:1,local_diary_reconciliation:1,runner_result_recovery_v1:1,held_tool_result_v1:1};
   const binding=validateBinding(command.binding);if(binding.store_id!==this.storeId)throw Error('binding_mismatch');
   if(['recovery_inspect','recovery_status','recovery_subscribe'].includes(command.type))return this._status(binding,command.attempt_id);
   assertNotRestored(this.root);
@@ -59,15 +59,34 @@ export class RecoveryProtocol{
    await this.sdk.assertAdoptable(binding);this._assertOpen();adopt(this.root,binding);
    const snapshot=command.previous_binding?this.store.admitNext(binding,command.input,command.previous_binding,command.expected_revision):await this.execution.admitInput(binding,command.input);return this._status(snapshot.binding);
   }
-  if(command.type==='recovery_claim'){
+  if(['recovery_claim','recovery_yield','recovery_reconcile_provider','recovery_reconcile_local_diary'].includes(command.type)){
    this._scope(command,null);
    const claim=await this.ownership.claim(binding,command.expected_revision,command.admission_id);
    try{
     this._assertOpen();this.claims.set(claim.claim_id,{claim,binding});this._scope(command,claim);
-    if(this.store.load(binding).phase==='terminal_committed')await this.sdk.checkEvidence(binding,claim);else await this.sdk.checkScope(binding,claim);
+    if(command.type==='recovery_reconcile_provider'){
+     await this.sdk.checkEvidence(binding,claim);this._assertOpen();
+     await this.execution.reconcileProvider(binding,claim,command.effect_admission_id);
+    }else if(command.type==='recovery_reconcile_local_diary'){
+     await this.sdk.checkEvidence(binding,claim);this._assertOpen();
+     const repaired=await this.execution.reconcileLocalDiary(binding,claim,command.effect_admission_id);
+     await this.execution.projectTranscript(repaired,claim);
+    }else if(command.type==='recovery_yield'){
+     await this.sdk.checkEvidence(binding,claim);
+     const yielded=await this.execution.yieldOwner(binding,claim);await this.execution.projectTranscript(yielded,claim);
+    }else if(this.store.load(binding).phase==='terminal_committed')await this.sdk.checkEvidence(binding,claim);else await this.sdk.checkScope(binding,claim);
     this._assertOpen();this.ownership.assertOwned(claim);
    }catch(error){this.claims.delete(claim.claim_id);await this.ownership.release(claim);throw error;}
    return {...claim,revision:this.store.load(binding).revision};
+  }
+  if(command.type==='recovery_reconcile_tool'){
+   const claim=this._claim(command);this._scope(command,claim);
+   if(this.store.load(binding).revision!==command.expected_revision)throw Error('stale revision');
+   await this.sdk.checkEvidence(binding,this.ownership.currentClaim(claim));this._claim(command);
+   if(this.store.load(binding).revision!==command.expected_revision)throw Error('stale revision');
+   const repaired=await this.execution.reconcileTool(binding,claim,command.effect_admission_id);
+   this._claim(command);await this.execution.projectTranscript(repaired,claim);
+   return this._status(binding,command.attempt_id);
   }
   if(command.type==='recovery_resume'){
    if(!safeId(command.attempt_id))throw Error('binding_mismatch');
@@ -90,7 +109,7 @@ export class RecoveryProtocol{
    const claim=this._claim(command),snapshot=this.store.load(binding);this._scope(command,claim);
    if(snapshot.terminal?.id!==command.terminal_id||binding.consumer_id!==command.consumer_id)throw Error('invalid transition');
    const evidence=await this.sdk.settlement(binding,this.ownership.currentClaim(claim),command.terminal_id);this._claim(command);
-   const admissions=[...snapshot.steps,...snapshot.tools].filter(item=>item.admission_id).map(item=>item.admission_id).sort();
+   const admissions=[...new Set([...snapshot.steps,...snapshot.tools].filter(item=>item.admission_id).map(item=>item.admission_id).concat(snapshot.terminal?.cancelled_admission_ids??[]))].sort();
    if(evidence?.settled!==true||!sameBinding(evidence.binding,binding)||evidence.terminal_id!==command.terminal_id||canonical(evidence.admission_ids)!==canonical(admissions))throw Error('provider_uncertain');
    this.store.commit(binding,command.expected_revision,{type:'ack',terminal_id:command.terminal_id,consumer_id:command.consumer_id,settled:true,fence:claim.fence,claim_id:claim.claim_id});return this._status(binding,command.attempt_id);
   }
@@ -98,15 +117,21 @@ export class RecoveryProtocol{
  }
  async _run(binding,claim,attemptId){
   try{
-   for(let count=0;count<1024;count++){
+   for(let count=0;count<1024;){
     this.ownership.assertOwned(claim);const snapshot=this.store.load(binding);
     await this.execution.projectTranscript(snapshot,claim);
     if(['held','terminal_committed'].includes(snapshot.phase))return;
-    await this.execution.advance(binding,claim);
+    const advanced=await this.execution.advance(binding,claim);
+    // Waiting for Retry-After does not consume the bounded work-step budget.
+    if(!(snapshot.phase==='provider_backoff'&&advanced.phase==='provider_backoff'
+         &&snapshot.steps.at(-1).rejection.attempt===advanced.steps.at(-1).rejection.attempt))count++;
    }
    throw Error('storage_limit');
   }catch(error){
    if(error.message==='authority_lost')return; // Lost evidence transport never invents an unknown result.
+   if(error.message==='owner_blocked'){
+    try{const yielded=await this.execution.yieldOwner(binding,claim);await this.execution.projectTranscript(yielded,claim);return;}catch{/* Owner changes and unknown effects remain fenced. */}
+   }
    try{this.ownership.assertOwned(claim);const snapshot=this.store.load(binding);
     const reason=['projection_conflict','storage_limit','owner_blocked','configuration_changed','unsupported_contract'].includes(error.message)?error.message:'state_corrupt';
     if(!['held','terminal_committed'].includes(snapshot.phase))this.store.commit(binding,snapshot.revision,{type:'hold',reason,fence:claim.fence,claim_id:claim.claim_id});

@@ -54,7 +54,9 @@ class SessionRunner:
                     pass
                 else:
                     recovery=getattr(self.agent,'local_recovery',None)
-                    if recovery is not None and recovery.enabled is True and recovery.has_pending():
+                    with self.store._lock:
+                        pending_journal=self.store.connection.execute("SELECT 1 FROM recovery_attempts WHERE state IN ('active','evidence','held','yielding') AND json_extract(binding_json,'$.session_id')=? LIMIT 1",(previous,)).fetchone()
+                    if pending_journal or (recovery is not None and recovery.enabled is True and recovery.has_pending()):
                         self.active_session_id=previous;self.started_at=started_at
                         if not self.store.get_state('autonomy_error',''):
                             self.store.set_state('autonomy_error','local_recovery_interrupted')

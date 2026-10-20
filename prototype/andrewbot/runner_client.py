@@ -11,19 +11,11 @@ import struct
 TOOL_CANCELLATION = ContextVar("runner_tool_cancellation", default=None)
 
 
-MAX_REQUEST_BYTES = 64 * 1024
-MAX_RESPONSE_BYTES = 40 * 1024
-_REQUEST_FIELDS = {
-    "python": {"type", "code"},
-    "node": {"type", "code"},
-    "shell": {"type", "command"},
-    "browser_open": {"type", "url"},
-}
-_SAFE_ERRORS = {"invalid_request", "unsupported_tool", "execution_failed", "timeout", "cancelled", "proxy_unavailable", "policy_rejected", "worker_unavailable"}
-
-
-class RunnerProtocolError(RuntimeError):
-    """A safe, bounded runner transport or response error."""
+from .runner_format import (
+    MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, REQUEST_FIELDS as _REQUEST_FIELDS,
+    SAFE_ERRORS as _SAFE_ERRORS, RunnerProtocolError, encode_runner_request,
+    validate_runner_response,
+)
 
 
 def _read_exactly(connection, length, cancel_event=None):
@@ -84,44 +76,21 @@ class RunnerClient:
         finally:
             connection.close()
 
-    @staticmethod
-    def _encode_request(request):
-        if not isinstance(request, dict) or not isinstance(request.get("type"), str):
-            raise RunnerProtocolError("invalid runner request")
-        request_type = request["type"]
-        if request_type not in _REQUEST_FIELDS or set(request) != _REQUEST_FIELDS[request_type]:
-            raise RunnerProtocolError("unsupported runner request")
-        value_key = "url" if request_type == "browser_open" else "command" if request_type == "shell" else "code"
-        value = request.get(value_key)
-        if not isinstance(value, str) or not value or len(value.encode("utf-8")) > MAX_REQUEST_BYTES:
-            raise RunnerProtocolError("invalid runner request")
-        payload = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        if len(payload) > MAX_REQUEST_BYTES:
-            raise RunnerProtocolError("runner request exceeded protocol limits")
-        return payload
+    _encode_request = staticmethod(encode_runner_request)
+    _validate_result = staticmethod(validate_runner_response)
 
-    @staticmethod
-    def _validate_result(result):
-        required = {"status", "stdout", "stderr", "artifacts", "safe_error"}
-        if not isinstance(result, dict) or set(result) not in (required, required | {"visit"}):
-            raise RunnerProtocolError("runner returned an invalid response")
-        if result["status"] not in {"ok", "error"}:
-            raise RunnerProtocolError("runner returned an invalid response")
-        if not isinstance(result["stdout"], str) or not isinstance(result["stderr"], str):
-            raise RunnerProtocolError("runner returned an invalid response")
-        if len(result["stdout"].encode("utf-8")) > MAX_RESPONSE_BYTES or len(result["stderr"].encode("utf-8")) > MAX_RESPONSE_BYTES:
-            raise RunnerProtocolError("runner returned an oversized response")
-        if not isinstance(result["artifacts"], list) or len(result["artifacts"]) > 32:
-            raise RunnerProtocolError("runner returned an invalid response")
-        if any(not isinstance(path, str) or path.startswith("/") or ".." in path.split("/") for path in result["artifacts"]):
-            raise RunnerProtocolError("runner returned an invalid response")
-        safe_error = result["safe_error"]
-        if safe_error is not None and safe_error not in _SAFE_ERRORS:
-            raise RunnerProtocolError("runner returned an invalid response")
-        visit = result.get("visit")
-        if visit is not None and (not isinstance(visit, dict) or set(visit) != {"url", "title"}
-                                  or not isinstance(visit["url"], str) or not isinstance(visit["title"], str)
-                                  or len(visit["url"]) > 2048 or len(visit["title"]) > 512):
-            raise RunnerProtocolError("runner returned an invalid response")
-        result["visit"] = visit
-        return result
+    def receipt_capabilities(self, *, expected_runner_uid):
+        from .runner_socket import receipt_capabilities
+        return receipt_capabilities(self, expected_runner_uid=expected_runner_uid)
+
+    def lookup_receipt(self, identity, *, expected_runner_uid, timeout_seconds=5):
+        from .runner_socket import lookup_receipt
+        return lookup_receipt(self, identity, expected_runner_uid=expected_runner_uid,
+                              timeout_seconds=timeout_seconds)
+
+    def execute_receipted(self, request, identity, *, expected_runner_uid, grant_factory, cancel_event=None):
+        from .runner_socket import execute_receipted
+        if cancel_event is None:
+            cancel_event = TOOL_CANCELLATION.get()
+        return execute_receipted(self, request, identity, expected_runner_uid=expected_runner_uid,
+                                 grant_factory=grant_factory, cancel_event=cancel_event)

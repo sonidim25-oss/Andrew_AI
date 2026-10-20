@@ -18,9 +18,9 @@ from andrewbot.store import Store
 
 
 class UnlimitedWorkTests(unittest.TestCase):
-    def test_provider_socket_wait_is_120_seconds(self):
+    def test_provider_socket_wait_accommodates_long_compaction(self):
         model = OpenRouterModel('fixture-key')
-        self.assertEqual(model.timeout, 120)
+        self.assertEqual(model.timeout, 600)
 
     def test_autonomous_turn_can_wait_without_an_absolute_or_socket_deadline(self):
         connection = Mock()

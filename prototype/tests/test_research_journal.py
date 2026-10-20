@@ -1,3 +1,4 @@
+from backup_fixture import isolate_backup_adoption
 import json
 import tempfile
 import threading
@@ -15,6 +16,7 @@ from andrewbot.store import Store
 
 class JournalTests(unittest.TestCase):
     def setUp(self):
+        isolate_backup_adoption(self)
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.path = Path(directory.name) / 'controller.sqlite3'

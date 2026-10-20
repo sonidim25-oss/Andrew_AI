@@ -7,6 +7,7 @@ import signal
 import sys
 import time
 import urllib.request
+import urllib.error
 from datetime import datetime,timezone
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'prototype'))
@@ -19,14 +20,16 @@ from andrewbot.recovery_dispatch import RecoveryDispatch
 from andrewbot.recovery_records import RecoveryRecords
 from andrewbot.sessions import SessionRunner
 from andrewbot.workers import ModelWorker
+from andrewbot.model import ProviderRequestError, retry_after_seconds
 
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--root',type=Path,required=True)
     parser.add_argument('--backend-url',required=True);parser.add_argument('--provider-url',required=True)
     parser.add_argument('--mode',choices=['start','recover'],required=True)
-    parser.add_argument('--fault',choices=['provider_before','provider_after','tool_before','tool_after'])
+    parser.add_argument('--fault',choices=['provider_before','provider_after','tool_before','tool_after','rejection_before','rejection_after','yield_before','yield_after','handoff_before','handoff_after'])
     parser.add_argument('--compaction',action='store_true')
+    parser.add_argument('--recovery-once',action='store_true')
     args=parser.parse_args();root=args.root
     def save(name,value):
         path=root/name;temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps(value,sort_keys=True));os.replace(temporary,path)
@@ -34,13 +37,17 @@ def main():
         request=urllib.request.Request(args.provider_url+path,json.dumps(payload).encode(),{'Content-Type':'application/json'},method='POST')
         with urllib.request.urlopen(request,timeout=10) as response:return json.load(response)
     class Provider:
-        def complete(self,payload):return post('/provider',payload)
+        def complete(self,payload):
+            try:return post('/provider',payload)
+            except urllib.error.HTTPError as error:
+                raise ProviderRequestError('http_error',error.code,retry_after=retry_after_seconds(error.headers.get('Retry-After'))) from None
     store=Store(root/'controller.sqlite3');gateway=ModelGateway(Provider(),store,'fixture-token')
     server=GatewayThread(make_server(gateway,port=0));server.start()
     def die(boundary):
         save('controller-fault.json',{'boundary':boundary});os.kill(os.getpid(),signal.SIGKILL)
     if args.fault:
-        method='confirm_tool' if args.fault.startswith('tool') else 'confirm_provider'
+        method=('prepare_owner_yield' if args.fault.startswith('yield') else 'complete_scope' if args.fault.startswith('handoff')
+                else 'reject_provider' if args.fault.startswith('rejection') else 'confirm_tool' if args.fault.startswith('tool') else 'confirm_provider')
         original=getattr(RecoveryRecords,method)
         def interrupted(self,*values,**keywords):
             if args.compaction:
@@ -73,6 +80,13 @@ def main():
             completed=runner.run_cycle(session)
         else:
             runner.recover();completed=coordinator.reconcile_one()
+            # Production schedules another worker pass after transient ownership
+            # conflicts. A single pass can race the old connection's release.
+            deadline=time.monotonic()+10
+            while not completed and not args.recovery_once and time.monotonic()<deadline:
+                pending=coordinator._pending()
+                if not pending or pending[0]['state']=='held':break
+                time.sleep(.05);completed=coordinator.reconcile_one()
         rows=[dict(row) for row in store.connection.execute('SELECT client_message_id,state FROM model_turn_receipts')]
         save('controller-done.json',{'completed':bool(completed),'receipts':rows,
             'reservations':store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0],

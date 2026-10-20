@@ -37,6 +37,15 @@ class CoordinatorTests(unittest.TestCase):
         coordinator=RecoveryCoordinator(self.store,self.controller,factory,enabled=False)
         self.assertEqual(coordinator.inspect_pending(),[]);self.assertFalse(coordinator.reconcile_one());factory.assert_not_called()
 
+    def test_revision_conflict_remains_pending_for_next_worker_pass(self):
+        self.client.claim.side_effect=RecoveryInterrupted('revision_conflict')
+        self.assertFalse(self.coordinator.reconcile_one())
+        pending=self.coordinator._pending()
+        self.assertEqual(len(pending),1)
+        self.assertEqual(pending[0]['state'],'active')
+        self.assertIsNone(pending[0]['hold_reason'])
+        self.client.resume.assert_not_called()
+
     def test_pause_sleep_restore_and_revision_block_before_claim(self):
         for key,value in [('paused','1'),('sleeping','1'),('restore_recovery_required','1'),('local_recovery_restore_required','1'),('owner_control_revision','1')]:
             previous=self.store.get_state(key,'0');self.store.set_state(key,value)
@@ -84,3 +93,38 @@ class CoordinatorTests(unittest.TestCase):
                 self.store.connection.execute('DELETE FROM budget_reservations')
                 self.store.connection.execute('INSERT INTO budget_reservations VALUES(?,?,?,?,?)',(reservation,'2026-10','2026-10-16',.01,self.store.now()))
                 with self.assertRaises(RecoveryInterrupted):self.coordinator._check_outcomes(self.binding,fresh=True)
+
+class LateProviderCoordinatorTests(unittest.TestCase):
+    def setUp(self):
+        CoordinatorTests.setUp(self)
+        self.client.capabilities.return_value['late_provider_receipt']=1
+        self.effect={'kind':'compaction','effect_id':'late-compaction','request_sha':'c'*64}
+        claim={'admission_id':self.scope['admission_id'],'fence':1,'claim_id':'fixture-claim','boot_id':Path('/proc/sys/kernel/random/boot_id').read_text().strip(),'expires_monotonic_ms':__import__('time').monotonic()*1000+15000}
+        effect=self.records.admit_effect(self.binding,claim,self.effect,self.scope['scope_token'])
+        self.effect_id=effect['admission_id']
+        result={'choices':[{'message':{'role':'assistant','content':'Saved compaction'},'finish_reason':'stop'}]}
+        with self.store.connection:
+            self.store.connection.execute("UPDATE recovery_effects SET state='admitted' WHERE admission_id=?",(self.effect_id,))
+            self.records._confirm(self.effect_id,__import__('andrewbot.recovery_records',fromlist=['canonical']).canonical(result),{'settled':True})
+            self.store.connection.execute("UPDATE recovery_attempts SET state='held',hold_reason='provider_uncertain' WHERE admission_id=?",(self.scope['admission_id'],))
+        self.state={'status':'held','binding':self.binding,'revision':8,'phase':'held','hold_reason':'provider_uncertain','state':'held','effect_admission_ids':[self.effect_id]}
+        self.client.inspect.return_value=self.state;self.client.status.return_value=self.state
+        self.client.command.return_value={'claim_id':'late-claim','fence':2,'revision':10}
+        self.coordinator._drive=Mock(side_effect=AssertionError('No continuation during evidence-only pass'))
+
+    def test_late_receipt_is_imported_without_dispatch_even_while_paused(self):
+        self.store.set_state('paused','1')
+        self.assertTrue(self.coordinator.reconcile_one())
+        self.client.command.assert_called_once()
+        self.assertEqual(self.client.command.call_args.args[0],'recovery_reconcile_provider')
+        self.assertEqual(self.client.command.call_args.kwargs['effect_admission_id'],self.effect_id)
+        self.client.release.assert_called_once();self.client.resume.assert_not_called()
+        self.coordinator._drive.assert_not_called()
+        self.assertEqual(self.store.get_state('paused'),'1')
+        self.assertEqual(self.coordinator._pending()[0]['state'],'active')
+
+    def test_missing_receipt_leaves_held_without_mutation(self):
+        with self.store.connection:self.store.connection.execute('DELETE FROM recovery_results')
+        self.assertFalse(self.coordinator.reconcile_one())
+        self.client.command.assert_not_called()
+        self.assertEqual(self.coordinator._pending()[0]['state'],'held')

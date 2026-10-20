@@ -1,0 +1,523 @@
+{
+  "backend": {
+    "extension_files": {
+      "recovery/adoption.mjs": "a7166efe336d5a1b2371528acb1797019377d4b53c2e804532182141f4a38c24",
+      "recovery/base.json": "e245e2bbaa46f2c1a08e33be3c97b4198fa83672ced5983ca2b0645cebce7fad",
+      "recovery/checkpoint-store.mjs": "05db777153a197f91e69771a33b91d369383dfbfbf88cf748edffd90a43a0955",
+      "recovery/contracts.mjs": "ea4a13d1909da551ae7c7fa2b1e38323bd06174e0b7d91cab6e95d05a5b1ecc7",
+      "recovery/entry.mjs": "80e51225a3040515fab1c5e77e5d993a4585e297a367edd6ae060fbffd41e4aa",
+      "recovery/execution.mjs": "40bc4a78a3b134d25cf4b372db62507f64a052814cc6e0d27ca23a169375c635",
+      "recovery/lock-helper.py": "924d7ea986195d8830de6a1f899f8e1d962ffd9c1a3d82dbc9135af28cc44135",
+      "recovery/ownership.mjs": "6fd05cf55abf43161d1e87bfe38587f83e7d26d40eda229dbedf167b9ebd8aef",
+      "recovery/patches.json": "36681e6dd07b09e391d60b54f500f148fd06d485ca423601ab721a0d3f628732",
+      "recovery/payload-store.mjs": "58c018270ec7df2e923d06437366758727912eb4e7953c9dae705fbce25146d3",
+      "recovery/protocol.mjs": "2be16a6b45bb76354cd5abab1d4a33c044df0303bd9ae0879e1bdfc60cc34f04",
+      "recovery/sdk-adapter.mjs": "37b02dbc87b85f08865f08171be374a6170b57743f7e1805edaa371f46f3bec4",
+      "recovery/state-machine.mjs": "30e3e49e462de97d668ba49114c0b8a3b40cb84bdc6b79eb32972c7d34fb60ac",
+      "recovery/transcript-projection.mjs": "fad4bc8001441c0f78408e9ae0849c8a0f579b62e9ee2f4f298078d2ddfd058b",
+      "recovery/transcript-write.mjs": "e3418cdd53238e7241e0a6993df386d2170142a9f218e48c569964423ef2045a",
+      "recovery/wire.mjs": "c3e14daa4e1440d6e942e082344d6e7bbcb4e5929975ac7cdba060f3549f7a58"
+    },
+    "package": {
+      "contract": "local_durable_recovery_v1",
+      "name": "@letta-ai/letta-code",
+      "sha256": "eab90b26ded2647769a00ae29ec95fea1881173da53e2d54f620fc6df085b2fe",
+      "version": "0.34.13"
+    },
+    "release_manifest_sha256": "94ccc2cc2b2d3609e52674af1676d0861a0eeba171e4bc40f70204a318b62a9d"
+  },
+  "controller_code": "bf90dbac9a614c05637f16999a73ef9911097b0ac7a471cc673f99e22dc0c16a",
+  "repository": "https://github.com/sonidim25-oss/Andrew_AI",
+  "runner_adoption_mode": "enabled",
+  "scope": "Application source and deployment tooling; runtime configuration, credentials and user databases remain private",
+  "service_code": "cf928d2247b4574c4f514dbc6dec6ed0b3d9a21e383e094e327e0ff8d8404d49",
+  "snapshot_date": "2026-10-20",
+  "source_files": {
+    "admin/verify-live-lifecycle.py": {
+      "repository_path": "admin/verify-live-lifecycle.py",
+      "sha256": "b8d7654a9dbb3383256b7b98e2b9e8e7b6198b522e68a95c7ce3a819b80368bb"
+    },
+    "prototype/andrewbot/__init__.py": {
+      "repository_path": "prototype/andrewbot/__init__.py",
+      "sha256": "b6a2b179e4e580f5a41756bb8e46702c6a65f73b83496ff6da9a8ed2c09b0508"
+    },
+    "prototype/andrewbot/account_broker.py": {
+      "repository_path": "prototype/andrewbot/account_broker.py",
+      "sha256": "5b7f3b5c1db1f5d1ab22a11a79d890f7150f88233bf0d811cae38fc968cfe74f"
+    },
+    "prototype/andrewbot/account_import.py": {
+      "repository_path": "prototype/andrewbot/account_import.py",
+      "sha256": "0977612bead29d13a4950a3babb7c32dc33bc5b86f527aab706941259ba41b5c"
+    },
+    "prototype/andrewbot/appserver.py": {
+      "repository_path": "prototype/andrewbot/appserver.py",
+      "sha256": "628daeeaf575719783ec5dcd8984507df1434115495561a6be65e78cbf8db0a1"
+    },
+    "prototype/andrewbot/browser_client.py": {
+      "repository_path": "prototype/andrewbot/browser_client.py",
+      "sha256": "7774598091ee0a842e5145226b337e32bfe51d8c8d03db2a821684996390c8bf"
+    },
+    "prototype/andrewbot/browser_history.py": {
+      "repository_path": "prototype/andrewbot/browser_history.py",
+      "sha256": "d08b88c47117907370d521d3593a125c9f0d80e84f38238b9351e423bf100835"
+    },
+    "prototype/andrewbot/browser_protocol.py": {
+      "repository_path": "prototype/andrewbot/browser_protocol.py",
+      "sha256": "6cb6a714933dcb17df48d4e68d1a058e3a99e72d11f608507de3ac717c229aeb"
+    },
+    "prototype/andrewbot/browser_service.py": {
+      "repository_path": "prototype/andrewbot/browser_service.py",
+      "sha256": "8c619a017d12e8418445ad96ac56ea8589f870e01ebd302d479d822610f9e5af"
+    },
+    "prototype/andrewbot/browser_tools.py": {
+      "repository_path": "prototype/andrewbot/browser_tools.py",
+      "sha256": "1b8bd9c9edc233531427ba3052a5d9aa6d2279d3dea99b1f9c45b6acbb555f06"
+    },
+    "prototype/andrewbot/budget.py": {
+      "repository_path": "prototype/andrewbot/budget.py",
+      "sha256": "07c164572f242358226d65eff0fb3088fd40f3b0124b73132f46420fd3e1cc56"
+    },
+    "prototype/andrewbot/configuration.py": {
+      "repository_path": "prototype/andrewbot/configuration.py",
+      "sha256": "96da496d7f2d0a3ebe7cec5bdc821d1f03e0bcf3d6912d0bcd0ed4a198ddeea4"
+    },
+    "prototype/andrewbot/controller.py": {
+      "repository_path": "prototype/andrewbot/controller.py",
+      "sha256": "639cb0c1d35fc82d9e0b138fb38e694abfcdb2a937a22c7a7d8959b0c9da2818"
+    },
+    "prototype/andrewbot/diary.py": {
+      "repository_path": "prototype/andrewbot/diary.py",
+      "sha256": "45ea42644a77cd6c0b5a4f581bdfbd219fcb544145d583a83824abea2f770bcd"
+    },
+    "prototype/andrewbot/dispatch.py": {
+      "repository_path": "prototype/andrewbot/dispatch.py",
+      "sha256": "c16dd1890108ea0558bc93d9220144e61876f1597a381b7ea9b12176d8ba012c"
+    },
+    "prototype/andrewbot/egress_proxy.py": {
+      "repository_path": "prototype/andrewbot/egress_proxy.py",
+      "sha256": "a838e18da11dd11f5a01415be4487ed0ad12d5a5d5b22316557f319af9bee318"
+    },
+    "prototype/andrewbot/gateway.py": {
+      "repository_path": "prototype/andrewbot/gateway.py",
+      "sha256": "20ae309db302e4a353fb0d42367777135edb963940887d5e36b78223c88d219a"
+    },
+    "prototype/andrewbot/gmail_admin.py": {
+      "repository_path": "prototype/andrewbot/gmail_admin.py",
+      "sha256": "d23f7221d51189aaee1c1a2c09c7f0afff8ed269330101f69c1a39db4a39688f"
+    },
+    "prototype/andrewbot/gmail_api.py": {
+      "repository_path": "prototype/andrewbot/gmail_api.py",
+      "sha256": "884a6c9716a807177fbe7e915ffb860c8ee4b0575457bdf7b2a40ea6d6c3017d"
+    },
+    "prototype/andrewbot/gmail_oauth.py": {
+      "repository_path": "prototype/andrewbot/gmail_oauth.py",
+      "sha256": "4f52a2ef7e254e2686005de0ccfc4a8091fb2c849bda18081c0b1082e17e554a"
+    },
+    "prototype/andrewbot/gmail_policy.py": {
+      "repository_path": "prototype/andrewbot/gmail_policy.py",
+      "sha256": "24a8b4e6bedce79b875b398b1ed1a5088c20c4e2ee16b3ec6b3bde015dc60cc4"
+    },
+    "prototype/andrewbot/gmail_tools.py": {
+      "repository_path": "prototype/andrewbot/gmail_tools.py",
+      "sha256": "540522eb3fd15725276adf02708fccfa161c2e18d5e10f1c7cc005cd1303c286"
+    },
+    "prototype/andrewbot/latency.py": {
+      "repository_path": "prototype/andrewbot/latency.py",
+      "sha256": "f7901bd84acb96fde0980150a2a16a912254f1f88c0cc9f451d058f48f2ac226"
+    },
+    "prototype/andrewbot/lifecycle_policy.py": {
+      "repository_path": "prototype/andrewbot/lifecycle_policy.py",
+      "sha256": "7eab2d34c1373e99460f0a2cd320ec9338cdad8be9665440d32054f98111df59"
+    },
+    "prototype/andrewbot/main.py": {
+      "repository_path": "prototype/andrewbot/main.py",
+      "sha256": "66948b169ff443c63cde8da6b49368523d9af25f4a0727973c1b016950571c4a"
+    },
+    "prototype/andrewbot/media.py": {
+      "repository_path": "prototype/andrewbot/media.py",
+      "sha256": "af55dbd3ccc3297b4eeeafa2cc5be6b34142d5da6c187b8ec1d934b87cd330a9"
+    },
+    "prototype/andrewbot/media_provider.py": {
+      "repository_path": "prototype/andrewbot/media_provider.py",
+      "sha256": "ea77a338e9a5649311e0c913b5c5d88b787a9792da517871cb12e9852e83a9c6"
+    },
+    "prototype/andrewbot/memory.py": {
+      "repository_path": "prototype/andrewbot/memory.py",
+      "sha256": "6487ad471523f8c064e0e07c500a90b1c3592886e454cce01c140bcc0cd00935"
+    },
+    "prototype/andrewbot/memory_backup.py": {
+      "repository_path": "prototype/andrewbot/memory_backup.py",
+      "sha256": "ee406c07640048940ce8e289e93fb77cc25809d9de7c7a17c86a2e7adfd2fea7"
+    },
+    "prototype/andrewbot/memory_backup_cli.py": {
+      "repository_path": "prototype/andrewbot/memory_backup_cli.py",
+      "sha256": "143f608dbaaa8fb1b1499bcabf4d1faf819b62208f05f1da85d475f050852419"
+    },
+    "prototype/andrewbot/model.py": {
+      "repository_path": "prototype/andrewbot/model.py",
+      "sha256": "6317727ca6a3ed3e92841f11104f7a06af73f8a2de9c6f8c84aa005a946c4160"
+    },
+    "prototype/andrewbot/network_policy.py": {
+      "repository_path": "prototype/andrewbot/network_policy.py",
+      "sha256": "5cfa5074389afb2a6befdd852baed5a17e6a46e21d5dd1f6157ab949b4d2cdb6"
+    },
+    "prototype/andrewbot/process_limits.py": {
+      "repository_path": "prototype/andrewbot/process_limits.py",
+      "sha256": "4b87317f24984288410be7e0203a5e45d1ad4b5e7c14e4a6af09e75cb1b354c7"
+    },
+    "prototype/andrewbot/recovery.py": {
+      "repository_path": "prototype/andrewbot/recovery.py",
+      "sha256": "ff899c8a9d2e9543dcec634c7672bb2fca5d634d94429c65d8f4c5a1028b2333"
+    },
+    "prototype/andrewbot/recovery_dispatch.py": {
+      "repository_path": "prototype/andrewbot/recovery_dispatch.py",
+      "sha256": "cd59944b86d260dc524f9d134bc208fd8dab7beacf034aae92dc608db004f3c3"
+    },
+    "prototype/andrewbot/recovery_identity.py": {
+      "repository_path": "prototype/andrewbot/recovery_identity.py",
+      "sha256": "b4251038e9d0cb2dadaf816795871ec64b0595bad06009ff4e8cababb407c3a7"
+    },
+    "prototype/andrewbot/recovery_records.py": {
+      "repository_path": "prototype/andrewbot/recovery_records.py",
+      "sha256": "d05a72a10d3be606a9377705c59895a9d4ec31718dc20dc527e615f811320663"
+    },
+    "prototype/andrewbot/runner_adoption.py": {
+      "repository_path": "prototype/andrewbot/runner_adoption.py",
+      "sha256": "def18596aa841e80b88f81db2b757d5aa34b7a0500eb5151da6f84990b3efaea"
+    },
+    "prototype/andrewbot/runner_backup.py": {
+      "repository_path": "prototype/andrewbot/runner_backup.py",
+      "sha256": "2e5acc6eceb73231a0a3bb2c37f34c38c44e2f00eb0b1bdd9579a3cab7ddb361"
+    },
+    "prototype/andrewbot/runner_client.py": {
+      "repository_path": "prototype/andrewbot/runner_client.py",
+      "sha256": "eebc39188040429936e064c3005b44f53aabe1c09c16d158e9ec9927e07c7a48"
+    },
+    "prototype/andrewbot/runner_format.py": {
+      "repository_path": "prototype/andrewbot/runner_format.py",
+      "sha256": "17829220366eb215b98b4ff3ac2009e4db4993a0b0aa3a3e850839e439d9d756"
+    },
+    "prototype/andrewbot/runner_protocol.py": {
+      "repository_path": "prototype/andrewbot/runner_protocol.py",
+      "sha256": "85651a5b45df6258aae9b32cc76d813e8957e79732a32f4c90848e850aa5f29f"
+    },
+    "prototype/andrewbot/runner_receipt_server.py": {
+      "repository_path": "prototype/andrewbot/runner_receipt_server.py",
+      "sha256": "f857de59a5752521a33f9e11cff5ec16eeb423a6ecc21960739f47efb9fd581f"
+    },
+    "prototype/andrewbot/runner_receipts.py": {
+      "repository_path": "prototype/andrewbot/runner_receipts.py",
+      "sha256": "ba0b7fa37c29ca427a335446e4101f4a4cc64a8addf91d05d0940bcb96dca156"
+    },
+    "prototype/andrewbot/runner_recovery.py": {
+      "repository_path": "prototype/andrewbot/runner_recovery.py",
+      "sha256": "57cbc0048bedd713e7bbb5bbc23cb0da7a56292533921e2ae3ee7158e969fa81"
+    },
+    "prototype/andrewbot/runner_service.py": {
+      "repository_path": "prototype/andrewbot/runner_service.py",
+      "sha256": "2c3c7dc983db37622efa64cb105ffe6e17628888bb0298f77ca9097dafe184a0"
+    },
+    "prototype/andrewbot/runner_socket.py": {
+      "repository_path": "prototype/andrewbot/runner_socket.py",
+      "sha256": "a210806888d574ade8d95806aff52c2529219e68c73a871a454bed0bda9789f3"
+    },
+    "prototype/andrewbot/runtime_readiness.py": {
+      "repository_path": "prototype/andrewbot/runtime_readiness.py",
+      "sha256": "731e9cf54994ec90f9a2b4934cc52addf917ba2a4ba83bdfb62375931d5da116"
+    },
+    "prototype/andrewbot/sessions.py": {
+      "repository_path": "prototype/andrewbot/sessions.py",
+      "sha256": "118a8a8fa5615e41a00d60e68728a73a9a1fd4871607bf35dff098c1fb2cf500"
+    },
+    "prototype/andrewbot/site_policy.py": {
+      "repository_path": "prototype/andrewbot/site_policy.py",
+      "sha256": "bf0f66301c959493b3be15334d493119cc7b625699b8d78fb9fcdefa351575fd"
+    },
+    "prototype/andrewbot/skills.py": {
+      "repository_path": "prototype/andrewbot/skills.py",
+      "sha256": "956d219644893e5aa19597bd8c61f10f5e152368254e45a7b3c068aa1cf2b2ea"
+    },
+    "prototype/andrewbot/store.py": {
+      "repository_path": "prototype/andrewbot/store.py",
+      "sha256": "95c7ea87eac3efcb516882ad5d2fdbb19db78ed573eb26244a8c8c5eeb0f9be7"
+    },
+    "prototype/andrewbot/telegram.py": {
+      "repository_path": "prototype/andrewbot/telegram.py",
+      "sha256": "fde914b03be15f001e0b4ee3024e7909baad58772f7bbe812e1dd98c2c190990"
+    },
+    "prototype/andrewbot/telegram_menu.py": {
+      "repository_path": "prototype/andrewbot/telegram_menu.py",
+      "sha256": "8180f3c40de9e74ef7193c0e577809c80ef22ab34a2feca85b8e85f29f0a30f3"
+    },
+    "prototype/andrewbot/telegram_smoke.py": {
+      "repository_path": "prototype/andrewbot/telegram_smoke.py",
+      "sha256": "d20001d1616e552f2e4d4dc1d9bbb7159d39022a3406d0fcde767ba1e36bc88e"
+    },
+    "prototype/andrewbot/tool_runtime.py": {
+      "repository_path": "prototype/andrewbot/tool_runtime.py",
+      "sha256": "8caf303fdd85c3d0dba64b2c296c13f6e51ae1537365cb4fdf06c14bc3ca463d"
+    },
+    "prototype/andrewbot/vault.py": {
+      "repository_path": "prototype/andrewbot/vault.py",
+      "sha256": "be397ce7f41a9d03a0a751788e647f3d5d6a1c6322cb1fdc95180e94d5a6c77b"
+    },
+    "prototype/andrewbot/vault_cli.py": {
+      "repository_path": "prototype/andrewbot/vault_cli.py",
+      "sha256": "655b7375c49d157de2f4e294d6c5449841e3d0347cd3ba764e704c99d3d47dc7"
+    },
+    "prototype/andrewbot/workers.py": {
+      "repository_path": "prototype/andrewbot/workers.py",
+      "sha256": "8458f39035ef12b5e4f8e817fb3abc9c552e54077b654b81010b9efb2ba8f47e"
+    },
+    "prototype/tests/test_appserver.py": {
+      "repository_path": "deployment/2026-10-20/installed-tests/test_appserver.py",
+      "sha256": "d5e59096b308af13a8371153b4d2ae4ca12fca33f5bd834176725a9d93cfbade"
+    },
+    "prototype/tests/test_controller.py": {
+      "repository_path": "deployment/2026-10-20/installed-tests/test_controller.py",
+      "sha256": "fa0a3044f54ee7932b45f8ba75d97f1ada021097ca92385c82f892d9ac89cc71"
+    },
+    "prototype/tests/test_gateway.py": {
+      "repository_path": "deployment/2026-10-20/installed-tests/test_gateway.py",
+      "sha256": "11ab85b142d01fd2e23f4ff7371f2c41a95064bf75dcd9463a7ba21762efeb0c"
+    },
+    "prototype/tests/test_model.py": {
+      "repository_path": "deployment/2026-10-20/installed-tests/test_model.py",
+      "sha256": "acc5ac8f9a5b798145b7341448e67dd393fe1662f563aedcba0029a3be0f9cfb"
+    },
+    "prototype/tests/test_telegram.py": {
+      "repository_path": "deployment/2026-10-20/installed-tests/test_telegram.py",
+      "sha256": "6710efcd7ea58cc9529e254e510044d8a7286e87dac9f5475eedc5221ddcb872"
+    },
+    "prototype/tests/test_vault.py": {
+      "repository_path": "deployment/2026-10-20/installed-tests/test_vault.py",
+      "sha256": "68442997cf5b9a25d251fc57f23c669521d388c181f9f8570baadc6bb914f326"
+    },
+    "runtime-services/andrewbot/__init__.py": {
+      "repository_path": "runtime-services/andrewbot/__init__.py",
+      "sha256": "b6a2b179e4e580f5a41756bb8e46702c6a65f73b83496ff6da9a8ed2c09b0508"
+    },
+    "runtime-services/andrewbot/account_broker.py": {
+      "repository_path": "runtime-services/andrewbot/account_broker.py",
+      "sha256": "5b7f3b5c1db1f5d1ab22a11a79d890f7150f88233bf0d811cae38fc968cfe74f"
+    },
+    "runtime-services/andrewbot/account_import.py": {
+      "repository_path": "runtime-services/andrewbot/account_import.py",
+      "sha256": "0977612bead29d13a4950a3babb7c32dc33bc5b86f527aab706941259ba41b5c"
+    },
+    "runtime-services/andrewbot/appserver.py": {
+      "repository_path": "runtime-services/andrewbot/appserver.py",
+      "sha256": "e2ea2d4e50395a7d88036956c93e8c06640abf195fc8a92be65063c3b6a9949f"
+    },
+    "runtime-services/andrewbot/browser_client.py": {
+      "repository_path": "runtime-services/andrewbot/browser_client.py",
+      "sha256": "7774598091ee0a842e5145226b337e32bfe51d8c8d03db2a821684996390c8bf"
+    },
+    "runtime-services/andrewbot/browser_history.py": {
+      "repository_path": "runtime-services/andrewbot/browser_history.py",
+      "sha256": "a6640c5533e6f84992bb5f68fe74d44d80a57f25a5a5c43bb4ee068b74a60fbc"
+    },
+    "runtime-services/andrewbot/browser_protocol.py": {
+      "repository_path": "runtime-services/andrewbot/browser_protocol.py",
+      "sha256": "6cb6a714933dcb17df48d4e68d1a058e3a99e72d11f608507de3ac717c229aeb"
+    },
+    "runtime-services/andrewbot/browser_service.py": {
+      "repository_path": "runtime-services/andrewbot/browser_service.py",
+      "sha256": "8c619a017d12e8418445ad96ac56ea8589f870e01ebd302d479d822610f9e5af"
+    },
+    "runtime-services/andrewbot/browser_tools.py": {
+      "repository_path": "runtime-services/andrewbot/browser_tools.py",
+      "sha256": "1b8bd9c9edc233531427ba3052a5d9aa6d2279d3dea99b1f9c45b6acbb555f06"
+    },
+    "runtime-services/andrewbot/budget.py": {
+      "repository_path": "runtime-services/andrewbot/budget.py",
+      "sha256": "69090340fac72fab0bbc66fc2c05e5584aae82618747f104a9f9e0a71dd9f0b0"
+    },
+    "runtime-services/andrewbot/configuration.py": {
+      "repository_path": "runtime-services/andrewbot/configuration.py",
+      "sha256": "d7531f8a83ae78b2e130fa9c86b2c0195df4248faec9ee629bb9a98631ca6096"
+    },
+    "runtime-services/andrewbot/controller.py": {
+      "repository_path": "runtime-services/andrewbot/controller.py",
+      "sha256": "5981f21f7de608c5b443eb7b60e7656e22134a318928456f69458f7c9a5b518a"
+    },
+    "runtime-services/andrewbot/diary.py": {
+      "repository_path": "runtime-services/andrewbot/diary.py",
+      "sha256": "fa8d71bc5057859623098c1e650ef69d3fe4de7c2c644c7b4de9e36bf2cbcaf2"
+    },
+    "runtime-services/andrewbot/dispatch.py": {
+      "repository_path": "runtime-services/andrewbot/dispatch.py",
+      "sha256": "c3b1b1cafc3629cdba7c4badeb8c7bb2158c8dd13536ecf84dd4c966276cd8ab"
+    },
+    "runtime-services/andrewbot/egress_proxy.py": {
+      "repository_path": "runtime-services/andrewbot/egress_proxy.py",
+      "sha256": "a838e18da11dd11f5a01415be4487ed0ad12d5a5d5b22316557f319af9bee318"
+    },
+    "runtime-services/andrewbot/gateway.py": {
+      "repository_path": "runtime-services/andrewbot/gateway.py",
+      "sha256": "d21342fcc34c651d6bccb29f47bdbd99450c0c4e640ce88a0f8d55f7b6195a54"
+    },
+    "runtime-services/andrewbot/gmail_admin.py": {
+      "repository_path": "runtime-services/andrewbot/gmail_admin.py",
+      "sha256": "d23f7221d51189aaee1c1a2c09c7f0afff8ed269330101f69c1a39db4a39688f"
+    },
+    "runtime-services/andrewbot/gmail_api.py": {
+      "repository_path": "runtime-services/andrewbot/gmail_api.py",
+      "sha256": "b294d1db8291e01f78f480c8bc8aa9444f16072c36f3d42d466e17dd13178d2a"
+    },
+    "runtime-services/andrewbot/gmail_oauth.py": {
+      "repository_path": "runtime-services/andrewbot/gmail_oauth.py",
+      "sha256": "4f52a2ef7e254e2686005de0ccfc4a8091fb2c849bda18081c0b1082e17e554a"
+    },
+    "runtime-services/andrewbot/gmail_policy.py": {
+      "repository_path": "runtime-services/andrewbot/gmail_policy.py",
+      "sha256": "24a8b4e6bedce79b875b398b1ed1a5088c20c4e2ee16b3ec6b3bde015dc60cc4"
+    },
+    "runtime-services/andrewbot/gmail_tools.py": {
+      "repository_path": "runtime-services/andrewbot/gmail_tools.py",
+      "sha256": "19999a8fabd299614ada3e834b97f82bd4faa657a6d2dcf8b11d0c6b91b2aa93"
+    },
+    "runtime-services/andrewbot/lifecycle_policy.py": {
+      "repository_path": "runtime-services/andrewbot/lifecycle_policy.py",
+      "sha256": "9e93c5159a69e4419688756085b778db8a5767a6a1b7ed8693d9bfde48a558ba"
+    },
+    "runtime-services/andrewbot/main.py": {
+      "repository_path": "runtime-services/andrewbot/main.py",
+      "sha256": "3d7d58c1c00cc21f6841525d9db7d8b0554b0239b311908ea5c150cbbaa83527"
+    },
+    "runtime-services/andrewbot/memory.py": {
+      "repository_path": "runtime-services/andrewbot/memory.py",
+      "sha256": "12a5e1e3cc7dfc7a21f37917c9d105f2899061fe6a2a9da289d09a449ca23a71"
+    },
+    "runtime-services/andrewbot/memory_backup.py": {
+      "repository_path": "runtime-services/andrewbot/memory_backup.py",
+      "sha256": "4c75ac36f5c90bc8df0ece579e9c518256379ade000d5e917530b4e229c1e0c2"
+    },
+    "runtime-services/andrewbot/memory_backup_cli.py": {
+      "repository_path": "runtime-services/andrewbot/memory_backup_cli.py",
+      "sha256": "73f2b27a205373f82e2eac0c62101f1a98c90ea2e1d08be2ceca4bf23329f80f"
+    },
+    "runtime-services/andrewbot/model.py": {
+      "repository_path": "runtime-services/andrewbot/model.py",
+      "sha256": "33e34307ad82c12c0f1709b623472c50f2f11871684b74d030868f239ecc2453"
+    },
+    "runtime-services/andrewbot/network_policy.py": {
+      "repository_path": "runtime-services/andrewbot/network_policy.py",
+      "sha256": "5cfa5074389afb2a6befdd852baed5a17e6a46e21d5dd1f6157ab949b4d2cdb6"
+    },
+    "runtime-services/andrewbot/process_limits.py": {
+      "repository_path": "runtime-services/andrewbot/process_limits.py",
+      "sha256": "4b87317f24984288410be7e0203a5e45d1ad4b5e7c14e4a6af09e75cb1b354c7"
+    },
+    "runtime-services/andrewbot/recovery_identity.py": {
+      "repository_path": "runtime-services/andrewbot/recovery_identity.py",
+      "sha256": "b4251038e9d0cb2dadaf816795871ec64b0595bad06009ff4e8cababb407c3a7"
+    },
+    "runtime-services/andrewbot/runner_adoption.py": {
+      "repository_path": "runtime-services/andrewbot/runner_adoption.py",
+      "sha256": "def18596aa841e80b88f81db2b757d5aa34b7a0500eb5151da6f84990b3efaea"
+    },
+    "runtime-services/andrewbot/runner_client.py": {
+      "repository_path": "runtime-services/andrewbot/runner_client.py",
+      "sha256": "eebc39188040429936e064c3005b44f53aabe1c09c16d158e9ec9927e07c7a48"
+    },
+    "runtime-services/andrewbot/runner_format.py": {
+      "repository_path": "runtime-services/andrewbot/runner_format.py",
+      "sha256": "17829220366eb215b98b4ff3ac2009e4db4993a0b0aa3a3e850839e439d9d756"
+    },
+    "runtime-services/andrewbot/runner_protocol.py": {
+      "repository_path": "runtime-services/andrewbot/runner_protocol.py",
+      "sha256": "85651a5b45df6258aae9b32cc76d813e8957e79732a32f4c90848e850aa5f29f"
+    },
+    "runtime-services/andrewbot/runner_receipt_server.py": {
+      "repository_path": "runtime-services/andrewbot/runner_receipt_server.py",
+      "sha256": "f857de59a5752521a33f9e11cff5ec16eeb423a6ecc21960739f47efb9fd581f"
+    },
+    "runtime-services/andrewbot/runner_receipts.py": {
+      "repository_path": "runtime-services/andrewbot/runner_receipts.py",
+      "sha256": "ba0b7fa37c29ca427a335446e4101f4a4cc64a8addf91d05d0940bcb96dca156"
+    },
+    "runtime-services/andrewbot/runner_service.py": {
+      "repository_path": "runtime-services/andrewbot/runner_service.py",
+      "sha256": "2c3c7dc983db37622efa64cb105ffe6e17628888bb0298f77ca9097dafe184a0"
+    },
+    "runtime-services/andrewbot/runner_socket.py": {
+      "repository_path": "runtime-services/andrewbot/runner_socket.py",
+      "sha256": "a210806888d574ade8d95806aff52c2529219e68c73a871a454bed0bda9789f3"
+    },
+    "runtime-services/andrewbot/runtime_readiness.py": {
+      "repository_path": "runtime-services/andrewbot/runtime_readiness.py",
+      "sha256": "731e9cf54994ec90f9a2b4934cc52addf917ba2a4ba83bdfb62375931d5da116"
+    },
+    "runtime-services/andrewbot/sessions.py": {
+      "repository_path": "runtime-services/andrewbot/sessions.py",
+      "sha256": "8bd13dfabdbb1da67b066845dacc7a286581f62482cb07932e985381c269366f"
+    },
+    "runtime-services/andrewbot/site_policy.py": {
+      "repository_path": "runtime-services/andrewbot/site_policy.py",
+      "sha256": "bf0f66301c959493b3be15334d493119cc7b625699b8d78fb9fcdefa351575fd"
+    },
+    "runtime-services/andrewbot/store.py": {
+      "repository_path": "runtime-services/andrewbot/store.py",
+      "sha256": "10548624b22ea55f2c67a1ee3a6eddea078660aba68a747048e051ca01257afd"
+    },
+    "runtime-services/andrewbot/telegram.py": {
+      "repository_path": "runtime-services/andrewbot/telegram.py",
+      "sha256": "f4b356b42cff1ae8ef69fdf9c25c3f910110dd5dcc254d35643f6558cf16e0d0"
+    },
+    "runtime-services/andrewbot/telegram_menu.py": {
+      "repository_path": "runtime-services/andrewbot/telegram_menu.py",
+      "sha256": "0df485e19b19a304dc26e47a7c585c6a741081be413794da1ca42c3900dbbe79"
+    },
+    "runtime-services/andrewbot/telegram_smoke.py": {
+      "repository_path": "runtime-services/andrewbot/telegram_smoke.py",
+      "sha256": "d20001d1616e552f2e4d4dc1d9bbb7159d39022a3406d0fcde767ba1e36bc88e"
+    },
+    "runtime-services/andrewbot/tool_runtime.py": {
+      "repository_path": "runtime-services/andrewbot/tool_runtime.py",
+      "sha256": "f7fdb4b8bf4e0018bfc084c8f0160c590d1c0460a9483566350115127ee593e9"
+    },
+    "runtime-services/andrewbot/vault.py": {
+      "repository_path": "runtime-services/andrewbot/vault.py",
+      "sha256": "be397ce7f41a9d03a0a751788e647f3d5d6a1c6322cb1fdc95180e94d5a6c77b"
+    },
+    "runtime-services/andrewbot/vault_cli.py": {
+      "repository_path": "runtime-services/andrewbot/vault_cli.py",
+      "sha256": "87d2d330e72a74be46fef3e01f9cc89104daa812a841e6ad82f990321b92f111"
+    },
+    "runtime-services/checks/verify-browser-fixture.py": {
+      "repository_path": "runtime-services/checks/verify-browser-fixture.py",
+      "sha256": "b0becde77970e4b68744f7e93785a9fc116339701877700e6dae7ae735e60e93"
+    },
+    "runtime-services/checks/verify-runtime.py": {
+      "repository_path": "runtime-services/checks/verify-runtime.py",
+      "sha256": "18145f0469fe953b60538849c0efe799dd6abb7b23fcd5fa561d80a9e8bfe47e"
+    },
+    "runtime-services/checks/verify-worker-launch.py": {
+      "repository_path": "runtime-services/checks/verify-worker-launch.py",
+      "sha256": "e9b56f8a3dcb8769c51046a247cdd91850b81c0b136d7f1b7fbd63ca93f3aeac"
+    },
+    "skills/image-creation/SKILL.md": {
+      "repository_path": "skills/image-creation/SKILL.md",
+      "sha256": "fe903a38e5b6fec6db0ba119a45806028653aa3ab02d52523c7fa66785f7af3d"
+    },
+    "skills/research-workflow/SKILL.md": {
+      "repository_path": "skills/research-workflow/SKILL.md",
+      "sha256": "fa50c34986a9442ccbe47289c723640bb0867d36a7ea63aeb20ca6b4a630ca7f"
+    },
+    "skills/voice-communication/SKILL.md": {
+      "repository_path": "skills/voice-communication/SKILL.md",
+      "sha256": "7702c951f807d65a261f655484b650af48a74cc0f3481fbf884053f10e2f8793"
+    }
+  },
+  "source_root": "/opt/andrew",
+  "verification": {
+    "autonomous_cycle_verified": false,
+    "enabled": true,
+    "installed": true,
+    "live_reply_verified": false,
+    "owner_pause_preserved": true,
+    "p0_closed": false,
+    "wake_requested": false
+  }
+}

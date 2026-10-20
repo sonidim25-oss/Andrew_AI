@@ -1,6 +1,8 @@
 import json
 import http.client
 import math
+import time
+from email.utils import parsedate_to_datetime
 import urllib.error
 import urllib.request
 from .configuration import ModelConfig, load_model_config
@@ -9,18 +11,37 @@ from .configuration import ModelConfig, load_model_config
 class ProviderRequestError(RuntimeError):
     CATEGORIES = frozenset({'http_error', 'timeout', 'network_error', 'invalid_json', 'invalid_response'})
 
-    def __init__(self, category, http_status=None):
+    def __init__(self, category, http_status=None, *, retry_after=None):
         self.safe_category = category if category in self.CATEGORIES else 'invalid_response'
         self.http_status = http_status if type(http_status) is int and 100 <= http_status <= 599 else None
+        self.retry_after = (retry_after if type(retry_after) in (int, float)
+                            and math.isfinite(retry_after) and 0 <= retry_after <= 315360000 else None)
         detail = f'HTTP status {self.http_status}' if self.http_status is not None else self.safe_category
         super().__init__('model request failed: ' + detail)
+
+
+def retry_after_seconds(value):
+    """Keep only the standard delay; never retain provider headers or error bodies."""
+    if not isinstance(value, str) or len(value) > 128:
+        return None
+    try:
+        if value.strip().isdigit():
+            seconds = int(value.strip())
+        else:
+            when = parsedate_to_datetime(value)
+            if when.tzinfo is None:
+                return None
+            seconds = max(0, when.timestamp() - time.time())
+        return seconds if 0 <= seconds <= 315360000 else None
+    except (ValueError, TypeError, OverflowError):
+        return None
 
 
 class OpenRouterModel:
     endpoint = "https://openrouter.ai/api/v1/chat/completions"
     model_id = "qwen/qwen3.8-flash"
 
-    def __init__(self, api_key, timeout=120, model_config=None, credit_key_reader=None):
+    def __init__(self, api_key, timeout=600, model_config=None, credit_key_reader=None):
         self.api_key = api_key
         self.credit_key_reader = credit_key_reader
         self.timeout = timeout
@@ -109,7 +130,10 @@ class OpenRouterModel:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 data = json.loads(response.read())
         except urllib.error.HTTPError as error:
-            raise ProviderRequestError('http_error', error.code) from None
+            delay = retry_after_seconds(error.headers.get('Retry-After')) if error.headers else None
+            status = error.code
+            error.close()
+            raise ProviderRequestError('http_error', status, retry_after=delay) from None
         except TimeoutError:
             raise ProviderRequestError('timeout') from None
         except urllib.error.URLError as error:
