@@ -4,7 +4,7 @@
     "scripts/install-autonomy-media.py": "df09795c9c8884ed42f9a0298c2e1ea13bc7f1efac37a3a15b7f339a306dc88b",
     "scripts/install-letta-recovery.py": "4a67b198b1e24107c4f5d96e705db59ec967d83f02c1d7f69da9d0c18c91bbca",
     "scripts/install-p1-fixes.py": "2ddac993e0200c7a106e848829de306daef3e489782718e3d09db9625a6c8fb5",
-    "scripts/install-runner-recovery.py": "2672d4464649ed1da8dfbd8e1fc4003efefd3bb4220d1a599a74aa5dec8452f7",
+    "scripts/install-runner-recovery.py": "ad9389f786d3a875d70e64223ab5ec57389443d2faf52f51f74dcde0bdc7bcce",
     "scripts/provision-runner-receipts-key.py": "22fddfe86cf37e0ddfbce70b3f279eaa0ef08e4adeb40e36cde9cb26f245561d",
     "scripts/runner-recovery-privileged-probe.py": "6a3bea2df77a45bd0e09aea3c7635594b5100bff945e697a56962581dc26cfe0",
     "systemd/andrew-runner.service": "2fd78bc1574429d79cfd600bb88d60d731430d07e7621320b73903cbf0e31e05"

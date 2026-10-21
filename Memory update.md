@@ -10,6 +10,10 @@
 - Two-fix deployment at `14f5275` completed exact-host acceptance and administrator rollout. Public adoption is enabled, controller code digest matches the reviewed two-fix source, and controller/backend/runner services are active. Backend and runner package remained unchanged.
 - The deployment preserves owner controls and does not request a wake. The existing held research.save attempt still needs a separately guarded reconciliation; no hold clearing or replay was performed. P0 remains open.
 
+## Provider transport rollout preparation — 2026-10-21
+
+The owner authorized deploying the reviewed transport fix and requested no duplicate full controller run. The coordinated installer now accepts explicitly selected, source-identical core acceptance evidence, with controller/tests/skills/backend/worker input hashes, interpreter version/binary hash, command and passing-log hash checked before reuse. Other acceptance and privileged UID checks remain required. Four targeted reuse tests and eighteen existing installer tests passed; the previously saved 709-test result is reused rather than rerun. Production remains on the enabled two-fix release until this separate rollout completes. The old research.save hold is retained; no wake/replay is part of this rollout.
+
 ## Revised provider transport classification — 2026-10-21
 
 - Claude commit `43d02c0` was rejected and remains unmerged: a local fault test proved that treating every URLError as unsent could release a reservation after the full POST was received and allow duplicate dispatch.

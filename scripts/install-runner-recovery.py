@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -114,7 +115,34 @@ def verify_candidate(candidate,*,require_acceptance=False,require_privileged=Tru
     return dict(verified=True,automatic_resume=False)
 
 
-def run_acceptance(candidate,pristine_binary,*,privileged=False):
+def core_acceptance_inputs(source):
+    source=Path(source);result={}
+    for prefix in ('prototype/andrewbot','prototype/tests','skills','letta_recovery','runtime'):
+        if not (source/prefix).is_dir():raise ValueError('Core acceptance inputs are missing')
+        result.update({prefix+'/'+name:value for name,value in tree(source/prefix).items()})
+    return result
+
+
+def reuse_core_acceptance(source,evidence_path):
+    # Evidence is selected explicitly by the operator. Bind the saved success
+    # to every controller/test/skill/backend input and the same Python binary.
+    read=helper('inspect_owner_handoff').read
+    evidence_path=Path(evidence_path);proof=json.loads(read(evidence_path))
+    if (not isinstance(proof,dict) or proof.get('contract')!='runner_core_acceptance_evidence_v1'
+            or proof.get('python_version')!=sys.version or proof.get('python_sha256')!=sha(sys.executable)):
+        raise ValueError('Core acceptance evidence runtime differs')
+    if proof.get('inputs')!=core_acceptance_inputs(source):raise ValueError('Core acceptance inputs differ')
+    if proof.get('command')!=['python3','-m','unittest','discover','-s','prototype/tests','-q']:
+        raise ValueError('Core acceptance command differs')
+    raw=read(evidence_path.parent/'core.txt')
+    if (hashlib.sha256(raw).hexdigest()!=proof.get('log_sha256')
+            or not re.search(rb'(?m)^Ran [1-9][0-9]* tests in [0-9.]+s\r?$',raw)
+            or not re.search(rb'(?m)^OK(?: \(skipped=[0-9]+\))?\s*\Z',raw)):
+        raise ValueError('Core acceptance log is changed or unsuccessful')
+    return raw,proof
+
+
+def run_acceptance(candidate,pristine_binary,*,privileged=False,core_evidence=None):
     verify_candidate(candidate);directory=Path(candidate['directory']);source=Path(candidate['source']);release=Path(candidate['backend_release'])
     pin=json.loads((ROOT/'letta_recovery/base.json').read_text())
     if sha(pristine_binary)!=pin['sha256']:raise ValueError('Unexpected pristine backend')
@@ -122,11 +150,21 @@ def run_acceptance(candidate,pristine_binary,*,privileged=False):
         'ANDREW_LOCAL_RECOVERY_TEST_RELEASE':str(release),'ANDREW_LETTA_TEST_BINARY':str(release/'letta.js'),
         'ANDREW_LETTA_PRISTINE_BINARY':str(Path(pristine_binary).resolve())}
     environment.pop('ANDREW_LOCAL_RECOVERY_ARTIFACT',None)
-    checks={};logs={};commands={}
+    checks={};logs={};commands={};reused={}
+    saved_core=reuse_core_acceptance(source,core_evidence) if core_evidence is not None else None
     jobs=[('node',['node','--test',*map(str,sorted((source/'letta_recovery/tests').glob('*.test.mjs')))]),
         ('core',[sys.executable,'-m','unittest','discover','-s','prototype/tests','-q']),
         ('scripts',[sys.executable,'-m','unittest','discover','-s','scripts/tests','-q'])]
     for name,command in jobs:
+        if name=='core' and saved_core is not None:
+            print('Reusing passing core evidence for identical code and test inputs',flush=True)
+            raw,proof=saved_core
+            _write(directory/'core-acceptance.txt',raw)
+            _write(directory/'core-reused-evidence.json',proof)
+            checks[name]='passed';logs['core-acceptance.txt']=sha(directory/'core-acceptance.txt')
+            logs['core-reused-evidence.json']=sha(directory/'core-reused-evidence.json')
+            commands[name]=proof['command'];reused[name]={'evidence':'core-reused-evidence.json','tested_commit':proof.get('tested_commit')}
+            continue
         print('Running candidate '+name+' checks',flush=True)
         with (directory/(name+'-acceptance.txt')).open('w') as output:
             result=subprocess.run(command,cwd=source,env=environment,stdout=output,stderr=subprocess.STDOUT,timeout=1200)
@@ -149,7 +187,7 @@ def run_acceptance(candidate,pristine_binary,*,privileged=False):
         if result.get('verified') is not True:raise ValueError('Distinct UID credential acceptance failed')
         _write(directory/'distinct-uid-acceptance.json',result);checks['distinct_uid']='passed';logs['distinct-uid-acceptance.json']=sha(directory/'distinct-uid-acceptance.json')
     verify_candidate(candidate)
-    evidence=dict(candidate_sha256=sha(directory/'candidate.json'),checks=checks,logs=logs,commands=commands,production_changed=False)
+    evidence=dict(candidate_sha256=sha(directory/'candidate.json'),checks=checks,logs=logs,commands=commands,reused_checks=reused,production_changed=False)
     _write(directory/'acceptance.json',evidence)
     return evidence
 
@@ -429,6 +467,7 @@ def _trusted_directory(directory):
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--backend-release');parser.add_argument('--directory',required=True)
     parser.add_argument('--controller-sources',default=DEFAULT_PATHS['controller']);parser.add_argument('--runner-sources',default=DEFAULT_PATHS['runner'])
+    parser.add_argument('--core-evidence',help='Reuse a saved passing core log only for identical validated inputs')
     parser.add_argument('--pristine-binary');parser.add_argument('--prepare',action='store_true');parser.add_argument('--apply',action='store_true');parser.add_argument('--enable',action='store_true')
     args=parser.parse_args(argv)
     if args.apply or args.enable:
@@ -440,7 +479,7 @@ def main(argv=None):
     if not args.backend_release or not args.pristine_binary:parser.error('--backend-release and --pristine-binary are required')
     candidate=build_candidate(args.backend_release,args.controller_sources,args.runner_sources,args.directory)
     print(json.dumps(dict(candidate=str(Path(args.directory)/'candidate.json'),production_changed=False)),flush=True)
-    if args.prepare:print(json.dumps(run_acceptance(candidate,args.pristine_binary,privileged=os.geteuid()==0)))
+    if args.prepare:print(json.dumps(run_acceptance(candidate,args.pristine_binary,privileged=os.geteuid()==0,core_evidence=args.core_evidence)))
 
 
 if __name__=='__main__':

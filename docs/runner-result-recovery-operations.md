@@ -43,6 +43,12 @@ the privileged UID result together. Independent whole-patch review and exact
 host acceptance remain release gates. No review status should be inferred from
 an earlier increment's acceptance.
 
+## Reusing an existing controller test result
+
+Preparation accepts `--core-evidence /path/to/core-evidence.json` when the controller suite has already passed. The JSON record binds the complete controller package, controller tests, trusted skills, backend recovery source and worker runtime source, the Python version and binary hash, the original discovery command and the SHA-256 of the adjacent `core.txt` log. Reuse refuses changed inputs, altered logs or a log without a successful terminal result. The operator explicitly selects the evidence; it must come from a trusted completed run.
+
+The exact saved log and its input record are copied into the candidate and hashed in `acceptance.json`, which identifies `core` under `reused_checks`. All other preparation checks, including the administrator-only distinct-UID probe, still run. Reuse does not alter installation, owner controls, service stops, snapshots or enablement guards.
+
 ## Installation and enablement
 
 Andrew must be paused before installation. The installer preserves the current
