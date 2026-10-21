@@ -289,15 +289,15 @@ class SessionRunner:
                 try:
                     self.store.finish_cycle(cycle_id, "failed")
                 except Exception:
-                    pass
+                    logging.warning('Failed cycle status could not be persisted')
             try:
                 self.store.add_activity(detail)
             except Exception:
-                pass
+                logging.warning('Cycle failure activity could not be persisted')
             try:
                 self._record_incident(session_id, "provider_error", self.started_at.isoformat())
             except Exception:
-                pass
+                logging.warning('Cycle failure incident summary could not be persisted')
             self.fail(category)
             return False
         try:
