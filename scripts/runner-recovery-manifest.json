@@ -1,9 +1,9 @@
 {
   "assets": {
     "scripts/check-runner-adoption.py": "ef91c3bf518d9949b8b2db7ff9e2aab88abad9a797e5f49c17deea56bff86488",
-    "scripts/install-autonomy-media.py": "df09795c9c8884ed42f9a0298c2e1ea13bc7f1efac37a3a15b7f339a306dc88b",
-    "scripts/install-letta-recovery.py": "4a67b198b1e24107c4f5d96e705db59ec967d83f02c1d7f69da9d0c18c91bbca",
-    "scripts/install-p1-fixes.py": "2ddac993e0200c7a106e848829de306daef3e489782718e3d09db9625a6c8fb5",
+    "scripts/install-autonomy-media.py": "817fb72aba8fd9ba28a83f38fbaccb7953620fbe330f5c516d137bf2f468a8c0",
+    "scripts/install-letta-recovery.py": "a2882ebf26317ab6381ebeb2bd5bc86c3a7dcd5d7b9379a8e29418aa08f219c5",
+    "scripts/install-p1-fixes.py": "a6fd60ce17ebd199167ebcf9ed0ab47408d3c00c1b664318bc82bda48c9b640c",
     "scripts/install-runner-recovery.py": "ad9389f786d3a875d70e64223ab5ec57389443d2faf52f51f74dcde0bdc7bcce",
     "scripts/provision-runner-receipts-key.py": "22fddfe86cf37e0ddfbce70b3f279eaa0ef08e4adeb40e36cde9cb26f245561d",
     "scripts/runner-recovery-privileged-probe.py": "6a3bea2df77a45bd0e09aea3c7635594b5100bff945e697a56962581dc26cfe0",
@@ -13,13 +13,13 @@
   "controller": {
     "appserver.py": {
       "allow_missing": false,
-      "baseline": "628daeeaf575719783ec5dcd8984507df1434115495561a6be65e78cbf8db0a1",
+      "baseline": "6c9c6abe3db5894d33adab06e6e47bc1aa145e10f6c2c408764825d866681113",
       "tested": "6c9c6abe3db5894d33adab06e6e47bc1aa145e10f6c2c408764825d866681113"
     },
     "controller.py": {
       "allow_missing": false,
-      "baseline": "b4cb00e3c7a422bca0cb2884017e6d993d962dd9029fb03922cc927898ee07fa",
-      "tested": "dc0ef2add14b9f47d4e6bcacf55ac7d8df75cf455a6b9a189c8cca75ec21cab6"
+      "baseline": "dc0ef2add14b9f47d4e6bcacf55ac7d8df75cf455a6b9a189c8cca75ec21cab6",
+      "tested": "51c41be72a13d6c0be0992e55ddc1c9cb99c687aa5b0346b7d97d92e2c7a9694"
     },
     "dispatch.py": {
       "allow_missing": false,
@@ -28,137 +28,152 @@
     },
     "gateway.py": {
       "allow_missing": false,
-      "baseline": "109bd07c4855d0da0eabc23d00bc30aded07d22c2828ae61290c4cbbcded1cac",
+      "baseline": "116a8c6019621fb2d4d98741afc0421684953eeaffae95ac94010961b72b56bc",
       "tested": "116a8c6019621fb2d4d98741afc0421684953eeaffae95ac94010961b72b56bc"
+    },
+    "gmail_tools.py": {
+      "allow_missing": false,
+      "baseline": "540522eb3fd15725276adf02708fccfa161c2e18d5e10f1c7cc005cd1303c286",
+      "tested": "f27f60f82dedc71c74001d15a5950b88194a907887e23dbcf4d110a85d0443f0"
     },
     "main.py": {
       "allow_missing": false,
-      "baseline": "c9576320a4931f1d4c6da1263fdfd5621670156e234f9c0ef08328678d13fcb8",
+      "baseline": "66948b169ff443c63cde8da6b49368523d9af25f4a0727973c1b016950571c4a",
       "tested": "66948b169ff443c63cde8da6b49368523d9af25f4a0727973c1b016950571c4a"
+    },
+    "media.py": {
+      "allow_missing": false,
+      "baseline": "af55dbd3ccc3297b4eeeafa2cc5be6b34142d5da6c187b8ec1d934b87cd330a9",
+      "tested": "92aa219e5f3b4db42e73bc6b8dff957305291022f80544ec6255f24e0c073c0a"
     },
     "memory.py": {
       "allow_missing": false,
-      "baseline": "6487ad471523f8c064e0e07c500a90b1c3592886e454cce01c140bcc0cd00935",
-      "tested": "58583ffbed5045592166ab2ef0c9df02005880530aaa554127e968a99e740a61"
+      "baseline": "58583ffbed5045592166ab2ef0c9df02005880530aaa554127e968a99e740a61",
+      "tested": "93a0494f4244311f2a08120f615e985058ff3759185e4ffda9fef2dd9044c8aa"
     },
     "memory_backup.py": {
       "allow_missing": false,
-      "baseline": "f462b7203d17a113d4189a476b22f795b86b545788a1952c1ca242ea7989d2b7",
+      "baseline": "ee406c07640048940ce8e289e93fb77cc25809d9de7c7a17c86a2e7adfd2fea7",
       "tested": "ee406c07640048940ce8e289e93fb77cc25809d9de7c7a17c86a2e7adfd2fea7"
     },
     "memory_backup_cli.py": {
       "allow_missing": false,
-      "baseline": "c44ba08aacd8febfa167986d934d6ed8a30f198e86cf66e91ea985fbdbb6f43a",
+      "baseline": "143f608dbaaa8fb1b1499bcabf4d1faf819b62208f05f1da85d475f050852419",
       "tested": "143f608dbaaa8fb1b1499bcabf4d1faf819b62208f05f1da85d475f050852419"
     },
     "model.py": {
       "allow_missing": false,
-      "baseline": "6317727ca6a3ed3e92841f11104f7a06af73f8a2de9c6f8c84aa005a946c4160",
+      "baseline": "8216b290b258e102a4793149e9009497d4880f43c704423bd947a2982303c1b8",
       "tested": "8216b290b258e102a4793149e9009497d4880f43c704423bd947a2982303c1b8"
     },
     "recovery.py": {
       "allow_missing": false,
-      "baseline": "267f7f545caf1fe8f67021e8647521e2b965899d5e21a521c9ab62460caca74f",
+      "baseline": "ff899c8a9d2e9543dcec634c7672bb2fca5d634d94429c65d8f4c5a1028b2333",
       "tested": "ff899c8a9d2e9543dcec634c7672bb2fca5d634d94429c65d8f4c5a1028b2333"
     },
     "recovery_dispatch.py": {
       "allow_missing": false,
-      "baseline": "cd59944b86d260dc524f9d134bc208fd8dab7beacf034aae92dc608db004f3c3",
-      "tested": "f827070482479770f4e0d3c422706308f1229a60286c28b92b05a99cdad65ebe"
+      "baseline": "f827070482479770f4e0d3c422706308f1229a60286c28b92b05a99cdad65ebe",
+      "tested": "b3d171f9fc3054d0bb18ddd5636c6489147fe2a89e904348730fd43eb4ebd8db"
     },
     "recovery_identity.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "b4251038e9d0cb2dadaf816795871ec64b0595bad06009ff4e8cababb407c3a7",
       "tested": "b4251038e9d0cb2dadaf816795871ec64b0595bad06009ff4e8cababb407c3a7"
     },
     "recovery_records.py": {
       "allow_missing": false,
-      "baseline": "f747b1e079e7baaa3f099c5a47dd5f81b89cf4d363e2efe0fcc286ef0a3efe7f",
+      "baseline": "d05a72a10d3be606a9377705c59895a9d4ec31718dc20dc527e615f811320663",
       "tested": "d05a72a10d3be606a9377705c59895a9d4ec31718dc20dc527e615f811320663"
     },
     "runner_adoption.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "def18596aa841e80b88f81db2b757d5aa34b7a0500eb5151da6f84990b3efaea",
       "tested": "def18596aa841e80b88f81db2b757d5aa34b7a0500eb5151da6f84990b3efaea"
     },
     "runner_backup.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "2e5acc6eceb73231a0a3bb2c37f34c38c44e2f00eb0b1bdd9579a3cab7ddb361",
       "tested": "2e5acc6eceb73231a0a3bb2c37f34c38c44e2f00eb0b1bdd9579a3cab7ddb361"
     },
     "runner_client.py": {
       "allow_missing": false,
-      "baseline": "8e96fc3d53c37be7f19b97da3447d9daeeb785339785e975a9a714b7ac5e67b8",
+      "baseline": "eebc39188040429936e064c3005b44f53aabe1c09c16d158e9ec9927e07c7a48",
       "tested": "eebc39188040429936e064c3005b44f53aabe1c09c16d158e9ec9927e07c7a48"
     },
     "runner_format.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "17829220366eb215b98b4ff3ac2009e4db4993a0b0aa3a3e850839e439d9d756",
       "tested": "17829220366eb215b98b4ff3ac2009e4db4993a0b0aa3a3e850839e439d9d756"
     },
     "runner_protocol.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "85651a5b45df6258aae9b32cc76d813e8957e79732a32f4c90848e850aa5f29f",
       "tested": "85651a5b45df6258aae9b32cc76d813e8957e79732a32f4c90848e850aa5f29f"
     },
     "runner_receipt_server.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "f857de59a5752521a33f9e11cff5ec16eeb423a6ecc21960739f47efb9fd581f",
       "tested": "f857de59a5752521a33f9e11cff5ec16eeb423a6ecc21960739f47efb9fd581f"
     },
     "runner_receipts.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "ba0b7fa37c29ca427a335446e4101f4a4cc64a8addf91d05d0940bcb96dca156",
       "tested": "ba0b7fa37c29ca427a335446e4101f4a4cc64a8addf91d05d0940bcb96dca156"
     },
     "runner_recovery.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "57cbc0048bedd713e7bbb5bbc23cb0da7a56292533921e2ae3ee7158e969fa81",
       "tested": "57cbc0048bedd713e7bbb5bbc23cb0da7a56292533921e2ae3ee7158e969fa81"
     },
     "runner_service.py": {
       "allow_missing": false,
-      "baseline": "03539830e704fa52c61e15139a79e3ac2ce990674f7db55157e70eb9145cdad6",
+      "baseline": "2c3c7dc983db37622efa64cb105ffe6e17628888bb0298f77ca9097dafe184a0",
       "tested": "2c3c7dc983db37622efa64cb105ffe6e17628888bb0298f77ca9097dafe184a0"
     },
     "runner_socket.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "a210806888d574ade8d95806aff52c2529219e68c73a871a454bed0bda9789f3",
       "tested": "a210806888d574ade8d95806aff52c2529219e68c73a871a454bed0bda9789f3"
     },
     "runtime_readiness.py": {
       "allow_missing": false,
-      "baseline": "1cdb98bb19f6a2f2291a2d36f92ac780658693d3ea8e855fe855e8bb306eee3c",
+      "baseline": "731e9cf54994ec90f9a2b4934cc52addf917ba2a4ba83bdfb62375931d5da116",
       "tested": "731e9cf54994ec90f9a2b4934cc52addf917ba2a4ba83bdfb62375931d5da116"
     },
     "sessions.py": {
       "allow_missing": false,
-      "baseline": "118a8a8fa5615e41a00d60e68728a73a9a1fd4871607bf35dff098c1fb2cf500",
+      "baseline": "d21782ed5ee5470673660cc59a746b2678c1815ac8a1dde2c7f13d22c5c21154",
       "tested": "d21782ed5ee5470673660cc59a746b2678c1815ac8a1dde2c7f13d22c5c21154"
     },
     "skills.py": {
       "allow_missing": false,
       "baseline": "956d219644893e5aa19597bd8c61f10f5e152368254e45a7b3c068aa1cf2b2ea",
-      "tested": "956d219644893e5aa19597bd8c61f10f5e152368254e45a7b3c068aa1cf2b2ea"
+      "tested": "c59a24bd5b4853a0b01a17b38ac2f1d7d77edb3422a8b077e56076357dbf77de"
     },
     "store.py": {
       "allow_missing": false,
-      "baseline": "97f63462e09bb683f7f58de64a718f95e8ddf883d5cf95ed1e6d62a5f4a97152",
-      "tested": "a4c1635c11f0ff49160a2634a8709bb5da54a2ecbbd9affa63b67c9927c49573"
+      "baseline": "a4c1635c11f0ff49160a2634a8709bb5da54a2ecbbd9affa63b67c9927c49573",
+      "tested": "65d32308e658ee585230794d6541fb9988e025a8cd8e8c9f78789d8c85ae8b05"
     },
     "telegram_menu.py": {
       "allow_missing": false,
       "baseline": "8180f3c40de9e74ef7193c0e577809c80ef22ab34a2feca85b8e85f29f0a30f3",
       "tested": "8180f3c40de9e74ef7193c0e577809c80ef22ab34a2feca85b8e85f29f0a30f3"
     },
+    "tool_errors.py": {
+      "allow_missing": true,
+      "baseline": null,
+      "tested": "88f7a8bce249a6aff2e27dfb5ea763a739041499e2b221f3010caa1ee68b3360"
+    },
     "tool_runtime.py": {
       "allow_missing": false,
-      "baseline": "f7fdb4b8bf4e0018bfc084c8f0160c590d1c0460a9483566350115127ee593e9",
+      "baseline": "8caf303fdd85c3d0dba64b2c296c13f6e51ae1537365cb4fdf06c14bc3ca463d",
       "tested": "8caf303fdd85c3d0dba64b2c296c13f6e51ae1537365cb4fdf06c14bc3ca463d"
     },
     "workers.py": {
       "allow_missing": false,
-      "baseline": "8458f39035ef12b5e4f8e817fb3abc9c552e54077b654b81010b9efb2ba8f47e",
+      "baseline": "45a6e5d87f33dff828101da8f56eca06a7a293debe562d850e684de50d2b9e83",
       "tested": "45a6e5d87f33dff828101da8f56eca06a7a293debe562d850e684de50d2b9e83"
     }
   },
