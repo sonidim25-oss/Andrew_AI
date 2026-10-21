@@ -16,6 +16,7 @@ class ModelWorker:
         self._active_since = None
         self._last_completion_at = None
         self._failures = 0
+        self._admission_blocked = False
 
     def start(self):
         with self._lock:
@@ -43,19 +44,36 @@ class ModelWorker:
         with self._lock:
             alive = self._thread is not None and self._thread.is_alive()
             state = ('stopping' if alive else 'stopped') if self._stop.is_set() else (
+                'stopped' if self._thread is not None and not alive else
+                'blocked' if self._admission_blocked else
                 'running' if self._active_since is not None else 'idle')
             return {'state': state,
                     'active_seconds': None if self._active_since is None else max(0, time.monotonic() - self._active_since),
                     'last_completion_at': self._last_completion_at, 'failures': self._failures}
 
     def _run(self):
-        while not self._stop.is_set() and not self.should_stop():
-            if not self._ready.wait(1):
+        while not self._stop.is_set():
+            try:
+                if self.should_stop():
+                    break
+                with self._lock:
+                    self._admission_blocked = False
+                if not self._ready.wait(1):
+                    continue
+                if self._stop.is_set() or self.should_stop():
+                    break
+            except Exception:
+                # A failed lifecycle read does not grant permission to act.
+                # Keep the wake pending until admission can be checked again.
+                with self._lock:
+                    self._failures += 1
+                    self._admission_blocked = True
+                logging.warning('Background worker stop check failed')
+                self._stop.wait(1)
                 continue
             self._ready.clear()
-            if self._stop.is_set() or self.should_stop():
-                break
             with self._lock:
+                self._admission_blocked = False
                 self._active_since = time.monotonic()
             succeeded = False
             try:

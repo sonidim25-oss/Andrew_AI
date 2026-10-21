@@ -1,5 +1,12 @@
 # Memory update
 
+## Worker stop-check recovery — 2026-10-21
+
+- **DONE (implementation and review; not deployed):** exceptions in a worker's stop predicate no longer kill its thread or consume a pending wake. Admission stays blocked until lifecycle checks succeed, with an interruptible one-second retry delay and sanitized logging. Worker status reports blocked or stopped instead of a misleading idle state.
+- Seven new regression tests and 21 existing worker/unlimited-work tests passed (28 total). Independent review approved. No action is automatically replayed, no work deadline was introduced, and Claude-owned gateway.py, sessions.py and store.py were not edited.
+- **DONE (deployment verified):** the reviewed provider transport candidate was installed and enabled. Public adoption is enabled and its controller digest matches the frozen `53e01cd` source. Acceptance included reused source-bound core evidence. Existing research.save hold and live-cycle verification remain open.
+- The broader action-hang/watchdog candidate is still unverified and is not marked complete by this worker fix.
+
 ## Current checkpoint — 2026-10-21
 
 - GitHub source synchronization completed at `bf9749d`; the 2026-10-20 deployment snapshot remains historical installed-source evidence.
@@ -12,7 +19,7 @@
 
 ## Provider transport rollout preparation — 2026-10-21
 
-The owner authorized deploying the reviewed transport fix and requested no duplicate full controller run. The coordinated installer now accepts explicitly selected, source-identical core acceptance evidence, with controller/tests/skills/backend/worker input hashes, interpreter version/binary hash, command and passing-log hash checked before reuse. Other acceptance and privileged UID checks remain required. Four targeted reuse tests and eighteen existing installer tests passed; the previously saved 709-test result is reused rather than rerun. Production remains on the enabled two-fix release until this separate rollout completes. The old research.save hold is retained; no wake/replay is part of this rollout.
+The owner authorized deploying the reviewed transport fix and requested no duplicate full controller run. The coordinated installer now accepts explicitly selected, source-identical core acceptance evidence, with controller/tests/skills/backend/worker input hashes, interpreter version/binary hash, command and passing-log hash checked before reuse. Other acceptance and privileged UID checks remain required. Four targeted reuse tests and eighteen existing installer tests passed; the previously saved 709-test result is reused rather than rerun. Rollout completed: adoption is enabled and the installed controller digest matches the reviewed provider transport source at `53e01cd`. The old research.save hold is retained; no wake/replay is part of this rollout.
 
 ## Revised provider transport classification — 2026-10-21
 
@@ -20,7 +27,7 @@ The owner authorized deploying the reviewed transport fix and requested no dupli
 - Revised Claude commit `534d6f4`, based on `8a783ff`, uses per-call connection evidence. Only a connect failure before any application send on every connection can establish an unsent request. Transmission failures, prior redirect hops, proxy CONNECT attempts and unknown transport errors retain uncertainty. Journaled recovery remains conservative.
 - Codex independently reran the original reproduction: two 422 responses, one retained reservation and exactly one provider POST. An independent reviewer approved the revised code and passed 49 focused transport/gateway/model tests.
 - Full controller validation passed: 709 tests, 2 skipped. All 18 installer tests passed. Future packaging changes only gateway.py and model.py in the controller; runner/backend are unchanged. The manifest targets the installed two-fix baseline.
-- These transport changes are integrated as source only and are NOT installed in production. They do not reconcile the existing research.save hold. Next production work remains guarded reconciliation, then explicit live owner reply and autonomous-cycle verification.
+- These transport changes are installed and enabled; adoption and the installed controller digest were verified against `53e01cd`. They do not reconcile the existing research.save hold. Next production work remains guarded reconciliation, then explicit live owner reply and autonomous-cycle verification.
 
 ## Current checkpoint — 2026-10-20
 
