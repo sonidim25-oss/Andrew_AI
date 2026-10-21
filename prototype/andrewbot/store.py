@@ -1431,6 +1431,7 @@ class Store:
         Returns the retry time, or None when the proof is incomplete or the backoff is exhausted.
         """
         with self.connection:
+            self.connection.execute('BEGIN IMMEDIATE')
             if not self._unsent_cycle_proven(session_id, cycle_id, owner_id):
                 return None
             streak = int(self.get_state('provider_retry_streak', '0') or '0')
@@ -1455,6 +1456,7 @@ class Store:
     def start_provider_retry_session(self, session_id, now, owner_id):
         """Atomically start a due provider retry, or cancel it if the owner or lifecycle changed."""
         with self.connection:
+            self.connection.execute('BEGIN IMMEDIATE')
             state = dict(self.connection.execute('SELECT key,value FROM state').fetchall())
             if state.get('session_start_requested', '') != 'provider_retry':
                 return False

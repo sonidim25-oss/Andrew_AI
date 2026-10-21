@@ -11,6 +11,11 @@
   },
   "contract": "runner_result_recovery_v1",
   "controller": {
+    "appserver.py": {
+      "allow_missing": false,
+      "baseline": "628daeeaf575719783ec5dcd8984507df1434115495561a6be65e78cbf8db0a1",
+      "tested": "6c9c6abe3db5894d33adab06e6e47bc1aa145e10f6c2c408764825d866681113"
+    },
     "controller.py": {
       "allow_missing": false,
       "baseline": "639cb0c1d35fc82d9e0b138fb38e694abfcdb2a937a22c7a7d8959b0c9da2818",
@@ -23,8 +28,8 @@
     },
     "gateway.py": {
       "allow_missing": false,
-      "baseline": "ca06c32985137e19106326426e9c902655abcb84ba6fcec86a6e389b52966868",
-      "tested": "109bd07c4855d0da0eabc23d00bc30aded07d22c2828ae61290c4cbbcded1cac"
+      "baseline": "109bd07c4855d0da0eabc23d00bc30aded07d22c2828ae61290c4cbbcded1cac",
+      "tested": "116a8c6019621fb2d4d98741afc0421684953eeaffae95ac94010961b72b56bc"
     },
     "main.py": {
       "allow_missing": false,
@@ -126,6 +131,11 @@
       "baseline": "1cdb98bb19f6a2f2291a2d36f92ac780658693d3ea8e855fe855e8bb306eee3c",
       "tested": "731e9cf54994ec90f9a2b4934cc52addf917ba2a4ba83bdfb62375931d5da116"
     },
+    "sessions.py": {
+      "allow_missing": false,
+      "baseline": "118a8a8fa5615e41a00d60e68728a73a9a1fd4871607bf35dff098c1fb2cf500",
+      "tested": "d21782ed5ee5470673660cc59a746b2678c1815ac8a1dde2c7f13d22c5c21154"
+    },
     "skills.py": {
       "allow_missing": false,
       "baseline": "956d219644893e5aa19597bd8c61f10f5e152368254e45a7b3c068aa1cf2b2ea",
@@ -133,8 +143,8 @@
     },
     "store.py": {
       "allow_missing": false,
-      "baseline": "cb21020860282a015a62fe265b54267ca5db3fd0a778d25b1dfbb29f99db19d1",
-      "tested": "95c7ea87eac3efcb516882ad5d2fdbb19db78ed573eb26244a8c8c5eeb0f9be7"
+      "baseline": "95c7ea87eac3efcb516882ad5d2fdbb19db78ed573eb26244a8c8c5eeb0f9be7",
+      "tested": "97f63462e09bb683f7f58de64a718f95e8ddf883d5cf95ed1e6d62a5f4a97152"
     },
     "telegram_menu.py": {
       "allow_missing": false,

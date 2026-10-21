@@ -1,5 +1,12 @@
 # Memory update
 
+## Proven-unsent retry exhaustion integration — 2026-10-21
+
+- **DONE (code and review; NOT DEPLOYED):** Claude `68243e2` was rebased onto worker fix `5ce3267` as `f4e0ff1`. The isolated pinned runtime established 16 failed provider dispatches over about 36 seconds before `llm_api_error`; safe legacy-mode exhaustion now schedules durable bounded retries instead of setting autonomy_error.
+- The bridge's `provider_not_reached` classification is only a hint. Scheduling requires every recorded attempt for the cycle to be proven unsent, no held reservation for those attempts, no executed tool/completed turn, no journaled attempt/held owner message, and unchanged owner controls and restore guards. Existing unknown outcomes are retained.
+- Review reproduced a cross-connection lifecycle race in the original patch. Both retry scheduling and admission now acquire `BEGIN IMMEDIATE` before reading guards. Two real-connection regressions failed before and passed after this correction; independent review approved it. Twenty-two focused integration tests passed. Claude's reported related/protocol results are retained without repeating the full suite.
+- **OPEN in production journaled mode:** this legacy-only path does not resolve journaled provider holds or the existing research.save hold. No deployment, wake, replay or hold clearing is part of this integration. The frozen worker rollout source remains unchanged.
+
 ## Worker stop-check recovery — 2026-10-21
 
 - **DONE (implementation and review; not deployed):** exceptions in a worker's stop predicate no longer kill its thread or consume a pending wake. Admission stays blocked until lifecycle checks succeed, with an interruptible one-second retry delay and sanitized logging. Worker status reports blocked or stopped instead of a misleading idle state.
