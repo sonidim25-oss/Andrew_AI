@@ -1,6 +1,6 @@
 import re
 from datetime import datetime
-from .telegram import deliver_saved_message
+from .telegram import TelegramNotSent, deliver_saved_message
 from .latency import record_failure
 
 
@@ -130,8 +130,13 @@ def deliver_pending_diary(telegram, store, owner_id, should_stop=lambda: False):
         try:
             complete = deliver_saved_message(telegram, store, 'diary', entry_id, owner_id,
                                              format_diary_entry(entry), entry['delivery_attempts'] > 0,
-                                             should_stop=should_stop)
+                                             should_stop=should_stop, diary_sender_token=token)
             if not complete:
+                record_failure(RuntimeError('Diary delivery remains held'))
+        except TelegramNotSent:
+            if store.diary_delivery_state(entry_id) == 'pending':
+                store.add_activity(f"Diary Telegram delivery not sent; retry scheduled ({entry_id})")
+            else:
                 record_failure(RuntimeError('Diary delivery remains held'))
         except Exception as error:
             record_failure(error)

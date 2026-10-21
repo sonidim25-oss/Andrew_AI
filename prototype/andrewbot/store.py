@@ -153,6 +153,11 @@ class Store:
                 entry_id TEXT PRIMARY KEY REFERENCES diary_entries(entry_id),
                 token TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS diary_delivery_retries (
+                entry_id TEXT PRIMARY KEY REFERENCES diary_entries(entry_id),
+                attempts INTEGER NOT NULL CHECK(attempts>0),
+                next_attempt_at TEXT NOT NULL
+            );
             CREATE UNIQUE INDEX IF NOT EXISTS diary_one_per_day
                 ON diary_entries(local_date) WHERE record_type='diary';
             CREATE UNIQUE INDEX IF NOT EXISTS diary_one_incident_per_session
@@ -1803,6 +1808,26 @@ class Store:
             if context['kind'] == 'reply':
                 self.connection.execute('UPDATE telegram_outbox SET attempts=attempts-1 WHERE id=? AND attempts>0',
                                         (context['record_id'],))
+            elif context['kind'] == 'diary' and context.get('diary_claim_token'):
+                # The exact chunk revocation and retry become durable together.
+                # A changed sender or a failed write rolls back the revocation.
+                changed = self.connection.execute(
+                    "UPDATE diary_entries SET delivery_state='pending',delivery_attempts=delivery_attempts-1 "
+                    "WHERE entry_id=? AND delivery_state='uncertain' AND delivery_attempts>0 "
+                    "AND EXISTS(SELECT 1 FROM diary_delivery_claims WHERE entry_id=? AND token=?)",
+                    (context['record_id'], context['record_id'], context['diary_claim_token']))
+                if changed.rowcount != 1:
+                    raise ValueError('Diary sender changed before unsent retry')
+                previous = self.connection.execute(
+                    'SELECT attempts FROM diary_delivery_retries WHERE entry_id=?',
+                    (context['record_id'],)).fetchone()
+                attempts = previous['attempts'] + 1 if previous else 1
+                delay = min(60, 2 ** min(attempts - 1, 6))
+                due = (datetime.fromisoformat(self.now()) + timedelta(seconds=delay)).isoformat(timespec='seconds')
+                self.connection.execute(
+                    'INSERT INTO diary_delivery_retries VALUES(?,?,?) ON CONFLICT(entry_id) DO UPDATE '
+                    'SET attempts=excluded.attempts,next_attempt_at=excluded.next_attempt_at',
+                    (context['record_id'], attempts, due))
 
     @database_locked
     def telegram_chunk_context(self, kind, record_id, chunk):
@@ -2082,8 +2107,10 @@ class Store:
     @database_locked
     def pending_diary_deliveries(self, limit=20):
         rows = self.connection.execute(
-            "SELECT * FROM diary_entries WHERE delivery_state='pending' ORDER BY created_at,entry_id LIMIT ?",
-            (max(1, min(100, int(limit))),),
+            "SELECT * FROM diary_entries WHERE delivery_state='pending' "
+            "AND NOT EXISTS(SELECT 1 FROM diary_delivery_retries r WHERE r.entry_id=diary_entries.entry_id "
+            "AND r.next_attempt_at>?) ORDER BY created_at,entry_id LIMIT ?",
+            (self.now(), max(1, min(100, int(limit)))),
         ).fetchall()
         return [self._diary_row(row) for row in rows]
 
@@ -2098,8 +2125,9 @@ class Store:
     def claim_pending_diary_delivery(self, entry_id):
         cursor = self.connection.execute(
             "UPDATE diary_entries SET delivery_state='uncertain',delivery_attempts=delivery_attempts+1 "
-            "WHERE entry_id=? AND delivery_state='pending'",
-            (entry_id,),
+            "WHERE entry_id=? AND delivery_state='pending' "
+            "AND NOT EXISTS(SELECT 1 FROM diary_delivery_retries r WHERE r.entry_id=diary_entries.entry_id AND r.next_attempt_at>?)",
+            (entry_id, self.now()),
         )
         self.connection.commit()
         return cursor.rowcount == 1
@@ -2111,8 +2139,9 @@ class Store:
             cursor = self.connection.execute(
                 "UPDATE diary_entries SET delivery_state='uncertain',delivery_attempts=delivery_attempts+1 "
                 "WHERE entry_id=? AND delivery_state='pending' "
-                "AND NOT EXISTS(SELECT 1 FROM diary_delivery_claims WHERE entry_id=?)",
-                (entry_id, entry_id))
+                "AND NOT EXISTS(SELECT 1 FROM diary_delivery_claims WHERE entry_id=?) "
+                "AND NOT EXISTS(SELECT 1 FROM diary_delivery_retries r WHERE r.entry_id=diary_entries.entry_id AND r.next_attempt_at>?)",
+                (entry_id, entry_id, self.now()))
             if cursor.rowcount != 1:
                 return None
             self.connection.execute('INSERT INTO diary_delivery_claims VALUES(?,?)', (entry_id, token))
@@ -2144,6 +2173,7 @@ class Store:
             )
             if cursor.rowcount == 1:
                 self.connection.execute("DELETE FROM telegram_delivery_progress WHERE kind='diary' AND record_id=?", (entry_id,))
+                self.connection.execute('DELETE FROM diary_delivery_retries WHERE entry_id=?', (entry_id,))
             return cursor.rowcount == 1
 
     @database_locked

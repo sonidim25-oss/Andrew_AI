@@ -78,7 +78,7 @@ def validate_sent_media(result, chat_id, mime):
 
 
 def deliver_saved_message(telegram, store, kind, record_id, chat_id, text,
-                          previously_attempted=False, should_stop=lambda: False):
+                          previously_attempted=False, should_stop=lambda: False, *, diary_sender_token=None):
     progress = store.prepare_telegram_delivery(kind, record_id, text, previously_attempted)
     store.apply_telegram_receipts(kind, record_id, chat_id)
     progress = store.prepare_telegram_delivery(kind, record_id, text, previously_attempted)
@@ -91,6 +91,8 @@ def deliver_saved_message(telegram, store, kind, record_id, chat_id, text,
             return False
         prefix = RETRY_NOTICE if attempts else ''
         context = store.telegram_chunk_context(kind, record_id, index)
+        if kind == 'diary' and diary_sender_token is not None:
+            context['diary_claim_token'] = diary_sender_token
         try:
             result = telegram.send_message(chat_id, prefix + chunks[index])
         except TelegramNotSent:
