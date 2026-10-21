@@ -7,8 +7,16 @@
 - The current incident is identified: cycle `68207635b5814cd8b82b2384062c3fb4` held a `research.save` at 2026-10-20 01:45:55. Its findings had 2,116 characters against the 2,000-character limit. Exact binding/request metadata matched; no result receipt or runner mapping exists for that effect.
 - The prevention fix separates pure `research.save` argument validation from storage execution. Known validation failures become sanitized, saved tool error results, allowing correction in the same cycle. Storage/callback failures remain uncertain and are not replayed.
 - Validation: 698 controller tests passed (2 skipped), 49 focused research/gateway tests passed independently, and code review approved. One actual isolated pinned-backend test verified rejection, corrected save, terminal completion and duplicate-resume protection without real provider calls.
-- Deployment packaging independently reviewed: exactly controller.py, gateway.py and memory.py change; runner package and backend release remain unchanged. All 18 installer tests passed. Exact-host acceptance and administrator rollout are pending.
-- No production deployment, hold clearing, wake or replay has occurred for these changes. The existing held attempt still needs a separately guarded reconciliation. Owner pause and revision must remain preserved. P0 remains open.
+- Two-fix deployment at `14f5275` completed exact-host acceptance and administrator rollout. Public adoption is enabled, controller code digest matches the reviewed two-fix source, and controller/backend/runner services are active. Backend and runner package remained unchanged.
+- The deployment preserves owner controls and does not request a wake. The existing held research.save attempt still needs a separately guarded reconciliation; no hold clearing or replay was performed. P0 remains open.
+
+## Revised provider transport classification — 2026-10-21
+
+- Claude commit `43d02c0` was rejected and remains unmerged: a local fault test proved that treating every URLError as unsent could release a reservation after the full POST was received and allow duplicate dispatch.
+- Revised Claude commit `534d6f4`, based on `8a783ff`, uses per-call connection evidence. Only a connect failure before any application send on every connection can establish an unsent request. Transmission failures, prior redirect hops, proxy CONNECT attempts and unknown transport errors retain uncertainty. Journaled recovery remains conservative.
+- Codex independently reran the original reproduction: two 422 responses, one retained reservation and exactly one provider POST. An independent reviewer approved the revised code and passed 49 focused transport/gateway/model tests.
+- Full controller validation passed: 709 tests, 2 skipped. All 18 installer tests passed. Future packaging changes only gateway.py and model.py in the controller; runner/backend are unchanged. The manifest targets the installed two-fix baseline.
+- These transport changes are integrated as source only and are NOT installed in production. They do not reconcile the existing research.save hold. Next production work remains guarded reconciliation, then explicit live owner reply and autonomous-cycle verification.
 
 ## Current checkpoint — 2026-10-20
 
