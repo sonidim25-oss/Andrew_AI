@@ -1,5 +1,10 @@
 # Memory update
 
+## P3 session failure logging release — 2026-10-21
+
+- Claude `4d18f23` (replaces `ffdf610`) adds three fixed warnings for failed session bookkeeping without exception text or control-flow changes. Owner authorized shipping after the historical P0 repair. Claude reports the new regression plus 118 related session tests passed; no duplicate broad run performed during integration.
+- Deployment manifests bind the installed P0-0b baseline at `4e91033` to this sessions.py change. Backend and runner packages remain unchanged. Administrator rollout pending; normal coordinated acceptance runs once in the deployment command before service changes.
+
 ## P0-0 historical research rejection repair — 2026-10-21
 
 - P0-0b is now installed/enabled at release `4e91033`: expected controller digest `a1b5fb7f47f6d6756318c241bdc4a0edc93698ce57486b36d0a09974c04aff6b` matches the public adoption record and all four services are active. The owner executed the root rollout; no additional rollout is needed for the prevention fix.
