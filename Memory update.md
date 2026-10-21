@@ -1,5 +1,14 @@
 # Memory update
 
+## P0-0 historical research rejection repair — 2026-10-21
+
+- P0-0b is now installed/enabled at release `4e91033`: expected controller digest `a1b5fb7f47f6d6756318c241bdc4a0edc93698ce57486b36d0a09974c04aff6b` matches the public adoption record and all four services are active. The owner executed the root rollout; no additional rollout is needed for the prevention fix.
+- Fresh root read-only inspection confirms the original admitted research.save call: findings 2116 > 2000, no new-entry ID, request/blob/checkpoint hashes agree, checkpoint revision 652 held/tool_uncertain, owner revision 38 versus current paused revision 39. There are 2 research entries, 17 held owner messages, 10 reservations and 56 cycle tool rows. Their exact hashes are pinned by the private proof, not checked into Git.
+- Added maintenance-only tools to inspect the exact incident, save its known pre-write error, and retire the historical paused attempt. No runtime package or backend release changes are needed. Writers stop behind a startup fence; controller/backend/runner snapshots are retained. Under the correct service UIDs, the tool receipt is recorded and one atomic checkpoint migration imports it into an existing owner-yield terminal. The old providers/tools are never called again.
+- A temporary controller-UID gateway exposes only evidence/result/settlement routes, blocks provider and tool dispatch, and uses only the internal systemd credential. Existing backend protocol code projects the error once and acknowledges the terminal. Owner pause/error/revision, existing research, held messages, reservations, other effects/results and provider usage are verified preserved. Normal services restart only after retirement verification.
+- Validation: 10 focused tests passed, including two actual pinned-backend protocol cases; the affected eight operator/unit checks passed again after the boot guard change. Focused tests cover read-only/privacy checks, refusal on drift before service changes, retained fences after failure, exact resume, transient service cleanup, actual backend receipt/checkpoint/projection interruption and duplicate finalization, and a fresh synthetic input after explicit owner wake. No broad suite rerun. See `docs/historical-research-hold-reconciliation.md` for scope and phases.
+- Production historical hold has NOT been modified by this source work. Administrator execution is required because this process cannot authenticate sudo. The repair is bound to the exact inspected admission/proof and preserves the newer pause; it does not authorize /wake or /replay.
+
 ## P0-0b journaled tool rejection results — 2026-10-21
 
 - **IMPLEMENTED locally; review/integration pending; NOT DEPLOYED.** Branch `fix/journaled-tool-rejections` in `/home/daniel/andrew-tool-rejections-20261021`, based on merged P2-11 `239f451`. Claude reproduction `404f7ed` preserved as test-only `f02b97e`.
