@@ -23,7 +23,7 @@
     },
     "diary.py": {
       "allow_missing": false,
-      "baseline": "45ea42644a77cd6c0b5a4f581bdfbd219fcb544145d583a83824abea2f770bcd",
+      "baseline": "23efdc5c9f0d7b5874083e3423ffc51f03af3627e9c47e2f8ab6083a8d43644a",
       "tested": "23efdc5c9f0d7b5874083e3423ffc51f03af3627e9c47e2f8ab6083a8d43644a"
     },
     "dispatch.py": {
@@ -119,7 +119,7 @@
     "runner_receipt_server.py": {
       "allow_missing": false,
       "baseline": "f857de59a5752521a33f9e11cff5ec16eeb423a6ecc21960739f47efb9fd581f",
-      "tested": "f857de59a5752521a33f9e11cff5ec16eeb423a6ecc21960739f47efb9fd581f"
+      "tested": "8b1c2d75725f41d0fd3067ea3bea53210b7a219618fea4e33ed6e4838d2242cc"
     },
     "runner_receipts.py": {
       "allow_missing": false,
@@ -134,7 +134,7 @@
     "runner_service.py": {
       "allow_missing": false,
       "baseline": "2c3c7dc983db37622efa64cb105ffe6e17628888bb0298f77ca9097dafe184a0",
-      "tested": "2c3c7dc983db37622efa64cb105ffe6e17628888bb0298f77ca9097dafe184a0"
+      "tested": "a6deeb31c71322cdb096374d3325d1c3ce2d1e7256af8ba72f3593e50bf97811"
     },
     "runner_socket.py": {
       "allow_missing": false,
@@ -158,12 +158,12 @@
     },
     "store.py": {
       "allow_missing": false,
-      "baseline": "f22290aa32c61cc6c4302923cc6f91a030740f5815320337c86847e40df7f12f",
+      "baseline": "925d41481c83457b0cef91ac82a87681f1e71f5d6aefa35ecc904fba98af56b2",
       "tested": "925d41481c83457b0cef91ac82a87681f1e71f5d6aefa35ecc904fba98af56b2"
     },
     "telegram.py": {
       "allow_missing": false,
-      "baseline": "4b45624af451e01fce45e56ff2b07d7f67ef16eb00362bb1c9deee944c0932da",
+      "baseline": "06f014b9738d22f9bc0ac9cff90254bde5c59b6eb43a16fd5e57b5112a5c8891",
       "tested": "06f014b9738d22f9bc0ac9cff90254bde5c59b6eb43a16fd5e57b5112a5c8891"
     },
     "telegram_menu.py": {
@@ -226,7 +226,7 @@
     "runner_receipt_server.py": {
       "allow_missing": true,
       "baseline": "f857de59a5752521a33f9e11cff5ec16eeb423a6ecc21960739f47efb9fd581f",
-      "tested": "f857de59a5752521a33f9e11cff5ec16eeb423a6ecc21960739f47efb9fd581f"
+      "tested": "8b1c2d75725f41d0fd3067ea3bea53210b7a219618fea4e33ed6e4838d2242cc"
     },
     "runner_receipts.py": {
       "allow_missing": true,
@@ -236,7 +236,7 @@
     "runner_service.py": {
       "allow_missing": false,
       "baseline": "2c3c7dc983db37622efa64cb105ffe6e17628888bb0298f77ca9097dafe184a0",
-      "tested": "2c3c7dc983db37622efa64cb105ffe6e17628888bb0298f77ca9097dafe184a0"
+      "tested": "a6deeb31c71322cdb096374d3325d1c3ce2d1e7256af8ba72f3593e50bf97811"
     },
     "runner_socket.py": {
       "allow_missing": true,
