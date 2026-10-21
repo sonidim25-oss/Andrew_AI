@@ -24,7 +24,7 @@
     "dispatch.py": {
       "allow_missing": false,
       "baseline": "c16dd1890108ea0558bc93d9220144e61876f1597a381b7ea9b12176d8ba012c",
-      "tested": "c16dd1890108ea0558bc93d9220144e61876f1597a381b7ea9b12176d8ba012c"
+      "tested": "b2c70e4db94bd46529d07de2b83a10e206ab15f67613a45f06b0be3f5e135159"
     },
     "gateway.py": {
       "allow_missing": false,
@@ -154,7 +154,12 @@
     "store.py": {
       "allow_missing": false,
       "baseline": "65d32308e658ee585230794d6541fb9988e025a8cd8e8c9f78789d8c85ae8b05",
-      "tested": "65d32308e658ee585230794d6541fb9988e025a8cd8e8c9f78789d8c85ae8b05"
+      "tested": "a1f55c6e5a0ac9c99058fd602af5d1905a4e23778095a3b1c964205bffd748b7"
+    },
+    "telegram.py": {
+      "allow_missing": false,
+      "baseline": "fde914b03be15f001e0b4ee3024e7909baad58772f7bbe812e1dd98c2c190990",
+      "tested": "4b45624af451e01fce45e56ff2b07d7f67ef16eb00362bb1c9deee944c0932da"
     },
     "telegram_menu.py": {
       "allow_missing": false,
