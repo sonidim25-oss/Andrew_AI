@@ -1688,7 +1688,7 @@ class Store:
 
     @database_locked
     def release_reply(self, reply_id, token):
-        # Used on shutdown before the next part, never to permit an uncertain retry.
+        # Used on shutdown or after a proven-unsent part, never to permit an uncertain retry.
         with self.connection:
             row = self.connection.execute("SELECT * FROM telegram_outbox WHERE id=? AND claim_token=? AND delivery_state='sending'",
                                           (reply_id, token)).fetchone()
@@ -1761,6 +1761,21 @@ class Store:
                 (kind, str(record_id), chunk))
             if cursor.rowcount != 1:
                 raise ValueError('Telegram delivery progress changed')
+
+    @database_locked
+    def revoke_unsent_telegram_chunk(self, context):
+        """Withdraw one send admission after Telegram was provably not reached."""
+        with self.connection:
+            cursor = self.connection.execute(
+                "UPDATE telegram_delivery_progress SET chunk_attempts=0,chunk_token='' "
+                "WHERE kind=? AND record_id=? AND delivery_id=? AND chunk_token=? AND next_chunk=? AND chunk_attempts=1 "
+                "AND NOT EXISTS (SELECT 1 FROM telegram_chunk_receipts r WHERE r.delivery_id=telegram_delivery_progress.delivery_id AND r.chunk=telegram_delivery_progress.next_chunk)",
+                (context['kind'], context['record_id'], context['delivery_id'], context['chunk_token'], context['next_chunk']))
+            if cursor.rowcount != 1:
+                raise ValueError('Telegram send admission changed before revocation')
+            if context['kind'] == 'reply':
+                self.connection.execute('UPDATE telegram_outbox SET attempts=attempts-1 WHERE id=? AND attempts>0',
+                                        (context['record_id'],))
 
     @database_locked
     def telegram_chunk_context(self, kind, record_id, chunk):

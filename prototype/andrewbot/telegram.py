@@ -1,4 +1,5 @@
 import json
+import socket
 import time
 import uuid
 from collections import deque
@@ -6,6 +7,15 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from .telegram_menu import command_keyboard
 from .latency import LatencyMetrics
+
+
+class TelegramNotSent(RuntimeError):
+    """Telegram was provably not reached, or refused the request unread; nothing was delivered."""
+
+
+def _proves_not_sent(reason):
+    # Name resolution and refused connections fail before any request byte leaves.
+    return isinstance(reason, (socket.gaierror, ConnectionRefusedError))
 
 
 class TelegramMediaError(RuntimeError):
@@ -81,7 +91,12 @@ def deliver_saved_message(telegram, store, kind, record_id, chat_id, text,
             return False
         prefix = RETRY_NOTICE if attempts else ''
         context = store.telegram_chunk_context(kind, record_id, index)
-        result = telegram.send_message(chat_id, prefix + chunks[index])
+        try:
+            result = telegram.send_message(chat_id, prefix + chunks[index])
+        except TelegramNotSent:
+            # Nothing reached Telegram, so this part may be sent again later.
+            store.revoke_unsent_telegram_chunk(context)
+            raise
         validate_sent_text(result, chat_id, prefix + chunks[index])
         store.save_telegram_receipt(context, chat_id, prefix + chunks[index], result)
         # Persist each acknowledgement. An unacknowledged attempt is held;
@@ -115,8 +130,16 @@ class TelegramAPI:
                 data = json.loads(response.read())
         except HTTPError as error:
             # HTTPError URLs contain the bot token, so expose only the status.
+            if error.code == 429:
+                raise TelegramNotSent("Telegram API returned HTTP status 429") from None
             raise RuntimeError(f"Telegram API returned HTTP status {error.code}") from None
-        except (URLError, TimeoutError, ValueError, OSError):
+        except URLError as error:
+            if _proves_not_sent(error.reason):
+                raise TelegramNotSent("Telegram API was not reached") from None
+            raise RuntimeError("Telegram API request failed") from None
+        except (socket.gaierror, ConnectionRefusedError):
+            raise TelegramNotSent("Telegram API was not reached") from None
+        except (TimeoutError, ValueError, OSError):
             # Telegram embeds the bot token in the API path; never propagate the exception text.
             raise RuntimeError("Telegram API request failed") from None
         if not isinstance(data, dict) or data.get("ok") is not True:
@@ -126,8 +149,15 @@ class TelegramAPI:
     def send_message(self, chat_id, text):
         result = None
         for chunk in split_message(text, limit=4000):
-            result = self.call("sendMessage", {"chat_id": chat_id, "text": chunk,
-                                              "reply_markup": command_keyboard()})
+            try:
+                sent = self.call("sendMessage", {"chat_id": chat_id, "text": chunk,
+                                                "reply_markup": command_keyboard()})
+            except TelegramNotSent:
+                if result is not None:
+                    # An earlier piece of this text was delivered.
+                    raise RuntimeError("Telegram API request failed") from None
+                raise
+            result = sent
             validate_sent_text(result, chat_id, chunk)
         return result
 
