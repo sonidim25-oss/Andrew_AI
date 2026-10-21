@@ -44,6 +44,8 @@ class Store:
                 queued INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS messages_owner_id ON messages(owner_id, id);
+            CREATE INDEX IF NOT EXISTS messages_pending_owner ON messages(owner_id)
+                WHERE role='user' AND queued IN (1,2);
             CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS session_history (
                 id INTEGER PRIMARY KEY,
@@ -83,6 +85,10 @@ class Store:
                 payload TEXT NOT NULL,
                 received_at TEXT NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS telegram_inbox_owner ON telegram_inbox(
+                json_extract(payload,'$.message.from.id'),
+                json_extract(payload,'$.message.chat.id'),
+                json_extract(payload,'$.message.chat.type'), update_id);
             CREATE TABLE IF NOT EXISTS telegram_claims (
                 update_id INTEGER PRIMARY KEY
             );
@@ -820,6 +826,14 @@ class Store:
 
     @database_locked
     def pending_owner_input(self, owner_id):
+        if self.connection.execute(
+            "SELECT 1 FROM messages WHERE owner_id=? AND role='user' AND queued IN (1,2) LIMIT 1",
+            (owner_id,),
+        ).fetchone() is not None:
+            return True
+        from .telegram_menu import is_model_input
+        prompt_after = (int(self.get_state('telegram_wake_prompt_after_update_id', '-1'))
+                        if self.get_state('telegram_wake_prompt_until', '') else None)
         # Search the entire durable inbox, including messages beyond its first page.
         rows=self.connection.execute(
             "SELECT update_id,json_extract(payload,'$.message.text') AS text FROM telegram_inbox WHERE json_extract(payload,'$.message.from.id')=? "
@@ -833,13 +847,12 @@ class Store:
             "AND json_type(payload,'$.message.forward_sender_name') IS NULL "
             "AND update_id NOT IN (SELECT update_id FROM telegram_claims) ",
             (owner_id, owner_id),
-        ).fetchall()
-        from .telegram_menu import is_model_input
-        prompt_after=int(self.get_state("telegram_wake_prompt_after_update_id","-1")) if self.get_state("telegram_wake_prompt_until","") else None
-        return any(is_model_input(row["text"],update_id=row["update_id"],prompt_after=prompt_after) for row in rows) or self.connection.execute(
-            "SELECT 1 FROM messages WHERE owner_id=? AND role='user' AND queued IN (1,2) LIMIT 1",
-            (owner_id,),
-        ).fetchone() is not None
+        )
+        try:
+            return any(is_model_input(row['text'], update_id=row['update_id'], prompt_after=prompt_after)
+                       for row in rows)
+        finally:
+            rows.close()
 
     @database_locked
     def record_session_failure(self, category, owner_id, owner_revision=None, session_id=None, notify=True):
