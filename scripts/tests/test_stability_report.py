@@ -18,6 +18,9 @@ from andrewbot.store import Store
 spec = importlib.util.spec_from_file_location('stability_report', ROOT / 'scripts/stability-report.py')
 stability = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(stability)
+timeline_spec = importlib.util.spec_from_file_location('incident_timeline', ROOT / 'scripts/incident-timeline.py')
+timeline = importlib.util.module_from_spec(timeline_spec)
+timeline_spec.loader.exec_module(timeline)
 
 
 class StabilityReportTests(unittest.TestCase):
@@ -75,6 +78,24 @@ class StabilityReportTests(unittest.TestCase):
         text = self.run_report()
         self.assertIn('provider_attempt_uncertain×1', text)
         self.assertIn('"autonomy_error": "provider_attempt_uncertain"', text)
+        self.assertNotIn('PRIVATE', text)
+
+    def test_incident_timeline_lists_events_before_each_stop_without_writing(self):
+        self.outcomes = [LettaTurnError('provider_attempt_uncertain')]
+        self.controller._command('/wake')
+        self.store.add_activity('Letta model gateway provider request failed (category=timeout, http_status=unavailable)')
+        self.assertFalse(self.runner.tick(datetime.now(timezone.utc)))
+        self.store.add_message(17, 'user', 'PRIVATE owner text', queued=True)
+        self.store.close()
+        before = self.path.read_bytes()
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            timeline.main(['--database', str(self.path), '--before', '4'])
+        text = output.getvalue()
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertIn('Session failed (category=provider_attempt_uncertain)', text)
+        self.assertIn('timeout            unavailable  x1', text)
+        self.assertIn('status=failed', text)
         self.assertNotIn('PRIVATE', text)
 
     def test_parsed_activity_phrases_still_exist_in_controller_source(self):
