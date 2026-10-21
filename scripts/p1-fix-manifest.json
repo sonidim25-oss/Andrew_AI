@@ -139,6 +139,9 @@
         "34fca841b8ba0db29bf2126464723f8d5af16380",
         "3acf8c31312207ab353836e7553836ffcbd7426d"
       ],
+      "c16dd1890108ea0558bc93d9220144e61876f1597a381b7ea9b12176d8ba012c": [
+        "5ab1851-installed"
+      ],
       "c3b1b1cafc3629cdba7c4badeb8c7bb2158c8dd13536ecf84dd4c966276cd8ab": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
       ],
@@ -159,7 +162,7 @@
         "b5708ac"
       ]
     },
-    "tested": "c16dd1890108ea0558bc93d9220144e61876f1597a381b7ea9b12176d8ba012c"
+    "tested": "b2c70e4db94bd46529d07de2b83a10e206ab15f67613a45f06b0be3f5e135159"
   },
   "gateway.py": {
     "original": "8b702d58d2359b963b42bc548d1549789996aeb8535d13fb3ffdcb6666200047",
@@ -443,6 +446,9 @@
       "5e22e4c8dbd15c5915b29f220705f58a180e667c64a620a4e00f1f588d2097d2": [
         "25b1ffc-installed-P0"
       ],
+      "65d32308e658ee585230794d6541fb9988e025a8cd8e8c9f78789d8c85ae8b05": [
+        "5ab1851-installed"
+      ],
       "97f63462e09bb683f7f58de64a718f95e8ddf883d5cf95ed1e6d62a5f4a97152": [
         "bffca82"
       ],
@@ -459,7 +465,7 @@
         "pre-local-recovery-source"
       ]
     },
-    "tested": "65d32308e658ee585230794d6541fb9988e025a8cd8e8c9f78789d8c85ae8b05"
+    "tested": "a1f55c6e5a0ac9c99058fd602af5d1905a4e23778095a3b1c964205bffd748b7"
   },
   "telegram.py": {
     "original": "f4b356b42cff1ae8ef69fdf9c25c3f910110dd5dcc254d35643f6558cf16e0d0",
@@ -484,9 +490,12 @@
       ],
       "f4b356b42cff1ae8ef69fdf9c25c3f910110dd5dcc254d35643f6558cf16e0d0": [
         "f732cfcb669c2776d8b33344749011a3e928ad50"
+      ],
+      "fde914b03be15f001e0b4ee3024e7909baad58772f7bbe812e1dd98c2c190990": [
+        "5ab1851-installed"
       ]
     },
-    "tested": "fde914b03be15f001e0b4ee3024e7909baad58772f7bbe812e1dd98c2c190990"
+    "tested": "4b45624af451e01fce45e56ff2b07d7f67ef16eb00362bb1c9deee944c0932da"
   },
   "telegram_menu.py": {
     "original": "0df485e19b19a304dc26e47a7c585c6a741081be413794da1ca42c3900dbbe79",
