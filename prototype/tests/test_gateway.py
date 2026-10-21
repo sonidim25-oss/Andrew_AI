@@ -96,6 +96,48 @@ class ModelGatewayTests(unittest.TestCase):
         self.assertIn('category=unexpected_error', output)
         self.assertNotIn('private', output)
 
+    def test_connection_failure_releases_reservation_and_returns_retryable_503(self):
+        from unittest.mock import Mock
+        self.provider.complete = Mock(side_effect=ProviderRequestError('network_error', request_sent=False))
+        payload = {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'dns failure'}]}
+        with self.assertLogs(level='WARNING') as logs:
+            status, result = self.gateway.complete('Bearer gateway-test-token', payload)
+        self.assertEqual(status, 503)
+        self.assertEqual(result['error']['code'], 'provider_not_reached')
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 1)
+        usage = self.store.connection.execute('SELECT cost_usd FROM usage').fetchone()
+        self.assertEqual(usage[0], 0.0)
+        self.provider.complete = Mock(return_value={"id": "cmpl-retry", "choices": [{"message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 5, "completion_tokens": 1, "cost": 0.000001}})
+        status2, result2 = self.gateway.complete('Bearer gateway-test-token', payload)
+        self.assertEqual(status2, 200)
+        self.assertEqual(result2['choices'][0]['message']['content'], 'OK')
+
+    def test_read_timeout_remains_uncertain_even_with_network_error_category(self):
+        from unittest.mock import Mock
+        self.provider.complete = Mock(side_effect=ProviderRequestError('network_error', request_sent=True))
+        payload = {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'read timeout'}]}
+        status, result = self.gateway.complete('Bearer gateway-test-token', payload)
+        self.assertEqual(status, 422)
+        self.assertEqual(result['error']['code'], 'provider_attempt_uncertain')
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 1)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 0)
+
+    def test_connect_timeout_releases_reservation_and_allows_retry(self):
+        from unittest.mock import Mock
+        self.provider.complete = Mock(side_effect=ProviderRequestError('timeout', request_sent=False))
+        payload = {'model': self.gateway.model_id, 'messages': [{'role': 'user', 'content': 'connect timeout'}]}
+        status, result = self.gateway.complete('Bearer gateway-test-token', payload)
+        self.assertEqual(status, 503)
+        self.assertEqual(result['error']['code'], 'provider_not_reached')
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
+
+    def test_request_sent_default_is_true_for_backwards_compatibility(self):
+        error = ProviderRequestError('timeout')
+        self.assertTrue(error.request_sent)
+        error2 = ProviderRequestError('network_error', 502)
+        self.assertTrue(error2.request_sent)
+
     def test_forwards_only_authorized_model_and_records_provider_usage(self):
         status, result = self.gateway.complete("Bearer gateway-test-token", {"model": "openai/qwen/qwen3.8-flash", "messages": [{"role": "user", "content": "hello"}], "max_tokens": 100})
         self.assertEqual(status, 200)

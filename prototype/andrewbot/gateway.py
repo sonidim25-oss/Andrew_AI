@@ -296,6 +296,11 @@ class ModelGateway:
                     return self.uncertain_response()
                 self.store.set_state('model_turn_progress',json.dumps({'phase':'waiting for provider rate limit','at':datetime.now(timezone.utc).timestamp()}))
                 return 429, {'error': {'message': 'Provider rate limited; retry scheduled', 'type': 'rate_limit_error', 'retry_at_ms': proof['retry_at_ms']}}
+            if (isinstance(error, ProviderRequestError) and not error.request_sent
+                    and recovery_records is None):
+                self.store.settle_usage(reservation_id, month, day, 0.0, 0, 0)
+                return 503, {'error': {'message': 'Provider connection failed; request was not sent',
+                                       'type': 'server_error', 'code': 'provider_not_reached'}}
             # Keep the reservation: the request may have reached the provider
             # even though its response was lost.
             return self.uncertain_response()

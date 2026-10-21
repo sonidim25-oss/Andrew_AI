@@ -10,7 +10,7 @@ from andrewbot.configuration import load_model_config
 class OpenRouterModelTests(unittest.TestCase):
     def test_rate_limit_preserves_only_standard_retry_delay(self):
         failure=HTTPError('fixed',429,'private body',{'Retry-After':'37','Private':'secret'},None)
-        with patch('urllib.request.urlopen',side_effect=failure):
+        with patch('urllib.request.OpenerDirector.open',side_effect=failure):
             with self.assertRaises(ProviderRequestError) as caught:
                 OpenRouterModel('private-key').complete({'messages':[]})
         self.assertEqual(caught.exception.http_status,429)
@@ -31,11 +31,12 @@ class OpenRouterModelTests(unittest.TestCase):
                  (URLError('private connection details'), 'network_error', None),
                  (http.client.IncompleteRead(b'private partial response'), 'network_error', None)]
         for failure, category, status in cases:
-            with self.subTest(category=category), patch('urllib.request.urlopen', side_effect=failure):
+            with self.subTest(category=category), patch('urllib.request.OpenerDirector.open', side_effect=failure):
                 with self.assertRaises(ProviderRequestError) as caught:
                     OpenRouterModel('private-key').complete({'messages': []})
                 self.assertEqual(caught.exception.safe_category, category)
                 self.assertEqual(caught.exception.http_status, status)
+                self.assertTrue(caught.exception.request_sent)
                 self.assertNotIn('private', str(caught.exception))
 
     def test_http_error_reports_status_without_api_key(self):
@@ -45,14 +46,9 @@ class OpenRouterModelTests(unittest.TestCase):
             raise HTTPError(request.full_url, 401, "unauthorized", {}, None)
 
         model = OpenRouterModel(key)
-        import urllib.request
-        original = urllib.request.urlopen
-        try:
-            urllib.request.urlopen = reject
+        with patch('urllib.request.OpenerDirector.open', side_effect=reject):
             with self.assertRaisesRegex(RuntimeError, "HTTP status 401") as caught:
                 model.reply([])
-        finally:
-            urllib.request.urlopen = original
         self.assertNotIn(key, str(caught.exception))
 
     def test_configured_model_id_is_sent_to_openrouter(self):
@@ -68,7 +64,7 @@ class OpenRouterModelTests(unittest.TestCase):
             def read(self):
                 return b'{"choices":[]}'
 
-        with patch("andrewbot.model.urllib.request.urlopen", return_value=Response()) as mocked:
+        with patch("urllib.request.OpenerDirector.open", return_value=Response()) as mocked:
             model = OpenRouterModel("synthetic-key", model_config=config)
             model.complete({"model": "old/model", "messages": [{"role": "user", "content": "hello"}]})
         request = mocked.call_args.args[0]

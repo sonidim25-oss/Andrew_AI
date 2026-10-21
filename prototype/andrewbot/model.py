@@ -11,13 +11,78 @@ from .configuration import ModelConfig, load_model_config
 class ProviderRequestError(RuntimeError):
     CATEGORIES = frozenset({'http_error', 'timeout', 'network_error', 'invalid_json', 'invalid_response'})
 
-    def __init__(self, category, http_status=None, *, retry_after=None):
+    def __init__(self, category, http_status=None, *, retry_after=None, request_sent=True):
         self.safe_category = category if category in self.CATEGORIES else 'invalid_response'
         self.http_status = http_status if type(http_status) is int and 100 <= http_status <= 599 else None
         self.retry_after = (retry_after if type(retry_after) in (int, float)
                             and math.isfinite(retry_after) and 0 <= retry_after <= 315360000 else None)
+        self.request_sent = request_sent is not False
         detail = f'HTTP status {self.http_status}' if self.http_status is not None else self.safe_category
         super().__init__('model request failed: ' + detail)
+
+
+class TransportEvidence:
+    """What the sockets of one provider call actually did."""
+
+    def __init__(self):
+        self.send_attempted = False
+        self.connect_failed_before_send = False
+
+    def proves_not_sent(self):
+        return self.connect_failed_before_send and not self.send_attempted
+
+
+class _ObservedConnection:
+    # Any send, including a proxy CONNECT or an earlier redirect hop, voids
+    # the not-sent proof; only a connect() failure before any send counts.
+    def __init__(self, *args, evidence, **kwargs):
+        self._evidence = evidence
+        super().__init__(*args, **kwargs)
+
+    def connect(self):
+        try:
+            super().connect()
+        except BaseException:
+            if not self._evidence.send_attempted:
+                self._evidence.connect_failed_before_send = True
+            raise
+
+    def send(self, data):
+        if self.sock is None and self.auto_open:
+            self.connect()
+        self._evidence.send_attempted = True
+        return super().send(data)
+
+
+class _ObservedHTTPConnection(_ObservedConnection, http.client.HTTPConnection):
+    pass
+
+
+class _ObservedHTTPSConnection(_ObservedConnection, http.client.HTTPSConnection):
+    pass
+
+
+class _ObservedHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, evidence):
+        super().__init__()
+        self._evidence = evidence
+
+    def http_open(self, req):
+        return self.do_open(lambda host, **kw: _ObservedHTTPConnection(host, evidence=self._evidence, **kw), req)
+
+
+class _ObservedHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, evidence):
+        super().__init__()
+        self._evidence = evidence
+
+    def https_open(self, req):
+        return self.do_open(lambda host, **kw: _ObservedHTTPSConnection(host, evidence=self._evidence, **kw),
+                            req, context=self._context)
+
+
+def observed_opener(evidence):
+    return urllib.request.build_opener(_ObservedHTTPHandler(evidence), _ObservedHTTPSHandler(evidence))
 
 
 def retry_after_seconds(value):
@@ -126,8 +191,9 @@ class OpenRouterModel:
             headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
             method="POST",
         )
+        evidence = TransportEvidence()
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with observed_opener(evidence).open(request, timeout=self.timeout) as response:
                 data = json.loads(response.read())
         except urllib.error.HTTPError as error:
             delay = retry_after_seconds(error.headers.get('Retry-After')) if error.headers else None
@@ -137,7 +203,8 @@ class OpenRouterModel:
         except TimeoutError:
             raise ProviderRequestError('timeout') from None
         except urllib.error.URLError as error:
-            raise ProviderRequestError('timeout' if isinstance(error.reason, TimeoutError) else 'network_error') from None
+            raise ProviderRequestError('timeout' if isinstance(error.reason, TimeoutError) else 'network_error',
+                                       request_sent=not evidence.proves_not_sent()) from None
         except ValueError:
             raise ProviderRequestError('invalid_json') from None
         except (OSError, http.client.HTTPException, EOFError):
