@@ -222,8 +222,20 @@ class ModelGateway:
                 try:
                     memory_context = self.memory_service.current_personality_context()
                 except Exception:
-                    self.store.add_activity("Model request blocked because memory context was unavailable")
-                    return 503, {"error": {"message": "controller memory context is unavailable", "type": "server_error"}}
+                    # Owner credit guidance is read by get_state, which shares
+                    # the store connection already proven reachable above.
+                    # Personality revisions query additional tables that may be
+                    # absent or corrupted after a migration.  Degrade to owner
+                    # guidance alone so that a personality-layer fault does not
+                    # block every provider call.
+                    logging.warning("Personality context unavailable; continuing with owner guidance only")
+                    try:
+                        memory_context = self.store.get_state("owner_credit_guidance", "") or ""
+                    except Exception:
+                        self.store.add_activity("Model request blocked because owner credit guidance was unreadable")
+                        return 503, {"error": {"message": "controller memory context is unavailable", "type": "server_error"}}
+                    if memory_context:
+                        self.store.add_activity("Personality context degraded; owner guidance preserved")
                 if memory_context:
                     position = 0
                     while position < len(outbound["messages"]) and isinstance(outbound["messages"][position], dict) and outbound["messages"][position].get("role") == "system":
