@@ -20,7 +20,7 @@
         "d25c31e1b15fa3bc62111910be7e65e5c9912abb015ca63453b0e59d106539d7": "d02477b",
         "e82dee7832cc1cdb9abb13efc4a994fa13ef44ad2f03c045248e0c14214a4c1a": "d22b891"
       },
-      "tested": "628daeeaf575719783ec5dcd8984507df1434115495561a6be65e78cbf8db0a1"
+      "tested": "6c9c6abe3db5894d33adab06e6e47bc1aa145e10f6c2c408764825d866681113"
     },
     "controller.py": {
       "deployed_bases": {
@@ -39,11 +39,13 @@
         "8e5870372fdab4dec5d279225dc2d7267b4fc185378088f3ee9926e2e972f000": "0afe2f9",
         "98d71e66615db4cb970218d4f24faae8ac6e0b9e62b2f06e44266433d9c168ee": "d22b891",
         "99443e0964000fa256d0680e3e9bf66f23127189bed3542f989f13a7d1fe18de": "f7418d2",
+        "b4cb00e3c7a422bca0cb2884017e6d993d962dd9029fb03922cc927898ee07fa": "bffca82",
         "d764fb822db978408a7f799ecfdfd0deb35b96deea8829b0ce540258b012cd96": "a8c0f7a95c37531e11ca5943cc36a22bfa7da14e",
+        "dc0ef2add14b9f47d4e6bcacf55ac7d8df75cf455a6b9a189c8cca75ec21cab6": "239f451",
         "e2141811807bb391fba9d590450273f1469e03bc111aa6482ce98b3a3a5ceb4a": "f7418d2",
         "e75b2278c3402a9541cec5bf308f371f234dd66c7261367137849457c90103e1": "747ec6b"
       },
-      "tested": "639cb0c1d35fc82d9e0b138fb38e694abfcdb2a937a22c7a7d8959b0c9da2818"
+      "tested": "51c41be72a13d6c0be0992e55ddc1c9cb99c687aa5b0346b7d97d92e2c7a9694"
     },
     "dispatch.py": {
       "deployed_bases": {
@@ -68,7 +70,13 @@
         "b35a1434d7b1b1f82084360432e6cfd661f161e50267c40a525825bb0ed43154": "d02477b",
         "d9b45133a7377d636f537bc79f16e83ab0871c62240baf5ebd50e4eb8b756fdc": "a8c0f7a95c37531e11ca5943cc36a22bfa7da14e"
       },
-      "tested": "20ae309db302e4a353fb0d42367777135edb963940887d5e36b78223c88d219a"
+      "tested": "116a8c6019621fb2d4d98741afc0421684953eeaffae95ac94010961b72b56bc"
+    },
+    "gmail_tools.py": {
+      "deployed_bases": {
+        "540522eb3fd15725276adf02708fccfa161c2e18d5e10f1c7cc005cd1303c286": "239f451"
+      },
+      "tested": "f27f60f82dedc71c74001d15a5950b88194a907887e23dbcf4d110a85d0443f0"
     },
     "main.py": {
       "deployed_bases": {
@@ -85,6 +93,18 @@
       },
       "tested": "66948b169ff443c63cde8da6b49368523d9af25f4a0727973c1b016950571c4a"
     },
+    "media.py": {
+      "deployed_bases": {
+        "af55dbd3ccc3297b4eeeafa2cc5be6b34142d5da6c187b8ec1d934b87cd330a9": "239f451"
+      },
+      "tested": "92aa219e5f3b4db42e73bc6b8dff957305291022f80544ec6255f24e0c073c0a"
+    },
+    "memory.py": {
+      "deployed_bases": {
+        "58583ffbed5045592166ab2ef0c9df02005880530aaa554127e968a99e740a61": "239f451"
+      },
+      "tested": "93a0494f4244311f2a08120f615e985058ff3759185e4ffda9fef2dd9044c8aa"
+    },
     "memory_backup.py": {
       "deployed_bases": {
         "06434e6bee39269884835a5ab1f801454cfae6a641e35b1305781ec5b60cdee9": "6d30308",
@@ -100,7 +120,7 @@
         "6317727ca6a3ed3e92841f11104f7a06af73f8a2de9c6f8c84aa005a946c4160": "86c611da94fbbb39f467eb6d47930872ec8e49fe",
         "9224881095f8a05d4b2f9a54a64968fe917bb56cb7e9dbc1b998753dfcf84bd8": "7c8872a2494136215b6695df9d8a3d7d16a3fe3a"
       },
-      "tested": "6317727ca6a3ed3e92841f11104f7a06af73f8a2de9c6f8c84aa005a946c4160"
+      "tested": "8216b290b258e102a4793149e9009497d4880f43c704423bd947a2982303c1b8"
     },
     "recovery.py": {
       "deployed_bases": {
@@ -115,9 +135,11 @@
     "recovery_dispatch.py": {
       "deployed_bases": {
         "1b30897318fd334136062a7fe99df67a5716db6f68c6a9735d73d498e7cf4e72": "86c611da94fbbb39f467eb6d47930872ec8e49fe",
-        "da1a741e3fab83d332db5a2f500ebedb11f1e3bdac665eab48b9ae11eb5122aa": "6d30308"
+        "cd59944b86d260dc524f9d134bc208fd8dab7beacf034aae92dc608db004f3c3": "bffca82",
+        "da1a741e3fab83d332db5a2f500ebedb11f1e3bdac665eab48b9ae11eb5122aa": "6d30308",
+        "f827070482479770f4e0d3c422706308f1229a60286c28b92b05a99cdad65ebe": "239f451"
       },
-      "tested": "cd59944b86d260dc524f9d134bc208fd8dab7beacf034aae92dc608db004f3c3"
+      "tested": "b3d171f9fc3054d0bb18ddd5636c6489147fe2a89e904348730fd43eb4ebd8db"
     },
     "recovery_records.py": {
       "deployed_bases": {
@@ -137,7 +159,13 @@
         "9fc054852294e1bf1506811f17960d5ea2647ea38f39c9682d45d627cd65df43": "6d30308",
         "c57312d5b9a7c3b3893fd17ae9b6ba6fec835a5d3dba51d7778770d63f13f3df": "a8c0f7a95c37531e11ca5943cc36a22bfa7da14e"
       },
-      "tested": "118a8a8fa5615e41a00d60e68728a73a9a1fd4871607bf35dff098c1fb2cf500"
+      "tested": "d21782ed5ee5470673660cc59a746b2678c1815ac8a1dde2c7f13d22c5c21154"
+    },
+    "skills.py": {
+      "deployed_bases": {
+        "956d219644893e5aa19597bd8c61f10f5e152368254e45a7b3c068aa1cf2b2ea": "239f451"
+      },
+      "tested": "c59a24bd5b4853a0b01a17b38ac2f1d7d77edb3422a8b077e56076357dbf77de"
     },
     "store.py": {
       "deployed_bases": {
@@ -149,7 +177,9 @@
         "77827c571e7dbbe2bc38a91416a4535f3466f9733f2619dd572e35ed81ff8edc": "045f7f8",
         "915f51586b521d0c77bc5d4c18f1a4d95ecec38af113c30b7836e30af50c4210": "045f7f8",
         "961c7fe3b3203531e742a1496fe78d8b8cfa7e4bd6936d46675cd4f889b06411": "c68e128",
+        "97f63462e09bb683f7f58de64a718f95e8ddf883d5cf95ed1e6d62a5f4a97152": "bffca82",
         "9cff57fec7d4a7d18ca297ec14bcbec1b1ea2038fef7891e0a874075e5b653de": "d22b891",
+        "a4c1635c11f0ff49160a2634a8709bb5da54a2ecbbd9affa63b67c9927c49573": "239f451",
         "abd14383a73eda77c59c973eea5f8f1894e7da79a753efc3ad21402f37963faa": "0afe2f9",
         "b26b96f9e92c541694c20381e1e93be294895e26b24890ae0429b6e003ccf134": "747ec6b",
         "c8d9f0473ba50a047cbb4983a885118f1df2d6bca723634a79156a01d792e77c": "3ffd87e",
@@ -158,7 +188,7 @@
         "f0c31e37d34cb4ece3e6bb2a27231696ee8f2dbdfd525fb4e720c89a2ad06279": "6c8000f",
         "f818044ae84efb99833f4f8c3e181c08e7d1c113e0cc4e2c287125ea9c2abb51": "d02477b"
       },
-      "tested": "95c7ea87eac3efcb516882ad5d2fdbb19db78ed573eb26244a8c8c5eeb0f9be7"
+      "tested": "65d32308e658ee585230794d6541fb9988e025a8cd8e8c9f78789d8c85ae8b05"
     },
     "telegram_menu.py": {
       "deployed_bases": {
@@ -166,6 +196,10 @@
         "cb0312af87a17f8f06ba0a94e679fbda28fc6e0e1f6fecdaf7b0ccfa1e7a0fa0": "d22b891842138789a0d65325e8140dee4fd93818"
       },
       "tested": "8180f3c40de9e74ef7193c0e577809c80ef22ab34a2feca85b8e85f29f0a30f3"
+    },
+    "tool_errors.py": {
+      "deployed_bases": {},
+      "tested": "88f7a8bce249a6aff2e27dfb5ea763a739041499e2b221f3010caa1ee68b3360"
     }
   },
   "version": 1

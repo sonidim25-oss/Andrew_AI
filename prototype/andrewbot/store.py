@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from functools import wraps
 from zoneinfo import ZoneInfo
+from .tool_errors import ToolRejected
 from .latency import wall_age_seconds
 from .telegram_menu import owner_control
 
@@ -456,22 +457,22 @@ class Store:
         self._research_mutation_allowed('research.save')
         allowed = {'question', 'findings', 'doubts', 'next_step', 'status', 'parent_id', 'sources'}
         if set(fields) - allowed:
-            raise ValueError('unsupported research fields')
+            raise ToolRejected('unsupported research fields')
         current = self.research_entry(record_id) if record_id else None
         if record_id and (current is None or current['revision'] != revision):
-            raise ValueError('research entry is missing or changed; read it again before editing')
+            raise ToolRejected('research entry is missing or changed; read it again before editing')
         if not record_id and self.connection.execute('SELECT count(*) FROM research_entries').fetchone()[0] >= 500:
-            raise ValueError('research journal capacity reached; edit or delete existing entries')
+            raise ToolRejected('research journal capacity reached; edit or delete existing entries')
         if fields.get('parent_id') and (fields['parent_id'] == record_id or not self.research_entry(fields['parent_id'])):
-            raise ValueError('parent question must identify another existing research entry')
+            raise ToolRejected('parent question must identify another existing research entry')
         parent_id = fields.get('parent_id')
         while parent_id:
             if parent_id == record_id:
-                raise ValueError('parent questions cannot form a cycle')
+                raise ToolRejected('parent questions cannot form a cycle')
             parent_id = self.research_entry(parent_id)['parent_id']
         combined = {**(current or {}), **fields}
         if len(json.dumps(combined, ensure_ascii=False).encode('utf-8')) > 20_000:
-            raise ValueError('research entry exceeds its total byte limit')
+            raise ToolRejected('research entry exceeds its total byte limit')
         now = self.now()
         with self.connection:
             if current:
@@ -500,7 +501,7 @@ class Store:
         self._research_mutation_allowed('research.focus')
         entry = self.research_entry(record_id)
         if entry is None or entry['status'] == 'closed':
-            raise ValueError('select an existing open or paused question')
+            raise ToolRejected('select an existing open or paused question')
         previous = self.connection.execute(
             "SELECT 1 FROM research_events WHERE entry_id=? AND kind IN ('topic_selected','topic_resumed') LIMIT 1", (record_id,)
         ).fetchone()
@@ -515,6 +516,13 @@ class Store:
     def delete_research_entry(self, record_id, revision):
         self._research_mutation_allowed('research.delete')
         with self.connection:
+            # Validate before touching child entries; keep the check and delete
+            # under one SQLite writer even with independent Store connections.
+            if not self.connection.in_transaction:
+                self.connection.execute('BEGIN IMMEDIATE')
+            entry = self.research_entry(record_id)
+            if entry is None or entry['revision'] != revision:
+                raise ToolRejected('research entry is missing or changed; read it again before deleting')
             self.connection.execute('UPDATE research_entries SET parent_id=NULL,revision=revision+1,updated_at=? WHERE parent_id=?',
                                     (self.now(), record_id))
             deleted = self.connection.execute('DELETE FROM research_entries WHERE record_id=? AND revision=?', (record_id, revision)).rowcount
@@ -528,7 +536,7 @@ class Store:
     def _research_mutation_allowed(self, tool):
         if (self.get_state('paused', '0') == '1' or self.get_state('sleeping', '0') == '1'
                 or self._agent_error_blocks({tool})):
-            raise ValueError('research journal changes cannot override owner controls or a stopped session')
+            raise ToolRejected('research journal changes cannot override owner controls or a stopped session')
 
     def _agent_error_blocks(self, tools):
         error = self.get_state('autonomy_error', '')
@@ -858,14 +866,14 @@ class Store:
         if (self.get_state('paused', '0') == '1' or self.get_state('sleeping', '0') == '1'
                 or self._agent_error_blocks({'sleep', 'wake_at'}) or self.conversation_waiting(now)
                 or self.pending_owner_input(owner_id)):
-            raise ValueError('Stay available for owner messages; sleep is unavailable during conversation or an error')
+            raise ToolRejected('Stay available for owner messages; sleep is unavailable during conversation or an error')
         self.transition_state(updates, event, owner_id, notice, stop_note)
 
     @database_locked
     def continue_activity_state(self):
         if (self.get_state('paused', '0') == '1' or self.get_state('sleeping', '0') == '1'
                 or self._agent_error_blocks({'continue_activity'})):
-            raise ValueError('Owner controls and failed sessions cannot be overridden by an agent')
+            raise ToolRejected('Owner controls and failed sessions cannot be overridden by an agent')
         self.transition_state({'session_start_requested': 'agent_continue'}, 'Andrew continued activity')
 
     @database_locked
@@ -1935,21 +1943,21 @@ class Store:
     def create_diary_entry(self, local_date, content, record_type="diary", session_id="", event_ids=()):
         from .diary import validate_diary_content
         if not isinstance(local_date, str):
-            raise ValueError("invalid diary date")
+            raise ToolRejected("invalid diary date")
         try:
             if datetime.strptime(local_date, "%Y-%m-%d").date().isoformat() != local_date:
                 raise ValueError
         except ValueError:
-            raise ValueError("invalid diary date") from None
+            raise ToolRejected("invalid diary date") from None
         content = validate_diary_content(content)
         if record_type not in {"diary", "incident_summary"}:
-            raise ValueError("invalid diary record type")
+            raise ToolRejected("invalid diary record type")
         if not isinstance(event_ids, (list, tuple)) or len(event_ids) > 20:
-            raise ValueError("invalid activity event references")
+            raise ToolRejected("invalid activity event references")
         event_ids = tuple(event_ids)
         if (len(set(event_ids)) != len(event_ids)
                 or any(isinstance(item, bool) or not isinstance(item, int) or item <= 0 for item in event_ids)):
-            raise ValueError("invalid activity event references")
+            raise ToolRejected("invalid activity event references")
         entry_id = uuid.uuid4().hex
         with self.connection:
             if event_ids:
@@ -1958,7 +1966,7 @@ class Store:
                     f"SELECT id FROM activity WHERE id IN ({marks})", event_ids
                 ).fetchall()
                 if {int(row[0]) for row in rows} != set(event_ids):
-                    raise ValueError("unknown activity event reference")
+                    raise ToolRejected("unknown activity event reference")
             if record_type == "incident_summary" and session_id:
                 existing = self.connection.execute(
                     "SELECT entry_id FROM diary_entries WHERE record_type='incident_summary' AND session_id=?",
@@ -1969,7 +1977,7 @@ class Store:
             if record_type == "diary" and self.connection.execute(
                 "SELECT 1 FROM diary_entries WHERE record_type='diary' AND local_date=?", (local_date,)
             ).fetchone():
-                raise ValueError("a diary entry already exists for this date")
+                raise ToolRejected("a diary entry already exists for this date")
             self.connection.execute(
                 "INSERT INTO diary_entries(entry_id,local_date,created_at,session_id,content,record_type,delivery_state) "
                 "VALUES(?,?,?,?,?,?, 'pending')",
@@ -2161,22 +2169,23 @@ class Store:
     def create_memory_record(self, record_type, content, source, event_ids=(), diary_ids=(), *,
                              history_ids=(), owner_id=None, untrusted=False):
         if record_type not in {"experience", "interest"}:
-            raise ValueError("invalid memory record type")
+            raise ToolRejected("invalid memory record type")
         if not isinstance(content, str) or not content.strip() or len(content) > 4000:
-            raise ValueError("invalid memory content")
+            raise ToolRejected("invalid memory content")
         if source not in {"andrew", "owner", "external", "system"}:
-            raise ValueError("invalid memory source")
+            raise ToolRejected("invalid memory source")
         event_ids = self._validate_reference_ids(event_ids, int)
         diary_ids = self._validate_reference_ids(diary_ids, str)
         record_id = uuid.uuid4().hex
         created_at = self.now()
         with self.connection:
             self._validate_memory_references(event_ids, diary_ids)
+            provenance = self._prepare_memory_provenance(source, history_ids, owner_id, untrusted)
             self.connection.execute(
                 "INSERT INTO memory_records(record_id,record_type,created_at,content,source) VALUES(?,?,?,?,?)",
                 (record_id, record_type, created_at, content.strip(), source),
             )
-            self._create_memory_provenance(record_id, source, history_ids, owner_id, untrusted)
+            self._insert_memory_provenance(record_id, provenance)
             self._insert_memory_references(
                 "memory_event_refs", "memory_diary_refs", "record_id", record_id, event_ids, diary_ids
             )
@@ -2210,7 +2219,7 @@ class Store:
                 self.connection.execute(
                     'INSERT INTO memory_records(record_id,record_type,created_at,content,source) VALUES(?,?,?,?,?)',
                     (record_id, 'experience', now, content, 'owner'))
-                self._create_memory_provenance(record_id, 'owner', (), None, False)
+                self._insert_memory_provenance(record_id, ('owner', 'controller', ()))
                 self.connection.execute(
                     'INSERT INTO memory_fts(record_id,record_type,created_at,content,source) VALUES(?,?,?,?,?)',
                     (record_id, 'experience', now, content, 'owner'))
@@ -2257,11 +2266,11 @@ class Store:
     def create_personality_revision(self, content, reason, source, event_ids=(), diary_ids=(), *,
                                     history_ids=(), owner_id=None, untrusted=False):
         if not isinstance(content, str) or not content.strip() or len(content) > 4000:
-            raise ValueError("invalid personality content")
+            raise ToolRejected("invalid personality content")
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:
-            raise ValueError("invalid personality revision reason")
+            raise ToolRejected("invalid personality revision reason")
         if source not in {"andrew", "owner", "external", "system"}:
-            raise ValueError("invalid personality revision source")
+            raise ToolRejected("invalid personality revision source")
         event_ids = self._validate_reference_ids(event_ids, int)
         diary_ids = self._validate_reference_ids(diary_ids, str)
         revision_id = uuid.uuid4().hex
@@ -2269,12 +2278,13 @@ class Store:
         effective_date = datetime.now(ZoneInfo("America/Toronto")).date().isoformat()
         with self.connection:
             self._validate_memory_references(event_ids, diary_ids)
+            provenance = self._prepare_memory_provenance(source, history_ids, owner_id, untrusted)
             self.connection.execute(
                 "INSERT INTO personality_revisions(revision_id,created_at,effective_date,content,reason,source) "
                 "VALUES(?,?,?,?,?,?)",
                 (revision_id, created_at, effective_date, content.strip(), reason.strip(), source),
             )
-            self._create_memory_provenance(revision_id, source, history_ids, owner_id, untrusted)
+            self._insert_memory_provenance(revision_id, provenance)
             self._insert_memory_references(
                 "personality_event_refs", "personality_diary_refs", "revision_id", revision_id,
                 event_ids, diary_ids,
@@ -2289,25 +2299,29 @@ class Store:
             )
         return revision_id
 
-    def _create_memory_provenance(self, record_id, source, history_ids, owner_id, untrusted):
+    def _prepare_memory_provenance(self, source, history_ids, owner_id, untrusted):
         history_ids = self._validate_reference_ids(history_ids, int)
         origin = {'owner': 'owner', 'andrew': 'agent', 'external': 'untrusted', 'system': 'system'}[source]
         basis = 'controller' if source in {'owner', 'system'} else 'authored'
         if history_ids:
             if type(owner_id) is not int:
-                raise ValueError('history references require an authenticated owner')
+                raise ToolRejected('history references require an authenticated owner')
             marks = ','.join('?' for _ in history_ids)
             rows = self.connection.execute(
                 f'SELECT id,role,complete FROM session_history WHERE owner_id=? AND id IN ({marks})',
                 (owner_id, *history_ids)).fetchall()
             if {row['id'] for row in rows} != set(history_ids):
-                raise ValueError('unknown history reference')
+                raise ToolRejected('unknown history reference')
             if any(row['role'] != 'user' or not row['complete'] for row in rows):
                 untrusted = True
             basis = 'history_linked'
         if untrusted or source == 'external':
             origin = 'untrusted'
             basis = 'external_context' if untrusted and not history_ids else 'external_source'
+        return origin, basis, history_ids
+
+    def _insert_memory_provenance(self, record_id, provenance):
+        origin, basis, history_ids = provenance
         self.connection.execute('INSERT INTO memory_provenance VALUES(?,?,?,?)',
                                 (record_id, origin, basis, self.now()))
         self.connection.executemany('INSERT INTO memory_history_refs VALUES(?,?)',
@@ -2323,14 +2337,14 @@ class Store:
     @staticmethod
     def _validate_reference_ids(values, expected_type):
         if not isinstance(values, (list, tuple)) or len(values) > 20:
-            raise ValueError("invalid memory references")
+            raise ToolRejected("invalid memory references")
         result = tuple(values)
-        if len(set(result)) != len(result) or any(
+        if any(
             isinstance(item, bool) or not isinstance(item, expected_type) or
             (expected_type is int and item <= 0) or (expected_type is str and not item)
             for item in result
-        ):
-            raise ValueError("invalid memory references")
+        ) or len(set(result)) != len(result):
+            raise ToolRejected("invalid memory references")
         return result
 
     def _validate_memory_references(self, event_ids, diary_ids):
@@ -2338,14 +2352,14 @@ class Store:
             marks = ",".join("?" for _ in event_ids)
             rows = self.connection.execute(f"SELECT id FROM activity WHERE id IN ({marks})", event_ids).fetchall()
             if {int(row[0]) for row in rows} != set(event_ids):
-                raise ValueError("unknown activity event reference")
+                raise ToolRejected("unknown activity event reference")
         if diary_ids:
             marks = ",".join("?" for _ in diary_ids)
             rows = self.connection.execute(
                 f"SELECT entry_id FROM diary_entries WHERE entry_id IN ({marks})", diary_ids
             ).fetchall()
             if {row[0] for row in rows} != set(diary_ids):
-                raise ValueError("unknown diary reference")
+                raise ToolRejected("unknown diary reference")
 
     def _insert_memory_references(self, event_table, diary_table, id_column, record_id, event_ids, diary_ids):
         self.connection.executemany(

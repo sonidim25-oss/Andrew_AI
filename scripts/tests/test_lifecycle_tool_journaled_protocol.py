@@ -18,7 +18,7 @@ class LifecycleToolJournaledProtocolTests(unittest.TestCase):
     prepare = protocol.LocalRecoveryProtocolTests.prepare
     command = protocol.LocalRecoveryProtocolTests.command
 
-    def run_tool(self, name, arguments, before_resume=lambda: None):
+    def run_tool(self, name, arguments, before_resume=lambda: None, *, correction=None):
         binding, input, unused = self.prepare()
         store = self.fixture.store
         records = RecoveryRecords(store)
@@ -28,10 +28,15 @@ class LifecycleToolJournaledProtocolTests(unittest.TestCase):
         binding['input_sha'] = digest(input)
         controller = Controller(store, Mock(), 17, autonomous_enabled=True)
         self.fixture.model_gateway.recovery_tool_handler = controller.execute_tool
-        self.responses[0:0] = [{'id': 'tool-call', 'choices': [{'index': 0, 'message': {
-            'role': 'assistant', 'content': None, 'tool_calls': [{'id': 'tool-call', 'type': 'function',
-                'function': {'name': name, 'arguments': json.dumps(arguments)}}]}, 'finish_reason': 'tool_calls'}],
-            'usage': {'prompt_tokens': 20, 'completion_tokens': 5, 'cost': .000001}}]
+        def tool_response(call_id, args):
+            return {'id': call_id, 'choices': [{'index': 0, 'message': {
+            'role': 'assistant', 'content': None, 'tool_calls': [{'id': call_id, 'type': 'function',
+                'function': {'name': name, 'arguments': json.dumps(args)}}]}, 'finish_reason': 'tool_calls'}],
+            'usage': {'prompt_tokens': 20, 'completion_tokens': 5, 'cost': .000001}}
+        responses = [tool_response('tool-call', arguments)]
+        if correction is not None:
+            responses.append(tool_response('correction', correction))
+        self.responses[0:0] = responses
         scope = records.admit_scope(binding)
         admitted = self.command('recovery_admit', binding=binding, input=input, **scope)
         claim = self.command('recovery_claim', binding=binding, expected_revision=admitted['revision'], **scope)
@@ -46,6 +51,7 @@ class LifecycleToolJournaledProtocolTests(unittest.TestCase):
                 break
             self.assertLess(time.monotonic(), deadline, state)
             time.sleep(.03)
+        self.resume_fields = fields
         return {'phase': state['phase'], 'hold_reason': state.get('hold_reason'),
                 'sleeping': store.get_state('sleeping', '0'),
                 'admitted_tool_effects': store.connection.execute(
@@ -70,8 +76,24 @@ class LifecycleToolJournaledProtocolTests(unittest.TestCase):
 
     def test_rejected_sleep_arguments_without_any_error_state_are_not_held(self):
         outcome = self.run_tool('sleep', {'minutes': 5000})
-        self.assertNotEqual(outcome['phase'], 'held', outcome)
+        self.assertEqual(outcome['phase'], 'terminal_committed', outcome)
         self.assertEqual(outcome['sleeping'], '0', outcome)
+        self.assertEqual(outcome['admitted_tool_effects'], 0)
+        self.assertEqual(outcome['provider_calls'], 2)
+
+    def test_model_receives_rejection_and_corrects_sleep_without_duplicate_calls(self):
+        outcome = self.run_tool('sleep', {'minutes': 5000}, correction={'minutes': 30})
+        self.assertEqual(outcome['phase'], 'terminal_committed', outcome)
+        self.assertEqual(outcome['sleeping'], '1', outcome)
+        self.assertEqual(outcome['admitted_tool_effects'], 0)
+        self.assertEqual(outcome['provider_calls'], 2)
+        message = self.fixture.provider_calls[1]['messages'][-1]
+        self.assertEqual(message['role'], 'tool')
+        rejection = json.loads(json.loads(message['content']))
+        self.assertEqual(rejection['status'], 'error')
+        self.assertFalse(rejection['executed'])
+        self.command('recovery_resume', **self.resume_fields)
+        self.assertEqual(len(self.fixture.provider_calls), 2)
 
 
 if __name__ == '__main__':

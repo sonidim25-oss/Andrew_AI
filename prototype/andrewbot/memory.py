@@ -4,6 +4,7 @@ import uuid
 import hashlib
 from contextvars import ContextVar
 from urllib.parse import urlsplit
+from .tool_errors import ToolRejected
 
 
 _SECRET_PATTERNS = (
@@ -30,10 +31,10 @@ def note_untrusted_memory_source():
 
 def validate_memory_text(value, maximum=4000):
     if not isinstance(value, str) or not value.strip() or len(value) > maximum:
-        raise ValueError("memory text is empty or exceeds its allowed length")
+        raise ToolRejected("memory text is empty or exceeds its allowed length")
     normalized = value.strip()
     if _PRIVATE_REASONING.search(normalized) or any(pattern.search(normalized) for pattern in _SECRET_PATTERNS):
-        raise ValueError("memory text contains disallowed sensitive material")
+        raise ToolRejected("memory text contains disallowed sensitive material")
     return normalized
 
 
@@ -114,17 +115,17 @@ class SessionHistory:
 
     def execute(self, name, arguments):
         if not isinstance(arguments, dict):
-            raise ValueError('history arguments must be an object')
+            raise ToolRejected('history arguments must be an object')
         if name == 'session_search':
             if set(arguments) - {'query', 'limit', 'session_id'}:
-                raise ValueError('unsupported history search arguments')
+                raise ToolRejected('unsupported history search arguments')
             query, limit, session_id = arguments.get('query'), arguments.get('limit', 8), arguments.get('session_id')
             if not isinstance(query, str) or not 1 <= len(query.strip()) <= 500:
-                raise ValueError('history query must contain 1 to 500 characters')
+                raise ToolRejected('history query must contain 1 to 500 characters')
             if type(limit) is not int or not 1 <= limit <= 20:
-                raise ValueError('history result limit must be from 1 to 20')
+                raise ToolRejected('history result limit must be from 1 to 20')
             if session_id is not None and (not isinstance(session_id, str) or not re.fullmatch('[0-9a-f]{32}', session_id)):
-                raise ValueError('invalid session ID')
+                raise ToolRejected('invalid session ID')
             normalized = normalize_memory_query(query)
             rows = self.store.search_session_history(self.owner_id, normalized, limit, session_id) if normalized else []
             for row in rows:
@@ -134,21 +135,21 @@ class SessionHistory:
             return {'notice': self.NOTICE, 'results': rows}
         if name == 'session_read':
             if set(arguments) - {'id', 'offset', 'limit'}:
-                raise ValueError('unsupported history read arguments')
+                raise ToolRejected('unsupported history read arguments')
             record_id, offset, limit = arguments.get('id'), arguments.get('offset', 0), arguments.get('limit', 4000)
             if (type(record_id) is not int or record_id < 1 or type(offset) is not int or offset < 0
                     or type(limit) is not int or not 1 <= limit <= 8000):
-                raise ValueError('invalid history read range')
+                raise ToolRejected('invalid history read range')
             row = self.store.read_session_history(self.owner_id, record_id, offset, limit)
             if row is None:
-                raise ValueError('history record not found')
+                raise ToolRejected('history record not found')
             if row['role'] != 'user' or not row['complete']:
                 note_untrusted_memory_source()
             next_offset = offset + len(row['content'])
             row['offset'] = offset
             row['next_offset'] = next_offset if next_offset < row['characters'] else None
             return {'notice': self.NOTICE, 'record': row}
-        raise ValueError('unsupported history action')
+        raise ToolRejected('unsupported history action')
 
 
 class MemoryService:
@@ -159,9 +160,9 @@ class MemoryService:
     def _validate_references(event_ids, diary_ids):
         for references, expected_type in ((event_ids, int), (diary_ids, str)):
             if not isinstance(references, (list, tuple)) or len(references) > 20:
-                raise ValueError("memory references are invalid")
+                raise ToolRejected("memory references are invalid")
             if any(isinstance(item, bool) or not isinstance(item, expected_type) for item in references):
-                raise ValueError("memory references are invalid")
+                raise ToolRejected("memory references are invalid")
         return list(event_ids), list(diary_ids)
 
     def _reject(self, kind):
@@ -179,6 +180,9 @@ class MemoryService:
                 normalized, normalized_reason, "andrew", events, diaries, history_ids=history_ids,
                 owner_id=owner_id, untrusted=bool((MEMORY_SOURCE_CONTEXT.get() or {}).get('untrusted')),
             )
+        except ToolRejected:
+            self._reject("personality")
+            raise
         except (TypeError, ValueError):
             self._reject("personality")
             raise ValueError("personality edit was rejected; check its text and references") from None
@@ -187,18 +191,21 @@ class MemoryService:
         try:
             normalized = validate_memory_text(content)
             if not isinstance(record_type, str) or record_type not in {"experience", "interest"}:
-                raise ValueError("invalid memory record type")
+                raise ToolRejected("invalid memory record type")
             events, diaries = self._validate_references(event_ids, diary_ids)
             return self.store.create_memory_record(record_type, normalized, "andrew", events, diaries,
                 history_ids=history_ids, owner_id=owner_id,
                 untrusted=bool((MEMORY_SOURCE_CONTEXT.get() or {}).get('untrusted')))
+        except ToolRejected:
+            self._reject("experience")
+            raise
         except (TypeError, ValueError):
             self._reject("experience")
             raise ValueError("memory record was rejected; check its type, text, and references") from None
 
     def search(self, query, limit=8):
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
-            raise ValueError("memory result limit must be from 1 to 20")
+            raise ToolRejected("memory result limit must be from 1 to 20")
         normalized = normalize_memory_query(query)
         if not normalized:
             return []
@@ -223,7 +230,7 @@ class MemoryService:
         return (guidance + "\n" if guidance else "") + f"{header}{content}{suffix}"
 
 
-class ResearchValidationError(ValueError):
+class ResearchValidationError(ToolRejected):
     """Known argument rejection, raised only before research storage is called."""
 
     def __init__(self, field=None, maximum=None):
@@ -250,13 +257,13 @@ class ResearchJournal:
     @staticmethod
     def _identifier(value):
         if not isinstance(value, str) or not re.fullmatch('[0-9a-f]{32}', value):
-            raise ValueError('research ID must identify a journal entry')
+            raise ToolRejected('research ID must identify a journal entry')
         return value
 
     @staticmethod
     def _integer(value, minimum=0, maximum=1_000_000_000):
         if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
-            raise ValueError('research revision, cursor or limit is invalid')
+            raise ToolRejected('research revision, cursor or limit is invalid')
         return value
 
     def prepare_save(self, arguments):
@@ -265,13 +272,13 @@ class ResearchJournal:
             allowed = {'id', 'revision', 'question', 'findings', 'doubts',
                        'next_step', 'status', 'parent_id', 'sources'}
             if not isinstance(arguments, dict) or set(arguments) - allowed:
-                raise ValueError('invalid research arguments')
+                raise ToolRejected('invalid research arguments')
             record_id = self._identifier(arguments['id']) if 'id' in arguments else None
             fields = {key: value for key, value in arguments.items() if key not in {'id', 'revision'}}
             if not fields or (not record_id and not fields.get('question')):
-                raise ValueError('a new research entry requires a question; updates require at least one field')
+                raise ToolRejected('a new research entry requires a question; updates require at least one field')
             if not record_id and 'revision' in arguments:
-                raise ValueError('revision is only used when editing an existing entry')
+                raise ToolRejected('revision is only used when editing an existing entry')
             for key, maximum in self.TEXT_LIMITS.items():
                 if key in fields:
                     value = fields[key]
@@ -282,19 +289,19 @@ class ResearchJournal:
                     except ValueError:
                         raise ResearchValidationError(key, maximum) from None
             if 'status' in fields and (not isinstance(fields['status'], str) or fields['status'] not in {'open', 'paused', 'closed'}):
-                raise ValueError('invalid research status')
+                raise ToolRejected('invalid research status')
             if fields.get('parent_id') is not None:
                 fields['parent_id'] = self._identifier(fields['parent_id'])
             if 'sources' in fields:
                 sources = fields['sources']
                 if not isinstance(sources, list) or len(sources) > 5:
-                    raise ValueError('provide at most five source URLs')
+                    raise ToolRejected('provide at most five source URLs')
                 cleaned_sources = []
                 for value in sources:
                     normalized = validate_memory_text(value, 1000)
                     url = urlsplit(normalized)
                     if url.scheme not in {'http', 'https'} or not url.hostname or url.username is not None or url.password is not None:
-                        raise ValueError('source URLs require HTTP(S) and cannot contain credentials')
+                        raise ToolRejected('source URLs require HTTP(S) and cannot contain credentials')
                     cleaned_sources.append(normalized)
                 fields['sources'] = cleaned_sources
             revision = self._integer(arguments.get('revision'), 1) if record_id else None
@@ -312,14 +319,14 @@ class ResearchJournal:
             # Outside validation handling: a storage failure may follow a commit.
             return self.store.save_research_entry(fields, record_id, revision)
         if not isinstance(arguments, dict):
-            raise ValueError('research arguments must be an object')
+            raise ToolRejected('research arguments must be an object')
         allowed = {
             'list': {'status', 'after', 'limit'}, 'get': {'id'}, 'focus': {'id'},
             'delete': {'id', 'revision'}, 'observations': {'after', 'limit'},
             'save': {'id', 'revision', 'question', 'findings', 'doubts', 'next_step', 'status', 'parent_id', 'sources'},
         }
         if operation not in allowed or set(arguments) - allowed[operation]:
-            raise ValueError('unsupported research operation or fields')
+            raise ToolRejected('unsupported research operation or fields')
         if operation in {'list', 'observations'}:
             after = self._integer(arguments.get('after', 0))
             limit = self._integer(arguments.get('limit', 8), 1, 20)
@@ -328,7 +335,7 @@ class ResearchJournal:
                 return {'events': rows[:limit], 'next_after': rows[limit - 1]['id'] if len(rows) > limit else None}
             status = arguments.get('status', 'unfinished')
             if not isinstance(status, str) or status not in {'unfinished', 'open', 'paused', 'closed', 'all'}:
-                raise ValueError('invalid research status')
+                raise ToolRejected('invalid research status')
             page = self.store.research_page(status, after, limit)
             page['entries'] = [{key: row[key] for key in ('record_id', 'seq', 'revision', 'question', 'status', 'parent_id')}
                                for row in page['entries']]
@@ -338,14 +345,14 @@ class ResearchJournal:
             return page
         record_id = self._identifier(arguments['id']) if 'id' in arguments else None
         if not record_id:
-            raise ValueError('research entry ID is required')
+            raise ToolRejected('research entry ID is required')
         if operation == 'delete':
             return {'deleted': self.store.delete_research_entry(record_id, self._integer(arguments.get('revision'), 1))}
         if operation == 'focus':
             return self.store.focus_research_entry(record_id)
         entry = self.store.research_entry(record_id)
         if entry is None:
-            raise ValueError('research entry was not found')
+            raise ToolRejected('research entry was not found')
         entry['last_stop'] = self.store.research_last_checkpoint(record_id)
         return entry
 

@@ -1,7 +1,9 @@
 """Controller-only effect dispatch gate shared by normal and resumed journaled steps."""
 from contextlib import contextmanager
 from contextvars import ContextVar
+import json
 from .recovery_records import RecoveryRecords,digest
+from .tool_errors import ToolRejected
 
 
 _LOCAL_TOOL_AUTHORITY = ContextVar('local_recovery_tool_authority', default=None)
@@ -64,13 +66,20 @@ class RecoveryDispatch:
         with self.store._lock:
             tainted=self.store.connection.execute('SELECT coalesce(max(untrusted),0) FROM recovery_attempts WHERE binding_sha=?',(digest(metadata['binding']),)).fetchone()[0]
         context={'untrusted':bool(tainted)};token=MEMORY_SOURCE_CONTEXT.set(context)
+        rejected=False
         try:
-            with self._local_authority(metadata, name, arguments, origin):
-                result=callback()
+            try:
+                with self._local_authority(metadata, name, arguments, origin):
+                    result=callback()
+            except ToolRejected as error:
+                # Only audited pre-effect rejection sites can settle an error.
+                # Authority validation above and unknown failures still escape.
+                result=json.dumps(error.result(), ensure_ascii=False)
+                rejected=True
         finally:
             MEMORY_SOURCE_CONTEXT.reset(token)
             if context['untrusted']:
                 with self.store._lock,self.store.connection:
                     self.store.connection.execute('UPDATE recovery_attempts SET untrusted=1 WHERE binding_sha=?',(digest(metadata['binding']),))
-        self.records.confirm_tool(admission_id,result,terminal_stop=name if name in {'sleep','wake_at'} and self.store.get_state('sleeping','0')=='1' else None)
+        self.records.confirm_tool(admission_id,result,terminal_stop=name if not rejected and name in {'sleep','wake_at'} and self.store.get_state('sleeping','0')=='1' else None)
         return result

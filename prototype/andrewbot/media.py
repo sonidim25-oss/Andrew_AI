@@ -12,6 +12,7 @@ from contextvars import ContextVar
 MEDIA_AUTHORIZATION = ContextVar("media_owner_authorization", default=None)
 from datetime import datetime, timezone
 from pathlib import Path
+from .tool_errors import ToolRejected
 from .telegram import TelegramMediaError, validate_sent_media
 
 
@@ -158,23 +159,23 @@ class MediaService:
 
     def submit(self, kind, text, request_key, *, owner_requested=False, voice_id=None, reference_id=None):
         if self.store.get_state('restore_recovery_required', '0') == '1':
-            raise ValueError('Restore requires billing and action reconciliation')
+            raise ToolRejected('Restore requires billing and action reconciliation')
         if not self.policy.enabled or (kind == 'voice' and not self.policy.voice_enabled):
-            raise ValueError('Media generation is disabled')
+            raise ToolRejected('Media generation is disabled')
         if not owner_requested and (self.store.get_state('paused', '0') == '1' or self.store.get_state('sleeping', '0') == '1'):
-            raise ValueError('Spontaneous generation is paused or sleeping')
+            raise ToolRejected('Spontaneous generation is paused or sleeping')
         if kind not in {'voice', 'image'} or not (owner_requested or self.spontaneous_enabled(kind)):
-            raise ValueError('Media requires an owner request or standing permission')
+            raise ToolRejected('Media requires an owner request or standing permission')
         maximum = 1000 if kind == 'voice' else 2000
         if not isinstance(text, str) or not text.strip() or len(text) > maximum:
-            raise ValueError('Media input is empty or too long')
+            raise ToolRejected('Media input is empty or too long')
         if not isinstance(request_key, str) or not re.fullmatch(r'[A-Za-z0-9:_-]{1,100}', request_key):
-            raise ValueError('Invalid media request ID')
+            raise ToolRejected('Invalid media request ID')
         if voice_id is not None and voice_id != self.policy.voice:
-            raise ValueError('Only the configured voice is approved')
+            raise ToolRejected('Only the configured voice is approved')
         if reference_id is not None:
             if kind != 'image' or not isinstance(reference_id, str) or not re.fullmatch(r'[a-f0-9]{32}', reference_id):
-                raise ValueError('Invalid image edit artifact')
+                raise ToolRejected('Invalid image edit artifact')
         # The controller never accepts arbitrary URLs, paths, recipients, or provider settings.
         payload = json.dumps({'text': text, 'voice': self.policy.voice,
                               'model': self.policy.tts_model if kind == 'voice' else self.policy.image_model,
@@ -188,15 +189,15 @@ class MediaService:
             old = self.store.connection.execute('SELECT id,digest FROM media_jobs WHERE request_key=?', (request_key,)).fetchone()
             if old:
                 if old['digest'] != digest:
-                    raise ValueError('Media request ID was already used with different arguments')
+                    raise ToolRejected('Media request ID was already used with different arguments')
                 return old['id']
             if reference_id is not None:
                 # Cleanup must not remove the source between validation and
                 # insertion of the durable reference, including other stores.
-                original = self.job(reference_id)
+                original = self.job(reference_id, preflight=True)
                 if original['kind'] != 'image' or original['delivery'] != 'delivered':
-                    raise ValueError('Image edits require a delivered owner artifact')
-                self.artifact(original)
+                    raise ToolRejected('Image edits require a delivered owner artifact')
+                self.artifact(original, preflight=True)
             job = uuid.uuid4().hex
             self.store.connection.execute('''INSERT INTO media_jobs
                 (id,request_key,kind,payload,digest,state,reserved_usd,created_at,updated_at)
@@ -209,40 +210,43 @@ class MediaService:
         if name == 'media.status' and not arguments:
             return self.status()
         if name == 'media.get' and set(arguments) == {'job_id'} and isinstance(arguments['job_id'], str):
-            row = self.job(arguments['job_id'])
+            row = self.job(arguments['job_id'], preflight=True)
             return {key: row[key] for key in ('id', 'kind', 'state', 'delivery', 'mime', 'actual_usd', 'error')}
         if (name in {'voice.generate', 'image.generate', 'image.edit'}
                 and set(arguments) in ({'text', 'owner_request_id'}, {'text', 'request_id'})):
             request_id = arguments.get('owner_request_id', arguments.get('request_id'))
             if not isinstance(request_id, str) or not re.fullmatch(r'[A-Za-z0-9:_-]{1,80}', request_id):
-                raise ValueError('Invalid media request ID')
+                raise ToolRejected('Invalid media request ID')
             authorization = MEDIA_AUTHORIZATION.get()
             if authorization is not None:
                 service, kind, authorized_id = authorization
                 if service is self and name == kind + '.generate' and request_id == authorized_id:
                     job = self.submit(kind, arguments['text'], request_id, owner_requested=True)
                     return {'job_id': job, 'state': self.job(job)['state']}
-                raise ValueError('This owner request does not authorize that media action')
+                raise ToolRejected('This owner request does not authorize that media action')
             with self.store._lock:
                 row = self.store.connection.execute('SELECT * FROM media_jobs WHERE request_key=?', (request_id,)).fetchone()
                 if row:
                     if (row['kind'] != ('voice' if name == 'voice.generate' else 'image')
                             or json.loads(row['payload'])['text'] != arguments['text']
                             or (name == 'image.edit' and not json.loads(row['payload']).get('reference_id'))):
-                        raise ValueError('Media request ID does not match the saved request')
+                        raise ToolRejected('Media request ID does not match the saved request')
                     return {'job_id': row['id'], 'state': row['state'], 'delivery': row['delivery']}
             kind = 'voice' if name == 'voice.generate' else 'image'
             if name == 'image.edit' or not self.spontaneous_enabled(kind):
-                raise ValueError('No saved request or standing permission for this media action')
+                raise ToolRejected('No saved request or standing permission for this media action')
             job = self.submit(kind, arguments['text'], 'agent:' + kind + ':' + request_id)
             return {'job_id': job, 'state': self.job(job)['state'], 'delivery': self.job(job)['delivery']}
-        raise ValueError('Invalid media tool arguments')
+        raise ToolRejected('Invalid media tool arguments')
 
-    def job(self, job_id):
+    def job(self, job_id, *, preflight=False):
+        error = ToolRejected if preflight else ValueError
+        if not isinstance(job_id, str):
+            raise error('Invalid media job ID')
         with self.store._lock:
             row = self.store.connection.execute('SELECT * FROM media_jobs WHERE id=?', (job_id,)).fetchone()
             if not row:
-                raise ValueError('Unknown media job')
+                raise error('Unknown media job')
             return dict(row)
 
     def claim(self):
@@ -325,15 +329,18 @@ class MediaService:
             self.store.connection.execute("""UPDATE media_jobs SET state='succeeded',mime=?,artifact_sha=?,actual_usd=?,updated_at=?
                 WHERE id=? AND state='running'""", (mime, hashlib.sha256(data).hexdigest(), actual, self.now(), job_id))
 
-    def artifact(self, row):
+    def artifact(self, row, *, preflight=False):
+        # Workers call this after paid generation/delivery admission. Only the
+        # submit/proposal preflight callers may classify explicit checks.
+        error = ToolRejected if preflight else ValueError
         if not re.fullmatch(r'[a-f0-9]{32}', row['id']) or row['state'] != 'succeeded':
-            raise ValueError('Invalid artifact reference')
+            raise error('Invalid artifact reference')
         path = self.artifacts / (row['id'] + ('.mp3' if row['kind'] == 'voice' else '.png'))
         if path.is_symlink() or path.stat().st_size > 8 * 1024 * 1024:
-            raise ValueError('Invalid artifact')
+            raise error('Invalid artifact')
         data = path.read_bytes()
         if hashlib.sha256(data).hexdigest() != row['artifact_sha']:
-            raise ValueError('Artifact checksum mismatch')
+            raise error('Artifact checksum mismatch')
         return data
 
     def claim_delivery(self):
@@ -428,10 +435,10 @@ class MediaService:
     def propose_avatar(self, job_id):
         with self.store._lock, self.store.connection:
             self.store.connection.execute('BEGIN IMMEDIATE')
-            row = self.job(job_id)
+            row = self.job(job_id, preflight=True)
             if row['kind'] != 'image' or row['state'] != 'succeeded' or row['delivery'] != 'delivered':
-                raise ValueError('An image preview must be delivered to the owner first')
-            self.artifact(row)
+                raise ToolRejected('An image preview must be delivered to the owner first')
+            self.artifact(row, preflight=True)
             previous = self.store.connection.execute("SELECT id FROM media_avatar_proposals WHERE job_id=? AND state IN ('proposed','approved','applying')", (job_id,)).fetchone()
             if previous:
                 return previous['id']

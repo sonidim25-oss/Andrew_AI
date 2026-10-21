@@ -97,7 +97,14 @@ class InterruptedToolAuthorityTests(unittest.TestCase):
                 def callback():
                     self.store.set_state(flag, '1')
                     return self.controller.execute_tool('research.save', args)
-                with self.assertRaises(ValueError):
-                    self.dispatch.run_tool(meta, 'research.save', args, callback)
-                self.store.set_state(flag, '0')
+                try:
+                    result = self.dispatch.run_tool(meta, 'research.save', args, callback)
+                    self.assertEqual(json.loads(result)['status'], 'error')
+                    self.assertFalse(json.loads(result)['executed'])
+                    self.assertEqual(self.records.effect_result(meta['admission_id'])['state'], 'confirmed')
+                    self.assertEqual(self.store.get_state(flag), '1')
+                    self.assertEqual(self.store.get_state('autonomy_error'), 'local_recovery_interrupted')
+                    self.assertEqual(self.store.research_page()['entries'], [])
+                finally:
+                    self.store.set_state(flag, '0')
         self.assertEqual(self.store.research_page()['entries'], [])

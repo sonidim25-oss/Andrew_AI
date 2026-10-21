@@ -7,6 +7,7 @@ from .configuration import OUTPUT_TOKEN_COST_ESTIMATE, ModelConfig, load_model_c
 from .diary import format_diary_entry, parse_diary_command, validate_diary_content
 from .telegram_menu import normalize_owner_text, HELP_TEXT
 from .appserver import AppServerClient, LettaTurnError, LettaTurnCancelled
+from .tool_errors import ToolRejected
 from .memory import ResearchJournal, ResearchValidationError, SessionHistory, validate_memory_text, note_untrusted_memory_source
 from .gmail_tools import GMAIL_TOOL_NAMES, GMAIL_ACTION_CONTEXT
 from .media import MEDIA_TOOL_NAMES, MEDIA_AUTHORIZATION
@@ -366,6 +367,12 @@ class Controller:
                         else:
                             confirmed = isinstance(response, dict) and response.get('status') == 'ok'
             return result
+        except ToolRejected:
+            # Known non-execution must settle the legacy tool ledger as well
+            # as the journaled receipt. Unknown exceptions remain uncertain.
+            confirmed = True
+            outcome = 'rejected'
+            raise
         finally:
             GMAIL_ACTION_CONTEXT.reset(action_context)
             self.store.finish_cycle_tool(attempt, confirmed)
@@ -377,22 +384,22 @@ class Controller:
             if name in {"memory_add_experience", "memory_propose_personality_edit"} and self.memory_service:
                 kind = "personality" if name == "memory_propose_personality_edit" else "experience"
                 self.memory_service.reject_edit_attempt(kind)
-            raise ValueError("tool arguments must be an object")
+            raise ToolRejected("tool arguments must be an object")
         read_tools = {"check_budget", "recent_activity", "memory_search", "session_search", "session_read", "gmail.status", "gmail.reconcile", "media.status", "media.get", "skills.list", "skills.load", 'research.list', 'research.get', 'research.observations'}
         if self.store.get_state("paused", "0") == "1" and name not in read_tools:
-            raise ValueError("owner pause can only be cleared by the owner with /wake")
+            raise ToolRejected("owner pause can only be cleared by the owner with /wake")
         if self.store.get_state("sleeping", "0") == "1" and name not in read_tools:
-            raise ValueError("sleep can only end at a scheduled wake or an owner wake")
+            raise ToolRejected("sleep can only end at a scheduled wake or an owner wake")
         if (name in {"sleep", "wake_at"} and self.store.get_state("active_session_id", "")
                 and not self.store.diary_entry(datetime.now(ZoneInfo("America/Toronto")).date().isoformat())):
-            raise ValueError("save today's diary before requesting autonomous sleep")
+            raise ToolRejected("save today's diary before requesting autonomous sleep")
         if name in SKILL_TOOL_NAMES:
             return json.dumps(self.skill_catalog.execute(name, arguments), ensure_ascii=False)
         if name in {'session_search', 'session_read'}:
             return json.dumps(SessionHistory(self.store, self.owner_id).execute(name, arguments), ensure_ascii=False)
         if name in {'media.status', 'media.get', 'voice.generate', 'image.generate', 'image.edit', 'profile.propose_avatar'}:
             if self.media is None:
-                raise ValueError('Media unavailable')
+                raise ToolRejected('Media unavailable')
             return json.dumps(self.media.execute(name, arguments), ensure_ascii=False)
         if name.startswith('research.'):
             try:
@@ -402,13 +409,13 @@ class Controller:
             return json.dumps(result, ensure_ascii=False)
         if name in {"memory_search", "memory_add_experience", "memory_propose_personality_edit"}:
             if self.memory_service is None:
-                raise ValueError("memory service is unavailable")
+                raise ToolRejected("memory service is unavailable")
             allowed = ({'query', 'limit'} if name == 'memory_search' else
                        {'content', 'record_type', 'event_ids', 'diary_ids', 'history_ids'} if name == 'memory_add_experience' else
                        {'content', 'reason', 'event_ids', 'diary_ids', 'history_ids'})
             if set(arguments) - allowed:
                 self.memory_service.reject_edit_attempt('personality' if name == 'memory_propose_personality_edit' else 'experience')
-                raise ValueError('unsupported memory arguments; provenance is assigned by the controller')
+                raise ToolRejected('unsupported memory arguments; provenance is assigned by the controller')
             if name == "memory_search":
                 rows = self.memory_service.search(arguments.get("query"), arguments.get("limit", 8))
                 if not rows:
@@ -445,7 +452,7 @@ class Controller:
             stop_note = validate_memory_text(arguments['reason'], 500) if arguments.get('reason') else ''
             minutes = arguments.get("minutes")
             if isinstance(minutes, bool) or not isinstance(minutes, int) or not 1 <= minutes <= 1440:
-                raise ValueError("sleep duration must be an integer from 1 to 1440 minutes")
+                raise ToolRejected("sleep duration must be an integer from 1 to 1440 minutes")
             wake_at = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat(timespec="seconds")
             notice = f"I’m choosing to sleep. I expect to wake at {wake_at} (in {minutes} minutes)."
             self.store.choose_sleep(
@@ -457,14 +464,14 @@ class Controller:
             stop_note = validate_memory_text(arguments['reason'], 500) if arguments.get('reason') else ''
             value = arguments.get("time")
             if not isinstance(value, str) or len(value) != 5 or value[2] != ":":
-                raise ValueError("wake time must use local HH:MM format")
+                raise ToolRejected("wake time must use local HH:MM format")
             try:
                 hour, minute = (int(piece) for piece in value.split(":"))
                 if not 0 <= hour <= 23 or not 0 <= minute <= 59:
                     raise ValueError
                 zone = ZoneInfo(self.timezone_name)
             except (ValueError, ZoneInfoNotFoundError):
-                raise ValueError("wake time or configured timezone is invalid") from None
+                raise ToolRejected("wake time or configured timezone is invalid") from None
             local_now = datetime.now(zone)
             target = self._next_local_wake(local_now, hour, minute, zone)
             notice = f"I’m choosing to sleep. I expect to wake at {target.strftime('%Y-%m-%d %H:%M %Z')}."
@@ -480,20 +487,20 @@ class Controller:
             return f"Andrew is awake. {queued} owner message(s) remain saved."
         if name == "check_budget":
             if arguments:
-                raise ValueError("check_budget takes no arguments")
+                raise ToolRejected("check_budget takes no arguments")
             return self._command("/budget")
         if name in GMAIL_TOOL_NAMES:
             if self.gmail_tools is None:
-                raise ValueError("Gmail is not configured")
+                raise ToolRejected("Gmail is not configured")
             if name not in {"gmail.status", "gmail.reconcile"}:
                 allowed, reason = self.budget_allows(0)
                 if not allowed:
-                    raise ValueError(f"Gmail action blocked by {reason} budget gate")
+                    raise ToolRejected(f"Gmail action blocked by {reason} budget gate")
             return self.gmail_tools.execute(name, arguments)
         if name == "recent_activity":
             limit = arguments.get("limit", 8)
             if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 8:
-                raise ValueError("activity limit must be from 1 to 8")
+                raise ToolRejected("activity limit must be from 1 to 8")
             rows = self.store.recent_activity(limit)
             return "Recent objective activity (event ID — summary):\n" + (
                 "\n".join(f"{row['id']} — {row['event']}" for row in rows)
@@ -502,9 +509,9 @@ class Controller:
         if name in {"python.run", "node.run", "shell.run", "browser.open", "browser.control", "browser.account"}:
             allowed, reason = self.budget_allows(0)
             if not allowed:
-                raise ValueError(f"external action blocked by {reason} budget gate")
+                raise ToolRejected(f"external action blocked by {reason} budget gate")
             if self.tool_runtime is None:
-                raise ValueError("isolated runtime is unavailable")
+                raise ToolRejected("isolated runtime is unavailable")
             return self.tool_runtime.execute(name, arguments)
         if name == "save_diary_entry":
             if not self.autonomous_enabled or not self.store.get_state("active_session_id", ""):
@@ -513,22 +520,28 @@ class Controller:
                 # outcome instead of leaving an admitted, apparently lost tool.
                 return json.dumps({"status": "error", "error": "diary_requires_autonomous_session",
                     "executed": False, "message": "Diary entry was not saved. This tool requires an active autonomous session; answer the owner without saving a diary."})
-            content = validate_diary_content(arguments.get("content"))
+            try:
+                content = validate_diary_content(arguments.get("content"))
+            except ValueError:
+                # Pure text validation only; no diary storage has been called.
+                raise ToolRejected('diary content was rejected; use safe text within 3000 characters') from None
             event_ids = arguments.get("event_ids", [])
             if (not isinstance(event_ids, list) or len(event_ids) > 20
                     or any(isinstance(item, bool) or not isinstance(item, int) or item <= 0 for item in event_ids)):
-                raise ValueError("activity event references are invalid")
+                raise ToolRejected("activity event references are invalid")
             local_date = datetime.now(ZoneInfo("America/Toronto")).date().isoformat()
             try:
                 entry_id = self.store.create_diary_entry(
                     local_date, content, session_id=self.store.get_state("active_session_id", ""),
                     event_ids=event_ids,
                 )
+            except ToolRejected:
+                raise
             except ValueError:
                 raise ValueError("diary entry was not saved; check the date and event references") from None
             self.store.add_activity(f"Diary entry saved ({entry_id})")
             return "Diary entry saved for today. It will be delivered to the owner by Telegram."
-        raise ValueError("unsupported controller action")
+        raise ToolRejected("unsupported controller action")
 
     def _cancel_active_turn(self):
         cancel = getattr(self.model, 'cancel_active_turn', None)

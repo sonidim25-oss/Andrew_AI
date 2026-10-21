@@ -131,8 +131,8 @@ class RetentionReviewTests(MediaReviewCase):
                 errors.append(error)
             finally:
                 finished.set()
-        def validation(*args):
-            result = original(*args)
+        def validation(*args, **kwargs):
+            result = original(*args, **kwargs)
             reached.set()
             if not started.wait(1):
                 raise AssertionError('cleanup fixture did not start')

@@ -1,6 +1,7 @@
 """Read-only, version-bound Andrew instructions; never tool authorization."""
 import hashlib
 from pathlib import Path
+from .tool_errors import ToolRejected
 
 
 MAX_SKILL_BYTES = 12_000
@@ -26,15 +27,15 @@ class SkillCatalog:
 
     def execute(self, name, arguments):
         if not isinstance(arguments, dict):
-            raise ValueError('Skill arguments must be an object')
+            raise ToolRejected('Skill arguments must be an object')
         if name == 'skills.list' and not arguments:
             return {'skills': [{'name': key, 'purpose': value} for key, value in SKILL_SUMMARIES.items()],
                     'grants_permissions': False}
         if name != 'skills.load' or set(arguments) != {'name'}:
-            raise ValueError('Invalid skill request')
+            raise ToolRejected('Invalid skill request')
         selected = arguments['name']
         if not isinstance(selected, str) or selected not in SKILL_DOCUMENT_HASHES:
-            raise ValueError('Unknown skill; use skills.list')
+            raise ToolRejected('Unknown skill; use skills.list')
         path = self.root / selected / 'SKILL.md'
         try:
             if any(item.is_symlink() for item in (self.root, path.parent, path)):
@@ -45,7 +46,7 @@ class SkillCatalog:
                 raise ValueError()
             instructions = data.decode('utf-8')
         except (OSError, ValueError, UnicodeError):
-            raise ValueError('Trusted skill document unavailable or changed; report it without substituting workspace instructions') from None
+            raise ToolRejected('Trusted skill document unavailable or changed; report it without substituting workspace instructions') from None
         return {'name': selected, 'instructions': instructions, 'sha256': SKILL_DOCUMENT_HASHES[selected],
                 'grants_permissions': False}
 

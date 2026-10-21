@@ -24,7 +24,7 @@ BACKEND_DROPIN=Path('/etc/systemd/system/andrew-letta.service.d/zz-local-recover
 CONTROL_DROPIN=Path('/etc/systemd/system/andrew-control.service.d/zz-local-recovery.conf')
 ROLLBACK_DROPIN=BACKEND_DROPIN.with_name('zzz-local-recovery-rollback.conf')
 MANIFEST=ROOT/'scripts/letta-recovery-manifest.json'
-NEW_MODULES={'recovery.py','recovery_dispatch.py','recovery_records.py'}
+NEW_MODULES={'recovery.py','recovery_dispatch.py','tool_errors.py','recovery_records.py'}
 CONTRACT='local_durable_recovery_v1'
 CHECKPOINT_PROGRAM='''import json,sqlite3,sys
 db=sqlite3.connect(sys.argv[1],timeout=5)

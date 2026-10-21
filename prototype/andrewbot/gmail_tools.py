@@ -16,6 +16,12 @@ from html.parser import HTMLParser
 from .gmail_api import GmailAPI, GmailError, VAULT_RECORD
 from .gmail_policy import load_permissions, scope_allows
 from .vault import Vault
+from .tool_errors import ToolRejected
+
+
+class GmailRejected(ToolRejected, GmailError):
+    """Explicit pre-dispatch Gmail validation, preserving GmailError callers."""
+
 
 _ID = re.compile(r'^[A-Za-z0-9_-]{1,200}$')
 _REQUEST_ID = re.compile(r'^[A-Za-z0-9_-]{8,80}$')
@@ -88,12 +94,12 @@ def compose_message(arguments, message_id=None):
     if (not isinstance(recipients, list) or not 1 <= len(recipients) <= 10
             or any(not isinstance(value, str) or len(value) > 254 or not _EMAIL.fullmatch(value)
                    for value in recipients)):
-        raise GmailError('Supply 1 to 10 plain recipient email addresses')
+        raise GmailRejected('Supply 1 to 10 plain recipient email addresses')
     subject, body = arguments.get('subject'), arguments.get('body')
     if (not isinstance(subject, str) or not 1 <= len(subject) <= 200
             or any(ord(char) < 32 or ord(char) == 127 for char in subject)
             or not isinstance(body, str) or not 1 <= len(body) <= 10000):
-        raise GmailError('Subject or plain-text body is invalid or too long')
+        raise GmailRejected('Subject or plain-text body is invalid or too long')
     message = EmailMessage(policy=SMTP)
     message['To'] = ', '.join(recipients)
     message['Subject'] = subject
@@ -148,27 +154,27 @@ class GmailTools:
 
     def execute(self, name, args):
         if not isinstance(args, dict):
-            raise GmailError('Gmail arguments must be an object')
+            raise GmailRejected('Gmail arguments must be an object')
         if name == 'gmail.status':
             if args:
-                raise GmailError('Gmail status takes no arguments')
+                raise GmailRejected('Gmail status takes no arguments')
             return json.dumps(self.status())
         if name == 'gmail.reconcile':
             if set(args) != {'request_id'} or not isinstance(args['request_id'], str) or not _REQUEST_ID.fullmatch(args['request_id']):
-                raise GmailError('Supply an existing Gmail request_id')
+                raise GmailRejected('Supply an existing Gmail request_id')
             return json.dumps(self.reconcile(args['request_id']), ensure_ascii=False)
         permission = {'gmail.read': 'read', 'gmail.draft': 'draft',
                       'gmail.send': 'send', 'gmail.delete': 'delete'}.get(name)
         if permission is None:
-            raise GmailError('Unsupported Gmail action')
+            raise GmailRejected('Unsupported Gmail action')
         policy = load_permissions()
         if not policy['enabled'] or not policy[permission]:
-            raise GmailError(f'Gmail {permission} permission is disabled by the owner')
+            raise GmailRejected(f'Gmail {permission} permission is disabled by the owner')
         vault = Vault(self.vault_directory)
         try:
             api = GmailAPI(vault)
             if not scope_allows(api.scopes, permission):
-                raise GmailError(f'Gmail {permission} requires new OAuth consent in the terminal')
+                raise GmailRejected(f'Gmail {permission} requires new OAuth consent in the terminal')
             if permission == 'read':
                 result = self._read(api, args)
                 self.store.add_activity('Gmail read completed (mail content omitted from activity log)')
@@ -185,13 +191,13 @@ class GmailTools:
         if op == 'get' and set(args) == {'operation', 'message_id'}:
             message_id = args['message_id']
             if not isinstance(message_id, str) or not _ID.fullmatch(message_id):
-                raise GmailError('Invalid Gmail message ID')
+                raise GmailRejected('Invalid Gmail message ID')
             return message_summary(api.request('messages/' + message_id, query={'format': 'full'}), True)
         if op == 'list' and set(args) <= {'operation', 'query', 'limit', 'page_token'}:
             query, limit, page = args.get('query', ''), args.get('limit', 5), args.get('page_token', '')
             if (not isinstance(query, str) or len(query) > 500 or type(limit) is not int
                     or not 1 <= limit <= 10 or not isinstance(page, str) or len(page) > 2048):
-                raise GmailError('Invalid Gmail search or result limit')
+                raise GmailRejected('Invalid Gmail search or result limit')
             parameters = {'q': query, 'maxResults': limit}
             if page:
                 parameters['pageToken'] = page
@@ -204,20 +210,20 @@ class GmailTools:
                 rows.append(message_summary(api.request('messages/' + message_id, query={
                     'format': 'metadata', 'metadataHeaders': ['From', 'To', 'Subject', 'Date']})))
             return {'messages': rows, 'next_page_token': str(response.get('nextPageToken', ''))[:2048]}
-        raise GmailError('Use Gmail list or get with the documented arguments')
+        raise GmailRejected('Use Gmail list or get with the documented arguments')
 
     def _write(self, api, permission, args):
         expected = {'request_id', 'message_id'} if permission == 'delete' else {'request_id', 'to', 'subject', 'body'}
         if set(args) != expected:
-            raise GmailError('Invalid Gmail mutation fields')
+            raise GmailRejected('Invalid Gmail mutation fields')
         request_id = args.get('request_id')
         if not isinstance(request_id, str) or not _REQUEST_ID.fullmatch(request_id):
-            raise GmailError('Mutation needs a unique request_id of 8 to 80 letters, digits, hyphens or underscores')
+            raise GmailRejected('Mutation needs a unique request_id of 8 to 80 letters, digits, hyphens or underscores')
         marker = '<andrew.' + uuid.uuid4().hex + '@andrew.invalid>'
         if permission == 'delete':
             message_id = args['message_id']
             if not isinstance(message_id, str) or not _ID.fullmatch(message_id):
-                raise GmailError('Invalid Gmail message ID')
+                raise GmailRejected('Invalid Gmail message ID')
             path, payload = 'messages/' + message_id + '/trash', {}
             lookup = {'message_id': message_id}
         else:
