@@ -113,6 +113,9 @@
   "diary.py": {
     "original": "fa8d71bc5057859623098c1e650ef69d3fe4de7c2c644c7b4de9e36bf2cbcaf2",
     "reviewed": {
+      "45ea42644a77cd6c0b5a4f581bdfbd219fcb544145d583a83824abea2f770bcd": [
+        "ee089e6"
+      ],
       "5db0cd5ee78b607cd12125be42214f545cc08a6af6a9a6f32bcc81d23fdcb369": [
         "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
         "927d9e399a0cbab106e820075838bad54b30d73b"
@@ -130,7 +133,7 @@
         "c4fd0621f95751237ecaad365c308f91e1206a55"
       ]
     },
-    "tested": "45ea42644a77cd6c0b5a4f581bdfbd219fcb544145d583a83824abea2f770bcd"
+    "tested": "23efdc5c9f0d7b5874083e3423ffc51f03af3627e9c47e2f8ab6083a8d43644a"
   },
   "dispatch.py": {
     "original": "c3b1b1cafc3629cdba7c4badeb8c7bb2158c8dd13536ecf84dd4c966276cd8ab",
@@ -478,9 +481,12 @@
       ],
       "f0c31e37d34cb4ece3e6bb2a27231696ee8f2dbdfd525fb4e720c89a2ad06279": [
         "pre-local-recovery-source"
+      ],
+      "f22290aa32c61cc6c4302923cc6f91a030740f5815320337c86847e40df7f12f": [
+        "ee089e6"
       ]
     },
-    "tested": "f22290aa32c61cc6c4302923cc6f91a030740f5815320337c86847e40df7f12f"
+    "tested": "925d41481c83457b0cef91ac82a87681f1e71f5d6aefa35ecc904fba98af56b2"
   },
   "telegram.py": {
     "original": "f4b356b42cff1ae8ef69fdf9c25c3f910110dd5dcc254d35643f6558cf16e0d0",
@@ -494,6 +500,9 @@
       "48dc50395d6ff046f48ceb62663ceff7c0fadc40385397ac46cf37142ab93f73": [
         "d5f1ac7a571235c0558d7a2e83c2119b448e95f3",
         "927d9e399a0cbab106e820075838bad54b30d73b"
+      ],
+      "4b45624af451e01fce45e56ff2b07d7f67ef16eb00362bb1c9deee944c0932da": [
+        "ee089e6"
       ],
       "a2887fe87994be163330d96bd36b26c709aaedb7dad793d0305d4711592f0558": [
         "34fca841b8ba0db29bf2126464723f8d5af16380",
@@ -510,7 +519,7 @@
         "5ab1851-installed"
       ]
     },
-    "tested": "4b45624af451e01fce45e56ff2b07d7f67ef16eb00362bb1c9deee944c0932da"
+    "tested": "06f014b9738d22f9bc0ac9cff90254bde5c59b6eb43a16fd5e57b5112a5c8891"
   },
   "telegram_menu.py": {
     "original": "0df485e19b19a304dc26e47a7c585c6a741081be413794da1ca42c3900dbbe79",
