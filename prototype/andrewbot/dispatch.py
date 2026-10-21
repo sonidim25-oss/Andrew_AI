@@ -8,10 +8,12 @@ from .latency import LatencyMetrics, wall_age_seconds
 from .workers import ModelWorker
 
 from .telegram_menu import owner_control
-from .telegram import deliver_saved_message
+from .telegram import TelegramNotSent, deliver_saved_message
 
 
 class ControllerDispatch:
+    UNSENT_RETRY_MAX_SECONDS = 60
+
     def __init__(self, store, controller, telegram, sessions, limiter,
                  owner_id, autonomous_enabled, fallback_enabled, should_stop=lambda: False,
                  metrics=None, utc_now=None, diary_action=None, media_worker=None, recovery_action=None):
@@ -97,6 +99,7 @@ class ControllerDispatch:
 
     def _reply_loop(self, lane):
         ready = self._system_reply_ready if lane == 'system' else self._reply_ready
+        backoff = 0
         while not self._poll_stop.is_set() and not self.should_stop():
             ready.wait(1)
             ready.clear()
@@ -106,6 +109,13 @@ class ControllerDispatch:
                 try:
                     if not self._deliver_reply(lane):
                         break
+                    backoff = 0
+                except TelegramNotSent:
+                    # The reply stays queued; wait before reaching Telegram again.
+                    backoff = min(self.UNSENT_RETRY_MAX_SECONDS, backoff * 2 or 1)
+                    logging.warning('Telegram was not reached; reply retry in %s s', backoff)
+                    self._poll_stop.wait(backoff)
+                    break
                 except Exception as error:
                     logging.warning('Telegram reply delivery failed (%s)', type(error).__name__)
                     break
@@ -230,6 +240,9 @@ class ControllerDispatch:
                 self.store.finish_reply(row['id'], row['claim_token'])
             else:
                 self.store.release_reply(row['id'], row['claim_token'])
+        except TelegramNotSent:
+            self.store.release_reply(row['id'], row['claim_token'])
+            raise
         except Exception:
             self.store.hold_reply(row['id'], row['claim_token'])
             raise
