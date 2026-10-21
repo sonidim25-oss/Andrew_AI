@@ -117,7 +117,7 @@ class RunnerReceiptTests(unittest.TestCase):
                 self.assertNotIn(sentinel, path.read_bytes())
         self.assertEqual(self.root.stat().st_mode & 0o777, 0o700)
 
-    def test_cleanup_failure_and_error_response_not_importable(self):
+    def test_cleanup_failure_stays_uncertain_and_completed_execution_error_is_importable(self):
         identity = self.identity()
         self.store.prepare(identity); self.store.admit(identity)
         evidence = self.store.finish(identity, self.response(), cleanup_verified=False)
@@ -129,7 +129,7 @@ class RunnerReceiptTests(unittest.TestCase):
         other = self.identity('b')
         self.store.prepare(other); self.store.admit(other)
         error = self.response(); error.update(status='error', safe_error='execution_failed')
-        self.assertFalse(self.store.finish(other, error, cleanup_verified=True).importable)
+        self.assertTrue(self.store.finish(other, error, cleanup_verified=True).importable)
 
     def test_unfinished_admission_on_restart_remains_unknown_and_cannot_finish(self):
         identity = self.identity()

@@ -33,7 +33,7 @@ class RunnerBackendProtocolTests(unittest.TestCase):
             if state.get('phase') in ('held','terminal_committed'):return state
             self.assertLess(time.monotonic(),deadline,state);time.sleep(.03)
 
-    def runner_turn(self,lose_reply=True):
+    def runner_turn(self,lose_reply=True,response=None):
         binding,input,unused_scope=self.prepare();self.binding=binding
         RecoveryRecords(self.fixture.store).revoke(unused_scope['admission_id'])
         capability=self.fixture.client.request(
@@ -44,6 +44,7 @@ class RunnerBackendProtocolTests(unittest.TestCase):
         for key,value in dict(local_recovery_controller_store_id=CONTROLLER_ID,runner_receipt_store_id=RUNNER_ID,
                               runner_receipts_enabled='1',runner_receipt_backend_capability='1').items():store.set_state(key,value)
         self.worker=EvidenceRunner(store);self.worker.lose_reply=lose_reply
+        self.worker.response=response
         self.adapter=RunnerRecoveryAdapter(store,self.worker,expected_runner_uid=os.getuid(),runner_store_id=RUNNER_ID)
         self.fixture.model_gateway.recovery_tool_handler=lambda name,args,*,recovery:RecoveryDispatch(store,runner_adapter=self.adapter).run_tool(
             recovery,name,args,lambda:self.fail('generic callback executed'))
@@ -56,8 +57,8 @@ class RunnerBackendProtocolTests(unittest.TestCase):
         self.command('recovery_resume',binding=binding,attempt_id='runner-attempt',expected_revision=claim['revision'],claim_id=claim['claim_id'],fence=claim['fence'],**scope)
         return scope,claim,self.wait('runner-attempt')
 
-    def test_lost_runner_result_recovers_exact_tool_and_one_continuation_after_restart(self):
-        scope,claim,state=self.runner_turn()
+    def test_lost_runner_result_recovers_exact_tool_and_one_continuation_after_restart(self,response=None):
+        scope,claim,state=self.runner_turn(response=response)
         self.assertEqual(state['phase'],'held',state);self.assertEqual(state['hold_reason'],'tool_uncertain')
         self.assertEqual(self.worker.calls,1);self.assertEqual(len(self.fixture.provider_calls),1)
         self.fixture.restart()
@@ -78,9 +79,14 @@ class RunnerBackendProtocolTests(unittest.TestCase):
         backend.resume(dict(binding=self.binding,attempt_id='runner-continuation',claim_id=claim['claim_id'],fence=claim['fence'],expected_revision=confirmed['revision']),scope)
         terminal=self.wait('runner-continuation');self.assertEqual(terminal['phase'],'terminal_committed',terminal)
         self.assertEqual(terminal['run_id'],original_run);self.assertEqual(self.worker.calls,1);self.assertEqual(len(self.fixture.provider_calls),2)
-        self.assertIn('saved exact result',self.fixture.provider_calls[-1]['messages'][-1]['content'])
+        self.assertIn('saved exact result' if response is None else 'ValueError: invalid input',self.fixture.provider_calls[-1]['messages'][-1]['content'])
         self.assertEqual(self.fixture.store.connection.execute('SELECT count(*) FROM cycle_tool_attempts').fetchone()[0],1)
         self.assertEqual(self.fixture.store.connection.execute('SELECT count(*) FROM runner_imports').fetchone()[0],1)
+
+    def test_lost_execution_error_receipt_recovers_after_restart_without_reexecution(self):
+        self.test_lost_runner_result_recovers_exact_tool_and_one_continuation_after_restart(
+            response=dict(status='error',stdout='partial work completed',stderr='ValueError: invalid input',
+                          artifacts=['partial.txt'],safe_error='execution_failed',visit=None))
 
     def test_pause_after_confirmation_blocks_resume_without_losing_saved_result(self):
         scope,claim,state=self.runner_turn()
@@ -102,6 +108,16 @@ class RunnerBackendProtocolTests(unittest.TestCase):
         operation=self.fixture.store.connection.execute('SELECT admission_id FROM runner_operations').fetchone()
         self.assertIn(operation[0],state['runner_receipt_admissions'])
         self.assertEqual(self.worker.calls,1);self.assertEqual(len(self.fixture.provider_calls),2)
+
+    def test_completed_execution_error_reaches_model_without_holding_or_repeating_worker(self):
+        response=dict(status='error',stdout='partial work completed',stderr='ValueError: invalid input',
+                      artifacts=['partial.txt'],safe_error='execution_failed',visit=None)
+        _,_,state=self.runner_turn(lose_reply=False,response=response)
+        self.assertEqual(state['phase'],'terminal_committed',state)
+        self.assertEqual(self.worker.calls,1);self.assertEqual(len(self.fixture.provider_calls),2)
+        content=self.fixture.provider_calls[-1]['messages'][-1]['content']
+        self.assertIn('Status: error',content);self.assertIn('ValueError: invalid input',content)
+        self.assertIn('partial.txt',content)
 
     def test_coordinator_imports_confirms_then_continues_the_same_turn_on_separate_passes(self):
         scope,_,state=self.runner_turn();self.assertEqual(state['phase'],'held',state)

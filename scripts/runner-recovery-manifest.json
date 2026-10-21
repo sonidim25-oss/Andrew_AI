@@ -109,7 +109,7 @@
     "runner_protocol.py": {
       "allow_missing": false,
       "baseline": "85651a5b45df6258aae9b32cc76d813e8957e79732a32f4c90848e850aa5f29f",
-      "tested": "85651a5b45df6258aae9b32cc76d813e8957e79732a32f4c90848e850aa5f29f"
+      "tested": "bee553866872458a36f28e1e96e45f5e10ce55aecab5a321d960f54d65aaa2c1"
     },
     "runner_receipt_server.py": {
       "allow_missing": false,
@@ -205,8 +205,8 @@
     },
     "runner_protocol.py": {
       "allow_missing": true,
-      "baseline": null,
-      "tested": "85651a5b45df6258aae9b32cc76d813e8957e79732a32f4c90848e850aa5f29f"
+      "baseline": "85651a5b45df6258aae9b32cc76d813e8957e79732a32f4c90848e850aa5f29f",
+      "tested": "bee553866872458a36f28e1e96e45f5e10ce55aecab5a321d960f54d65aaa2c1"
     },
     "runner_receipt_server.py": {
       "allow_missing": true,

@@ -102,8 +102,12 @@ class ReceiptEvidence(_Document):
 
     @property
     def importable(self):
+        # A completed program error is a saved outcome, including any partial
+        # effects. Import its error text; never execute that operation again.
+        # Timeout, cancellation and infrastructure failures remain held.
         return (self.state == 'result' and self.cleanup_verified and self.response is not None
-                and self.response['status'] == 'ok' and self.response['safe_error'] is None)
+                and ((self.response['status'] == 'ok' and self.response['safe_error'] is None)
+                     or (self.response['status'] == 'error' and self.response['safe_error'] == 'execution_failed')))
 
 
 def _shape(value, cls, limit=MAX_METADATA_BYTES):

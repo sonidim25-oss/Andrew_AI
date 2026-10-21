@@ -22,6 +22,7 @@ class EvidenceRunner:
         self.calls = 0
         self.lookups = 0
         self.receipt = None
+        self.response = None
         self.before_grant = lambda: None
         self.lose_reply = False
         self.capability_changes = {}
@@ -42,7 +43,7 @@ class EvidenceRunner:
                            challenge='1' * 64, operation_sha=digest(identity.to_dict())))
         assert not self.store.connection.in_transaction
         self.calls += 1
-        response = dict(status='ok', stdout='saved exact result', stderr='', artifacts=[], safe_error=None, visit=None)
+        response = self.response if self.response is not None else dict(status='ok', stdout='saved exact result', stderr='', artifacts=[], safe_error=None, visit=None)
         self.receipt = validate_evidence(dict(contract=CONTRACT, version=VERSION, identity=identity.to_dict(),
             identity_sha=digest(identity.to_dict()), state='result', response=response,
             response_sha=digest(response), cleanup_verified=True), identity)

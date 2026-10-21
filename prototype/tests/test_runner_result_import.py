@@ -84,13 +84,13 @@ a.import_result(validate_identity(value['identity']),value['receipt'])
                 self.assertEqual(self.store.connection.execute('SELECT count(*) FROM '+table).fetchone()[0], int(committed))
             self.assertEqual(self.operation()['state'], 'imported' if committed else 'admitted')
 
-    def test_valid_missing_prepared_admitted_uncertain_or_error_evidence_stays_held(self):
+    def test_valid_missing_prepared_admitted_uncertain_or_timeout_evidence_stays_held(self):
         identity, receipt = self.saved_result()
         for state in ['missing','prepared','admitted','uncertain']:
             value = receipt.to_dict(); value.update(state=state, response=None, response_sha=None, cleanup_verified=False)
             self.client.receipt = value
             self.assertFalse(reconcile_pending_runner_result(self.store, self.client, self.binding, expected_runner_uid=os.getuid()))
-        error = receipt.to_dict(); error['response'].update(status='error', safe_error='execution_failed')
+        error = receipt.to_dict(); error['response'].update(status='error', safe_error='timeout')
         error['response_sha'] = digest(error['response'])
         with self.assertRaises(Exception):
             self.adapter.import_result(identity, error)
