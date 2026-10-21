@@ -1615,6 +1615,20 @@ class Store:
                 self.connection.execute("INSERT INTO telegram_outbox(chat_id,text,created_at,lane) VALUES(?,?,?,?)", (chat_id, text, self.now(), lane))
 
     @database_locked
+    def queue_daily_spend_alert(self, day, chat_id, text):
+        """Queue at most one spending alert per local day."""
+        with self.connection:
+            row = self.connection.execute("SELECT value FROM state WHERE key='spend_alert_day'").fetchone()
+            if row is not None and row[0] == day:
+                return False
+            self.connection.execute(
+                "INSERT INTO state(key,value) VALUES('spend_alert_day',?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (day,))
+            self.connection.execute("INSERT INTO telegram_outbox(chat_id,text,created_at,lane) VALUES(?,?,?,'system')",
+                                    (chat_id, text, self.now()))
+        return True
+
+    @database_locked
     def inbox_received_at(self, update_id):
         row = self.connection.execute('SELECT received_at FROM telegram_inbox WHERE update_id=?',
                                       (update_id,)).fetchone()

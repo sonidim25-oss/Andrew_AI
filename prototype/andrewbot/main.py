@@ -82,6 +82,18 @@ def build_memory_backup_scheduler(store, key, backup_directory, validate_only=Fa
     return PeriodicMemoryBackup(store, backup_directory, key)
 
 
+def daily_spend_alert_usd():
+    raw = os.environ.get("ANDREW_DAILY_SPEND_ALERT_USD", "1.00")
+    try:
+        value = float(raw)
+    except ValueError:
+        value = -1.0
+    if not 0 <= value < 1000:
+        logging.warning("Invalid ANDREW_DAILY_SPEND_ALERT_USD; using 1.00")
+        return 1.0
+    return value or None
+
+
 def env_enabled(name, default=False):
     value = os.environ.get(name)
     if value is None:
@@ -218,6 +230,7 @@ def run(validate_only=False):
         gmail_tools=GmailTools(vault_directory(), store),
         media=media,
         credit_reader=provider.credit_status,
+        daily_spend_alert_usd=daily_spend_alert_usd(),
     )
     agent.tool_handler = controller.execute_tool
     if env_enabled('ANDREW_LOCAL_RECOVERY_ENABLED',False):

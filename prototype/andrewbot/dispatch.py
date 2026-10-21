@@ -13,11 +13,13 @@ from .telegram import TelegramNotSent, deliver_saved_message
 
 class ControllerDispatch:
     UNSENT_RETRY_MAX_SECONDS = 60
+    SPEND_CHECK_SECONDS = 60
 
     def __init__(self, store, controller, telegram, sessions, limiter,
                  owner_id, autonomous_enabled, fallback_enabled, should_stop=lambda: False,
                  metrics=None, utc_now=None, diary_action=None, media_worker=None, recovery_action=None):
         self.media_worker = media_worker
+        self._spend_checked_at = None
         self.store, self.controller, self.telegram = store, controller, telegram
         self.sessions, self.limiter = sessions, limiter
         self.owner_id = owner_id
@@ -286,6 +288,9 @@ class ControllerDispatch:
             self.guarded('Scheduled wake', lambda: self._run_stage('schedule', self.controller.check_scheduled_wake))
         if self.fallback_enabled:
             self.guarded('Fallback wake', lambda: self._run_stage('schedule', self.controller.check_fallback_wake))
+        if self._spend_checked_at is None or time.monotonic() - self._spend_checked_at >= self.SPEND_CHECK_SECONDS:
+            self._spend_checked_at = time.monotonic()
+            self.guarded('Spending alert', self.controller.check_spend_alert)
         if self._poll_thread is None:
             self.guarded('Telegram reply delivery', self.deliver_reply)
         else:

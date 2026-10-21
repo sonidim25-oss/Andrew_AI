@@ -21,7 +21,8 @@ class Controller:
                  monthly_reserve_usd=1.0, daily_target_usd=0.30,
                  timezone_name="America/Toronto", fallback_wake_time="09:00",
                  autonomous_enabled=False, fallback_enabled=False, memory_service=None, model_config=None, credit_reader=None,
-                 tool_runtime=None, visit_history=None, gmail_tools=None, conversation_idle_seconds=300, health_snapshot=None, media=None, skill_catalog=None):
+                 tool_runtime=None, visit_history=None, gmail_tools=None, conversation_idle_seconds=300, health_snapshot=None, media=None, skill_catalog=None,
+                 daily_spend_alert_usd=None):
         self.store = store
         self.media = media
         self.skill_catalog = skill_catalog if skill_catalog is not None else SkillCatalog()
@@ -31,6 +32,8 @@ class Controller:
         self.monthly_limit_usd = float(monthly_limit_usd)
         self.monthly_reserve_usd = float(monthly_reserve_usd)
         self.daily_target_usd = float(daily_target_usd)
+        # Notification only: spending stays agent-managed with no controller cap.
+        self.daily_spend_alert_usd = float(daily_spend_alert_usd) if daily_spend_alert_usd else None
         self.credit_reader = credit_reader
         self.timezone_name = timezone_name
         self.fallback_wake_time = fallback_wake_time
@@ -45,6 +48,21 @@ class Controller:
         if model_config is not None and not isinstance(model_config, ModelConfig):
             raise ValueError("model configuration is invalid")
         self.model_config = model_config or load_model_config({})
+
+    def check_spend_alert(self, now=None):
+        if self.daily_spend_alert_usd is None:
+            return False
+        snapshot = budget_snapshot(self.store, now=now)
+        if snapshot['daily_cost'] < self.daily_spend_alert_usd:
+            return False
+        text = (f"Spending alert: ${snapshot['daily_cost']:.2f} used today ({snapshot['day']}), "
+                f"above the ${self.daily_spend_alert_usd:.2f} alert level. "
+                f"This month so far: ${snapshot['monthly_cost']:.2f}. "
+                "Nothing was stopped; send /pause to pause Andrew.")
+        if not self.store.queue_daily_spend_alert(snapshot['day'], self.owner_id, text):
+            return False
+        self.store.add_activity(f"Daily spending alert sent ({snapshot['day']})")
+        return True
 
     @property
     def research(self):
