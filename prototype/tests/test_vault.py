@@ -58,6 +58,22 @@ class VaultTests(unittest.TestCase):
                 vault.get_account_secret(account_id, "https://example.com")
             self.assertTrue(vault.delete_account(account_id))
 
+    def test_only_empty_text_revocation_marker_permits_secret_access(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Vault(Path(directory) / 'vault')
+            self.addCleanup(vault.close)
+            account_id = vault.save_account('https://example.com', 'andrew', 'synthetic-secret')
+            # SQLite accepts an empty BLOB in the TEXT column despite NOT NULL.
+            # An unexpected stored type must not silently enable credentials.
+            for marker in ('2026-10-21 00:00:00', '0', b''):
+                with self.subTest(marker=marker):
+                    vault.db.execute('UPDATE site_accounts SET revoked_at=? WHERE account_id=?',
+                                     (marker, account_id))
+                    vault.db.commit()
+                    self.assertTrue(vault.account_metadata()[0]['revoked'])
+                    with self.assertRaises(PermissionError):
+                        vault.get_account_secret(account_id, 'https://example.com')
+
 
 if __name__ == "__main__":
     unittest.main()

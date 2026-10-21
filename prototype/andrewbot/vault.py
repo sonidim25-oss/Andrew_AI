@@ -105,7 +105,7 @@ class Vault:
         for account_id, origin, nonce, ciphertext, created_at, revoked_at in rows:
             username = AESGCM(self.key).decrypt(nonce, ciphertext, self._account_aad(account_id, "username")).decode("utf-8")
             result.append({"account_id": account_id, "origin": origin, "username": username,
-                           "created_at": created_at, "revoked": bool(revoked_at)})
+                           "created_at": created_at, "revoked": revoked_at != ''})
         return result
 
     def get_account_secret(self, account_id, origin):
@@ -114,7 +114,8 @@ class Vault:
             raise KeyError(account_id)
         if row[0] != origin:
             raise PermissionError("account origin does not match")
-        if row[3]:
+        # Only the schema's exact empty-text sentinel means active.
+        if row[3] != '':
             raise PermissionError("account is revoked")
         return AESGCM(self.key).decrypt(row[1], row[2], self._account_aad(account_id, "secret")).decode("utf-8")
 
