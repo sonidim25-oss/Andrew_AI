@@ -23,7 +23,7 @@
     },
     "dispatch.py": {
       "allow_missing": false,
-      "baseline": "c16dd1890108ea0558bc93d9220144e61876f1597a381b7ea9b12176d8ba012c",
+      "baseline": "b2c70e4db94bd46529d07de2b83a10e206ab15f67613a45f06b0be3f5e135159",
       "tested": "b2c70e4db94bd46529d07de2b83a10e206ab15f67613a45f06b0be3f5e135159"
     },
     "gateway.py": {
@@ -108,7 +108,7 @@
     },
     "runner_protocol.py": {
       "allow_missing": false,
-      "baseline": "85651a5b45df6258aae9b32cc76d813e8957e79732a32f4c90848e850aa5f29f",
+      "baseline": "bee553866872458a36f28e1e96e45f5e10ce55aecab5a321d960f54d65aaa2c1",
       "tested": "bee553866872458a36f28e1e96e45f5e10ce55aecab5a321d960f54d65aaa2c1"
     },
     "runner_receipt_server.py": {
@@ -143,7 +143,7 @@
     },
     "sessions.py": {
       "allow_missing": false,
-      "baseline": "d21782ed5ee5470673660cc59a746b2678c1815ac8a1dde2c7f13d22c5c21154",
+      "baseline": "48cd8d84352f948b25767c16a50be36c6e8086a6b1a9152e9e83921ea2f5401b",
       "tested": "48cd8d84352f948b25767c16a50be36c6e8086a6b1a9152e9e83921ea2f5401b"
     },
     "skills.py": {
@@ -153,12 +153,12 @@
     },
     "store.py": {
       "allow_missing": false,
-      "baseline": "65d32308e658ee585230794d6541fb9988e025a8cd8e8c9f78789d8c85ae8b05",
-      "tested": "a1f55c6e5a0ac9c99058fd602af5d1905a4e23778095a3b1c964205bffd748b7"
+      "baseline": "a1f55c6e5a0ac9c99058fd602af5d1905a4e23778095a3b1c964205bffd748b7",
+      "tested": "c476403c9aeb562517cf5b887c867b1b0239ac214bcd6f39517b36919cee9221"
     },
     "telegram.py": {
       "allow_missing": false,
-      "baseline": "fde914b03be15f001e0b4ee3024e7909baad58772f7bbe812e1dd98c2c190990",
+      "baseline": "4b45624af451e01fce45e56ff2b07d7f67ef16eb00362bb1c9deee944c0932da",
       "tested": "4b45624af451e01fce45e56ff2b07d7f67ef16eb00362bb1c9deee944c0932da"
     },
     "telegram_menu.py": {
@@ -176,6 +176,11 @@
       "baseline": "8caf303fdd85c3d0dba64b2c296c13f6e51ae1537365cb4fdf06c14bc3ca463d",
       "tested": "8caf303fdd85c3d0dba64b2c296c13f6e51ae1537365cb4fdf06c14bc3ca463d"
     },
+    "vault.py": {
+      "allow_missing": false,
+      "baseline": "be397ce7f41a9d03a0a751788e647f3d5d6a1c6322cb1fdc95180e94d5a6c77b",
+      "tested": "c92dde46fdda5e9617b162e910b42c10a4b7cc72f0a7d733fbf38c0dee029943"
+    },
     "workers.py": {
       "allow_missing": false,
       "baseline": "45a6e5d87f33dff828101da8f56eca06a7a293debe562d850e684de50d2b9e83",
@@ -185,58 +190,63 @@
   "runner": {
     "__init__.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "b6a2b179e4e580f5a41756bb8e46702c6a65f73b83496ff6da9a8ed2c09b0508",
       "tested": "b6a2b179e4e580f5a41756bb8e46702c6a65f73b83496ff6da9a8ed2c09b0508"
     },
     "recovery_identity.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "b4251038e9d0cb2dadaf816795871ec64b0595bad06009ff4e8cababb407c3a7",
       "tested": "b4251038e9d0cb2dadaf816795871ec64b0595bad06009ff4e8cababb407c3a7"
     },
     "runner_adoption.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "def18596aa841e80b88f81db2b757d5aa34b7a0500eb5151da6f84990b3efaea",
       "tested": "def18596aa841e80b88f81db2b757d5aa34b7a0500eb5151da6f84990b3efaea"
     },
     "runner_client.py": {
       "allow_missing": true,
-      "baseline": "8e96fc3d53c37be7f19b97da3447d9daeeb785339785e975a9a714b7ac5e67b8",
+      "baseline": "eebc39188040429936e064c3005b44f53aabe1c09c16d158e9ec9927e07c7a48",
       "tested": "eebc39188040429936e064c3005b44f53aabe1c09c16d158e9ec9927e07c7a48"
     },
     "runner_format.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "17829220366eb215b98b4ff3ac2009e4db4993a0b0aa3a3e850839e439d9d756",
       "tested": "17829220366eb215b98b4ff3ac2009e4db4993a0b0aa3a3e850839e439d9d756"
     },
     "runner_protocol.py": {
       "allow_missing": true,
-      "baseline": "85651a5b45df6258aae9b32cc76d813e8957e79732a32f4c90848e850aa5f29f",
+      "baseline": "bee553866872458a36f28e1e96e45f5e10ce55aecab5a321d960f54d65aaa2c1",
       "tested": "bee553866872458a36f28e1e96e45f5e10ce55aecab5a321d960f54d65aaa2c1"
     },
     "runner_receipt_server.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "f857de59a5752521a33f9e11cff5ec16eeb423a6ecc21960739f47efb9fd581f",
       "tested": "f857de59a5752521a33f9e11cff5ec16eeb423a6ecc21960739f47efb9fd581f"
     },
     "runner_receipts.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "ba0b7fa37c29ca427a335446e4101f4a4cc64a8addf91d05d0940bcb96dca156",
       "tested": "ba0b7fa37c29ca427a335446e4101f4a4cc64a8addf91d05d0940bcb96dca156"
     },
     "runner_service.py": {
       "allow_missing": false,
-      "baseline": "03539830e704fa52c61e15139a79e3ac2ce990674f7db55157e70eb9145cdad6",
+      "baseline": "2c3c7dc983db37622efa64cb105ffe6e17628888bb0298f77ca9097dafe184a0",
       "tested": "2c3c7dc983db37622efa64cb105ffe6e17628888bb0298f77ca9097dafe184a0"
     },
     "runner_socket.py": {
       "allow_missing": true,
-      "baseline": null,
+      "baseline": "a210806888d574ade8d95806aff52c2529219e68c73a871a454bed0bda9789f3",
       "tested": "a210806888d574ade8d95806aff52c2529219e68c73a871a454bed0bda9789f3"
     },
     "runtime_readiness.py": {
       "allow_missing": true,
-      "baseline": "1cdb98bb19f6a2f2291a2d36f92ac780658693d3ea8e855fe855e8bb306eee3c",
+      "baseline": "731e9cf54994ec90f9a2b4934cc52addf917ba2a4ba83bdfb62375931d5da116",
       "tested": "731e9cf54994ec90f9a2b4934cc52addf917ba2a4ba83bdfb62375931d5da116"
+    },
+    "vault.py": {
+      "allow_missing": false,
+      "baseline": "be397ce7f41a9d03a0a751788e647f3d5d6a1c6322cb1fdc95180e94d5a6c77b",
+      "tested": "c92dde46fdda5e9617b162e910b42c10a4b7cc72f0a7d733fbf38c0dee029943"
     }
   },
   "version": 1
