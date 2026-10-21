@@ -223,6 +223,22 @@ class MemoryService:
         return (guidance + "\n" if guidance else "") + f"{header}{content}{suffix}"
 
 
+class ResearchValidationError(ValueError):
+    """Known argument rejection, raised only before research storage is called."""
+
+    def __init__(self, field=None, maximum=None):
+        super().__init__('research.save arguments rejected before journal changes')
+        self.field = field
+        self.maximum = maximum
+
+    def result(self):
+        error = {'code': 'invalid_research_arguments',
+                 'message': 'Research arguments were rejected before any journal change.'}
+        if self.field is not None:
+            error.update(field=self.field, max_characters=self.maximum)
+        return {'status': 'error', 'error': error}
+
+
 class ResearchJournal:
     """Andrew-authored, mutable research state; independent of immutable autobiography."""
 
@@ -243,7 +259,58 @@ class ResearchJournal:
             raise ValueError('research revision, cursor or limit is invalid')
         return value
 
+    def prepare_save(self, arguments):
+        """Validate without reading or mutating the store; execution errors stay distinct."""
+        try:
+            allowed = {'id', 'revision', 'question', 'findings', 'doubts',
+                       'next_step', 'status', 'parent_id', 'sources'}
+            if not isinstance(arguments, dict) or set(arguments) - allowed:
+                raise ValueError('invalid research arguments')
+            record_id = self._identifier(arguments['id']) if 'id' in arguments else None
+            fields = {key: value for key, value in arguments.items() if key not in {'id', 'revision'}}
+            if not fields or (not record_id and not fields.get('question')):
+                raise ValueError('a new research entry requires a question; updates require at least one field')
+            if not record_id and 'revision' in arguments:
+                raise ValueError('revision is only used when editing an existing entry')
+            for key, maximum in self.TEXT_LIMITS.items():
+                if key in fields:
+                    value = fields[key]
+                    if key != 'question' and value == '':
+                        continue
+                    try:
+                        fields[key] = validate_memory_text(value, maximum)
+                    except ValueError:
+                        raise ResearchValidationError(key, maximum) from None
+            if 'status' in fields and (not isinstance(fields['status'], str) or fields['status'] not in {'open', 'paused', 'closed'}):
+                raise ValueError('invalid research status')
+            if fields.get('parent_id') is not None:
+                fields['parent_id'] = self._identifier(fields['parent_id'])
+            if 'sources' in fields:
+                sources = fields['sources']
+                if not isinstance(sources, list) or len(sources) > 5:
+                    raise ValueError('provide at most five source URLs')
+                cleaned_sources = []
+                for value in sources:
+                    normalized = validate_memory_text(value, 1000)
+                    url = urlsplit(normalized)
+                    if url.scheme not in {'http', 'https'} or not url.hostname or url.username is not None or url.password is not None:
+                        raise ValueError('source URLs require HTTP(S) and cannot contain credentials')
+                    cleaned_sources.append(normalized)
+                fields['sources'] = cleaned_sources
+            revision = self._integer(arguments.get('revision'), 1) if record_id else None
+            return fields, record_id, revision
+        except ResearchValidationError:
+            raise
+        except ValueError:
+            # Validation can raise messages containing URLs or sensitive input.
+            # Return only fixed vocabulary through the controller tool result.
+            raise ResearchValidationError() from None
+
     def execute(self, operation, arguments):
+        if operation == 'save':
+            fields, record_id, revision = self.prepare_save(arguments)
+            # Outside validation handling: a storage failure may follow a commit.
+            return self.store.save_research_entry(fields, record_id, revision)
         if not isinstance(arguments, dict):
             raise ValueError('research arguments must be an object')
         allowed = {
@@ -270,36 +337,6 @@ class ResearchJournal:
                     row['question'] = row['question'][:120] + '…'
             return page
         record_id = self._identifier(arguments['id']) if 'id' in arguments else None
-        if operation == 'save':
-            fields = {key: value for key, value in arguments.items() if key not in {'id', 'revision'}}
-            if not fields or (not record_id and not fields.get('question')):
-                raise ValueError('a new research entry requires a question; updates require at least one field')
-            if not record_id and 'revision' in arguments:
-                raise ValueError('revision is only used when editing an existing entry')
-            for key, maximum in self.TEXT_LIMITS.items():
-                if key in fields:
-                    value = fields[key]
-                    if key != 'question' and value == '':
-                        continue
-                    fields[key] = validate_memory_text(value, maximum)
-            if 'status' in fields and (not isinstance(fields['status'], str) or fields['status'] not in {'open', 'paused', 'closed'}):
-                raise ValueError('invalid research status')
-            if fields.get('parent_id') is not None:
-                fields['parent_id'] = self._identifier(fields['parent_id'])
-            if 'sources' in fields:
-                sources = fields['sources']
-                if not isinstance(sources, list) or len(sources) > 5:
-                    raise ValueError('provide at most five source URLs')
-                cleaned_sources = []
-                for value in sources:
-                    normalized = validate_memory_text(value, 1000)
-                    url = urlsplit(normalized)
-                    if url.scheme not in {'http', 'https'} or not url.hostname or url.username is not None or url.password is not None:
-                        raise ValueError('source URLs require HTTP(S) and cannot contain credentials')
-                    cleaned_sources.append(normalized)
-                fields['sources'] = cleaned_sources
-            revision = self._integer(arguments.get('revision'), 1) if record_id else None
-            return self.store.save_research_entry(fields, record_id, revision)
         if not record_id:
             raise ValueError('research entry ID is required')
         if operation == 'delete':

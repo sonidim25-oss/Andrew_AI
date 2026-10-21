@@ -1,5 +1,14 @@
 # Memory update
 
+## Current checkpoint — 2026-10-21
+
+- GitHub source synchronization completed at `bf9749d`; the 2026-10-20 deployment snapshot remains historical installed-source evidence.
+- Claude's `e75d45c` gateway memory-context fallback is included on `fix/research-validation-result` in `/home/daniel/andrew-research-validation-20261021`. It preserves owner credit guidance and blocks when that guidance cannot be read. Its saved-result regression now exercises actual journaled receipt reuse with one provider dispatch.
+- The current incident is identified: cycle `68207635b5814cd8b82b2384062c3fb4` held a `research.save` at 2026-10-20 01:45:55. Its findings had 2,116 characters against the 2,000-character limit. Exact binding/request metadata matched; no result receipt or runner mapping exists for that effect.
+- The prevention fix separates pure `research.save` argument validation from storage execution. Known validation failures become sanitized, saved tool error results, allowing correction in the same cycle. Storage/callback failures remain uncertain and are not replayed.
+- Validation: 698 controller tests passed (2 skipped), 49 focused research/gateway tests passed independently, and code review approved. One actual isolated pinned-backend test verified rejection, corrected save, terminal completion and duplicate-resume protection without real provider calls.
+- No production deployment, hold clearing, wake or replay has occurred for these changes. The existing held attempt still needs a separately guarded reconciliation. Owner pause and revision must remain preserved. P0 remains open.
+
 ## Current checkpoint — 2026-10-20
 
 | Item | Verified status / next action |

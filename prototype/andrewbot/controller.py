@@ -7,7 +7,7 @@ from .configuration import OUTPUT_TOKEN_COST_ESTIMATE, ModelConfig, load_model_c
 from .diary import format_diary_entry, parse_diary_command, validate_diary_content
 from .telegram_menu import normalize_owner_text, HELP_TEXT
 from .appserver import AppServerClient, LettaTurnError, LettaTurnCancelled
-from .memory import ResearchJournal, SessionHistory, validate_memory_text, note_untrusted_memory_source
+from .memory import ResearchJournal, ResearchValidationError, SessionHistory, validate_memory_text, note_untrusted_memory_source
 from .gmail_tools import GMAIL_TOOL_NAMES, GMAIL_ACTION_CONTEXT
 from .media import MEDIA_TOOL_NAMES, MEDIA_AUTHORIZATION
 from .skills import SkillCatalog, SKILL_TOOL_NAMES
@@ -395,7 +395,11 @@ class Controller:
                 raise ValueError('Media unavailable')
             return json.dumps(self.media.execute(name, arguments), ensure_ascii=False)
         if name.startswith('research.'):
-            return json.dumps(self.research.execute(name.split('.', 1)[1], arguments), ensure_ascii=False)
+            try:
+                result = self.research.execute(name.split('.', 1)[1], arguments)
+            except ResearchValidationError as error:
+                result = error.result()
+            return json.dumps(result, ensure_ascii=False)
         if name in {"memory_search", "memory_add_experience", "memory_propose_personality_edit"}:
             if self.memory_service is None:
                 raise ValueError("memory service is unavailable")

@@ -294,29 +294,23 @@ class ModelGatewayTests(unittest.TestCase):
             self.store.get_state = original_get_state
 
     def test_saved_result_reused_without_provider_call_after_personality_failure(self):
-        """A confirmed recovery result is returned directly, skipping memory context entirely."""
-        # The recovery path returns at line 150 before reaching the memory_service block.
-        # Verify that a gateway with a failing memory service can still serve saved results
-        # by testing the normal (non-recovery) path: after the first successful call,
-        # the duplicate-request guard prevents a second provider dispatch.
-        class FailingMemoryService:
-            def current_personality_context(self):
-                raise RuntimeError("FTS5 corrupted")
-        gateway = ModelGateway(
-            self.provider, self.store, "gateway-test-token",
-            memory_service=FailingMemoryService(),
-        )
-        payload = {"model": "openai/qwen/qwen3.8-flash",
-                   "messages": [{"role": "user", "content": "reuse fixture"}]}
-        status1, _ = gateway.complete("Bearer gateway-test-token", payload)
-        self.assertEqual(status1, 200)
-        self.assertEqual(len(self.provider.calls), 1)
-        # Second identical request hits the duplicate guard (reservation exists, settled).
-        # The gateway degrades personality context again but the reservation check
-        # still passes because settle_usage removed the reservation.
-        status2, _ = gateway.complete("Bearer gateway-test-token", payload)
-        self.assertEqual(status2, 200)
-        self.assertEqual(len(self.provider.calls), 2)
+        from unittest.mock import Mock
+        from test_recovery_dispatch import RecoveryDispatchTests
+        fixture = RecoveryDispatchTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        memory = Mock()
+        memory.current_personality_context.side_effect = RuntimeError('PRIVATE memory failure')
+        gateway = ModelGateway(fixture.provider, fixture.store, 'fixture-token', memory_service=memory)
+        metadata = fixture.metadata()
+        first_status, first = gateway.complete('Bearer fixture-token', fixture.payload, recovery=metadata)
+        self.assertEqual(first_status, 200)
+        second_status, second = gateway.complete('Bearer fixture-token', fixture.payload, recovery=metadata)
+        self.assertEqual((second_status, second), (200, first))
+        fixture.provider.complete.assert_called_once()
+        memory.current_personality_context.assert_called_once()
+        self.assertEqual(fixture.store.connection.execute('SELECT count(*) FROM usage').fetchone()[0], 1)
+        self.assertEqual(fixture.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
 
     def test_paused_path_makes_zero_provider_calls_with_failing_memory(self):
         class FailingMemoryService:
