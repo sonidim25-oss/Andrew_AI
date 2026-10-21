@@ -295,7 +295,7 @@ class ModelGatewayTests(unittest.TestCase):
 
     def test_saved_result_reused_without_provider_call_after_personality_failure(self):
         from unittest.mock import Mock
-        from test_recovery_dispatch import RecoveryDispatchTests
+        from prototype.tests.test_recovery_dispatch import RecoveryDispatchTests
         fixture = RecoveryDispatchTests()
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)

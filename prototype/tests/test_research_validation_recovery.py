@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from test_recovery_dispatch import RecoveryDispatchTests
+from prototype.tests.test_recovery_dispatch import RecoveryDispatchTests
 
 
 class ResearchValidationRecoveryTests(unittest.TestCase):
