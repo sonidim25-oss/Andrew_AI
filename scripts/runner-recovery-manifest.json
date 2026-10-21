@@ -13,18 +13,28 @@
   "controller": {
     "controller.py": {
       "allow_missing": false,
-      "baseline": "934f89b63a554dd3f93c9ac84a766a4e8d995c1e455a8fb31a27caee0237d544",
-      "tested": "639cb0c1d35fc82d9e0b138fb38e694abfcdb2a937a22c7a7d8959b0c9da2818"
+      "baseline": "639cb0c1d35fc82d9e0b138fb38e694abfcdb2a937a22c7a7d8959b0c9da2818",
+      "tested": "b4cb00e3c7a422bca0cb2884017e6d993d962dd9029fb03922cc927898ee07fa"
     },
     "dispatch.py": {
       "allow_missing": false,
       "baseline": "c16dd1890108ea0558bc93d9220144e61876f1597a381b7ea9b12176d8ba012c",
       "tested": "c16dd1890108ea0558bc93d9220144e61876f1597a381b7ea9b12176d8ba012c"
     },
+    "gateway.py": {
+      "allow_missing": false,
+      "baseline": "20ae309db302e4a353fb0d42367777135edb963940887d5e36b78223c88d219a",
+      "tested": "ca06c32985137e19106326426e9c902655abcb84ba6fcec86a6e389b52966868"
+    },
     "main.py": {
       "allow_missing": false,
       "baseline": "c9576320a4931f1d4c6da1263fdfd5621670156e234f9c0ef08328678d13fcb8",
       "tested": "66948b169ff443c63cde8da6b49368523d9af25f4a0727973c1b016950571c4a"
+    },
+    "memory.py": {
+      "allow_missing": false,
+      "baseline": "6487ad471523f8c064e0e07c500a90b1c3592886e454cce01c140bcc0cd00935",
+      "tested": "58583ffbed5045592166ab2ef0c9df02005880530aaa554127e968a99e740a61"
     },
     "memory_backup.py": {
       "allow_missing": false,

@@ -7,6 +7,7 @@
 - The current incident is identified: cycle `68207635b5814cd8b82b2384062c3fb4` held a `research.save` at 2026-10-20 01:45:55. Its findings had 2,116 characters against the 2,000-character limit. Exact binding/request metadata matched; no result receipt or runner mapping exists for that effect.
 - The prevention fix separates pure `research.save` argument validation from storage execution. Known validation failures become sanitized, saved tool error results, allowing correction in the same cycle. Storage/callback failures remain uncertain and are not replayed.
 - Validation: 698 controller tests passed (2 skipped), 49 focused research/gateway tests passed independently, and code review approved. One actual isolated pinned-backend test verified rejection, corrected save, terminal completion and duplicate-resume protection without real provider calls.
+- Deployment packaging independently reviewed: exactly controller.py, gateway.py and memory.py change; runner package and backend release remain unchanged. All 18 installer tests passed. Exact-host acceptance and administrator rollout are pending.
 - No production deployment, hold clearing, wake or replay has occurred for these changes. The existing held attempt still needs a separately guarded reconciliation. Owner pause and revision must remain preserved. P0 remains open.
 
 ## Current checkpoint — 2026-10-20
