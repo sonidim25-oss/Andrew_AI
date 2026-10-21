@@ -1,5 +1,7 @@
 """research.save during an authorized journaled continuation after local_recovery_interrupted."""
 import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import os
 import time
 import unittest
@@ -17,18 +19,18 @@ class ResearchRecoveryInterruptedProtocolTests(unittest.TestCase):
     prepare = protocol.LocalRecoveryProtocolTests.prepare
     command = protocol.LocalRecoveryProtocolTests.command
 
-    def run_save(self, before_resume):
+    def run_save(self, before_resume, tool='research.save', arguments=None):
         binding, input, unused = self.prepare()
         records = RecoveryRecords(self.fixture.store)
         records.revoke(unused['admission_id'])
-        input['tools'] = [{'type': 'function', 'function': {'name': 'research.save', 'parameters': {'type': 'object'}}}]
+        input['tools'] = [{'type': 'function', 'function': {'name': tool, 'parameters': {'type': 'object'}}}]
         binding['input_sha'] = digest(input)
         controller = Controller(self.fixture.store, Mock(), 17, autonomous_enabled=True)
         self.fixture.model_gateway.recovery_tool_handler = controller.execute_tool
         self.responses[0:0] = [{'id': 'save-call', 'choices': [{'index': 0, 'message': {
             'role': 'assistant', 'content': None, 'tool_calls': [{
                 'id': 'save-call', 'type': 'function', 'function': {
-                    'name': 'research.save', 'arguments': json.dumps({
+                    'name': tool, 'arguments': json.dumps(arguments if arguments is not None else {
                         'question': 'Synthetic continuation question', 'findings': 'Valid short findings.'})}}]},
             'finish_reason': 'tool_calls'}], 'usage': {'prompt_tokens': 20, 'completion_tokens': 5, 'cost': .000001}}]
         scope = records.admit_scope(binding)
@@ -81,6 +83,26 @@ class ResearchRecoveryInterruptedProtocolTests(unittest.TestCase):
         outcome = self.run_save(lambda: self.fixture.store.set_state('autonomy_error', 'provider_attempt_uncertain'))
         self.assertIn('owner_blocked', outcome.get('resume_refused', ''), outcome)
         self.assertEqual((outcome['entries'], outcome['provider_calls']), ([], 0), outcome)
+
+
+    def test_authorized_continuation_can_continue_activity(self):
+        outcome = self.run_save(
+            lambda: self.fixture.store.set_state('autonomy_error', 'local_recovery_interrupted'),
+            tool='continue_activity', arguments={})
+        self.assertEqual(outcome['phase'], 'terminal_committed', outcome)
+        self.assertEqual(outcome['admitted_tool_effects'], 0, outcome)
+        self.assertEqual(outcome['entries'], [], outcome)
+        self.assertEqual(self.fixture.store.get_state('session_start_requested'), 'agent_continue')
+
+    def test_authorized_continuation_can_sleep_with_a_confirmed_terminal_stop(self):
+        def interrupted_with_diary():
+            store = self.fixture.store
+            store.create_diary_entry(datetime.now(ZoneInfo('America/Toronto')).date().isoformat(), 'Synthetic diary.')
+            store.set_state('autonomy_error', 'local_recovery_interrupted')
+        outcome = self.run_save(interrupted_with_diary, tool='sleep', arguments={'minutes': 1})
+        self.assertEqual(outcome['phase'], 'terminal_committed', outcome)
+        self.assertEqual(outcome['admitted_tool_effects'], 0, outcome)
+        self.assertEqual(self.fixture.store.get_state('sleeping'), '1')
 
 
 if __name__ == '__main__':

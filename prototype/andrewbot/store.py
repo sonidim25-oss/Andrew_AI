@@ -453,7 +453,7 @@ class Store:
 
     @database_locked
     def save_research_entry(self, fields, record_id=None, revision=None):
-        self._research_mutation_allowed()
+        self._research_mutation_allowed('research.save')
         allowed = {'question', 'findings', 'doubts', 'next_step', 'status', 'parent_id', 'sources'}
         if set(fields) - allowed:
             raise ValueError('unsupported research fields')
@@ -497,7 +497,7 @@ class Store:
 
     @database_locked
     def focus_research_entry(self, record_id):
-        self._research_mutation_allowed()
+        self._research_mutation_allowed('research.focus')
         entry = self.research_entry(record_id)
         if entry is None or entry['status'] == 'closed':
             raise ValueError('select an existing open or paused question')
@@ -513,7 +513,7 @@ class Store:
 
     @database_locked
     def delete_research_entry(self, record_id, revision):
-        self._research_mutation_allowed()
+        self._research_mutation_allowed('research.delete')
         with self.connection:
             self.connection.execute('UPDATE research_entries SET parent_id=NULL,revision=revision+1,updated_at=? WHERE parent_id=?',
                                     (self.now(), record_id))
@@ -525,10 +525,17 @@ class Store:
             self._research_event('question_deleted', record_id)
         return True
 
-    def _research_mutation_allowed(self):
+    def _research_mutation_allowed(self, tool):
         if (self.get_state('paused', '0') == '1' or self.get_state('sleeping', '0') == '1'
-                or self.get_state('autonomy_error', '')):
+                or self._agent_error_blocks({tool})):
             raise ValueError('research journal changes cannot override owner controls or a stopped session')
+
+    def _agent_error_blocks(self, tools):
+        error = self.get_state('autonomy_error', '')
+        if error != 'local_recovery_interrupted':
+            return bool(error)
+        from .recovery_dispatch import authorized_interrupted_tool
+        return not authorized_interrupted_tool(self, tools)
 
     @database_locked
     def research_observations(self, after=0, limit=50):
@@ -849,7 +856,7 @@ class Store:
     @database_locked
     def choose_sleep(self, updates, event, owner_id, notice, now, stop_note=''):
         if (self.get_state('paused', '0') == '1' or self.get_state('sleeping', '0') == '1'
-                or self.get_state('autonomy_error', '') or self.conversation_waiting(now)
+                or self._agent_error_blocks({'sleep', 'wake_at'}) or self.conversation_waiting(now)
                 or self.pending_owner_input(owner_id)):
             raise ValueError('Stay available for owner messages; sleep is unavailable during conversation or an error')
         self.transition_state(updates, event, owner_id, notice, stop_note)
@@ -857,7 +864,7 @@ class Store:
     @database_locked
     def continue_activity_state(self):
         if (self.get_state('paused', '0') == '1' or self.get_state('sleeping', '0') == '1'
-                or self.get_state('autonomy_error', '')):
+                or self._agent_error_blocks({'continue_activity'})):
             raise ValueError('Owner controls and failed sessions cannot be overridden by an agent')
         self.transition_state({'session_start_requested': 'agent_continue'}, 'Andrew continued activity')
 

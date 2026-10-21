@@ -1,5 +1,12 @@
 # Memory update
 
+## Interrupted journaled local-tool guards — 2026-10-21
+
+- **DONE (implementation and review; NOT DEPLOYED):** Claude reproduction `7d56919` confirmed that an authorized continuation with `autonomy_error=local_recovery_interrupted` admitted `research.save`, then held it without a result because the Store rejected every autonomy error. This is a different trigger from the historical oversized research request, although both left an uncertain tool admission.
+- Recovery dispatch now supplies temporary context for the exact authorized local callback. Research save/focus/delete and sleep/wake_at/continue may accept only this interruption error, only with matching store and operation, and only after revalidating the original scope, claim, fence, owner revision, lifecycle and restore guards. Validation acquires the SQLite writer before reading authority. Context is reset even after callback failure; the recovery error is never cleared by this exception. A redundant broad continue check in controller.py now defers to the guarded Store check.
+- Nine focused authority regressions pass; 84 focused research/recovery/lifecycle/controller tests pass in total. Six actual isolated pinned-runtime tests pass, including resumed save, continue and sleep terminal confirmation plus pause and other-error controls. The original resumed-save case failed before the fix with one paid fake-provider step, no research entry and one admitted tool. Independent review approved. No full-suite rerun.
+- Existing ambiguous effects, including the production historical research.save hold, remain held. No deployment, replay or owner-state changes are part of this implementation. Release pins target the integrated `bffca82` controller baseline; its frozen rollout checkout remains unchanged.
+
 ## Proven-unsent retry exhaustion integration — 2026-10-21
 
 - **DONE (code and review; NOT DEPLOYED):** Claude `68243e2` was rebased onto worker fix `5ce3267` as `f4e0ff1`. The isolated pinned runtime established 16 failed provider dispatches over about 36 seconds before `llm_api_error`; safe legacy-mode exhaustion now schedules durable bounded retries instead of setting autonomy_error.

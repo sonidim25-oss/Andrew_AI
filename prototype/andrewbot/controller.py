@@ -475,8 +475,6 @@ class Controller:
             )
             return f"Andrew is sleeping until {target.strftime('%H:%M')} {self.timezone_name}."
         if name == "continue_activity":
-            if self.store.get_state('autonomy_error', ''):
-                raise ValueError('A failed session requires owner recovery before autonomous activity')
             queued = self.store.pending_message_count(self.owner_id)
             self.store.continue_activity_state()
             return f"Andrew is awake. {queued} owner message(s) remain saved."

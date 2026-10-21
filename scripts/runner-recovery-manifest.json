@@ -18,8 +18,8 @@
     },
     "controller.py": {
       "allow_missing": false,
-      "baseline": "639cb0c1d35fc82d9e0b138fb38e694abfcdb2a937a22c7a7d8959b0c9da2818",
-      "tested": "b4cb00e3c7a422bca0cb2884017e6d993d962dd9029fb03922cc927898ee07fa"
+      "baseline": "b4cb00e3c7a422bca0cb2884017e6d993d962dd9029fb03922cc927898ee07fa",
+      "tested": "dc0ef2add14b9f47d4e6bcacf55ac7d8df75cf455a6b9a189c8cca75ec21cab6"
     },
     "dispatch.py": {
       "allow_missing": false,
@@ -63,8 +63,8 @@
     },
     "recovery_dispatch.py": {
       "allow_missing": false,
-      "baseline": "1b30897318fd334136062a7fe99df67a5716db6f68c6a9735d73d498e7cf4e72",
-      "tested": "cd59944b86d260dc524f9d134bc208fd8dab7beacf034aae92dc608db004f3c3"
+      "baseline": "cd59944b86d260dc524f9d134bc208fd8dab7beacf034aae92dc608db004f3c3",
+      "tested": "f827070482479770f4e0d3c422706308f1229a60286c28b92b05a99cdad65ebe"
     },
     "recovery_identity.py": {
       "allow_missing": true,
@@ -143,8 +143,8 @@
     },
     "store.py": {
       "allow_missing": false,
-      "baseline": "95c7ea87eac3efcb516882ad5d2fdbb19db78ed573eb26244a8c8c5eeb0f9be7",
-      "tested": "97f63462e09bb683f7f58de64a718f95e8ddf883d5cf95ed1e6d62a5f4a97152"
+      "baseline": "97f63462e09bb683f7f58de64a718f95e8ddf883d5cf95ed1e6d62a5f4a97152",
+      "tested": "a4c1635c11f0ff49160a2634a8709bb5da54a2ecbbd9affa63b67c9927c49573"
     },
     "telegram_menu.py": {
       "allow_missing": false,
