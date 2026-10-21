@@ -267,6 +267,7 @@ class ModelGateway:
         elif not self.store.reserve_usage(reservation_id, month, day, reserved):
             self.store.add_activity('Letta model gateway blocked a repeated uncertain provider request')
             return self.uncertain_response()
+        provider_attempt = None if recovery_records is not None else self.store.record_provider_attempt(reservation_id)
 
         outbound["model"] = self.model_id
         outbound.pop("max_tokens", None)
@@ -299,16 +300,19 @@ class ModelGateway:
             if (isinstance(error, ProviderRequestError) and not error.request_sent
                     and recovery_records is None):
                 self.store.settle_usage(reservation_id, month, day, 0.0, 0, 0)
+                self.store.finish_provider_attempt(provider_attempt, 'not_reached')
                 return 503, {'error': {'message': 'Provider connection failed; request was not sent',
                                        'type': 'server_error', 'code': 'provider_not_reached'}}
             # Keep the reservation: the request may have reached the provider
             # even though its response was lost.
+            self.store.finish_provider_attempt(provider_attempt, 'uncertain')
             return self.uncertain_response()
         self.store.set_state('model_turn_progress', json.dumps({'phase': 'processing the model response', 'at': datetime.now(timezone.utc).timestamp()}))
         if not usable_provider_choices(result):
             event = 'Letta model gateway received an invalid provider response; reservation retained'
             logging.warning('%s', event)
             self.store.add_activity(event)
+            self.store.finish_provider_attempt(provider_attempt, 'uncertain')
             return self.uncertain_response()
         usage = result.get("usage") or {}
         invalid_usage = False
@@ -359,6 +363,7 @@ class ModelGateway:
                 reservation_id, month, day, max(cost, reserved if not usage else 0.0),
                 input_tokens or input_tokens_bound, output_tokens,
             )
+            self.store.finish_provider_attempt(provider_attempt, 'completed')
 
         if any(isinstance(choice, dict) and choice.get("finish_reason") == "length" for choice in result["choices"]):
             # Preserve provider truth and billing; never silently replay a paid request.

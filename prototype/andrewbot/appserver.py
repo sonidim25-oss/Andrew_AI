@@ -37,7 +37,7 @@ class LettaCommandError(RuntimeError):
 
 
 class LettaTurnError(RuntimeError):
-    CATEGORIES = frozenset({"output_token_limit", "turn_failed", "missing_assistant_text", "active_run_conflict", "provider_attempt_uncertain", "owner_reply_tools_disallowed", "context_compaction_failed", "action_outcome_uncertain"})
+    CATEGORIES = frozenset({"output_token_limit", "turn_failed", "missing_assistant_text", "active_run_conflict", "provider_attempt_uncertain", "owner_reply_tools_disallowed", "context_compaction_failed", "action_outcome_uncertain", "provider_not_reached"})
 
     def __init__(self, category, source='unknown', stop_reason=None, context_reason='unavailable'):
         self.safe_category = category if category in self.CATEGORIES else "turn_failed"
@@ -47,7 +47,7 @@ class LettaTurnError(RuntimeError):
         self.safe_source = source if source in {'input_rejected', 'stream_error', 'turn_finished', 'protocol_error'} else 'unknown'
         self.safe_stop_reason = stop_reason if stop_reason in {
             'end_turn', 'error', 'error_retry_exhausted', 'max_steps', 'max_tokens_exceeded',
-            'context_window_overflow_in_system_prompt', 'no_tool_call', 'tool_rule', 'requires_approval', 'cancelled'
+            'context_window_overflow_in_system_prompt', 'no_tool_call', 'tool_rule', 'requires_approval', 'cancelled', 'llm_api_error'
         } else 'unavailable'
         message = ("Letta completed the turn without an assistant text response"
                    if self.safe_category == "missing_assistant_text" else "Letta agent turn failed")
@@ -446,6 +446,7 @@ class AppServerClient:
         failure = False
         active_run_conflict = False
         provider_uncertain = False
+        provider_not_reached = False
         owner_pending = False
         tools_disallowed = False
         compaction_error = False
@@ -458,9 +459,10 @@ class AppServerClient:
         abort_request_id = None
         input_accepted = not getattr(self, 'require_input_ack', False)
         def classify_error(value):
-            nonlocal provider_uncertain, owner_pending, tools_disallowed, compaction_error, context_reason
+            nonlocal provider_uncertain, provider_not_reached, owner_pending, tools_disallowed, compaction_error, context_reason
             text = json.dumps(value).lower()
             provider_uncertain |= 'provider_attempt_uncertain' in text
+            provider_not_reached |= 'provider_not_reached' in text
             owner_pending |= 'owner_input_pending' in text
             tools_disallowed |= 'owner_reply_tools_disallowed' in text
             if 'system prompt and tool definitions need' in text:
@@ -586,6 +588,9 @@ class AppServerClient:
             raise LettaTurnError('provider_attempt_uncertain')
         if active_run_conflict:
             raise LettaTurnError('active_run_conflict')
+        if failure and provider_not_reached and not compaction_error:
+            # Only a hint: sessions must still match it to the gateway's durable per-attempt proof.
+            raise LettaTurnError('provider_not_reached', failure_source, final_stop_reason)
         if failure:
             raise LettaTurnError("turn_failed", failure_source, final_stop_reason)
         response = self.request({

@@ -261,6 +261,16 @@ class Store:
                 finished_at TEXT
             );
             CREATE INDEX IF NOT EXISTS cycle_tool_attempts_cycle ON cycle_tool_attempts(cycle_id,outcome);
+            CREATE TABLE IF NOT EXISTS provider_attempts (
+                attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                cycle_id TEXT NOT NULL,
+                reservation_id TEXT NOT NULL,
+                outcome TEXT NOT NULL CHECK(outcome IN ('dispatching','not_reached','completed','uncertain')),
+                created_at TEXT NOT NULL,
+                finished_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS provider_attempts_cycle ON provider_attempts(cycle_id,outcome);
             CREATE TABLE IF NOT EXISTS external_action_receipts (
                 action_id TEXT PRIMARY KEY,
                 adapter TEXT NOT NULL,
@@ -1347,7 +1357,131 @@ class Store:
                 self._research_event('cycle_finished', outcome=status, session_id=session, cycle_id=cycle_id)
                 if status in {'complete', 'stopped'} and self.get_state('active_cycle_id', '') == cycle_id:
                     self.connection.execute("DELETE FROM state WHERE key='active_cycle_id'")
+                if status == 'complete':
+                    self.connection.execute("DELETE FROM state WHERE key='provider_retry_streak'")
             return cursor.rowcount == 1
+
+    PROVIDER_RETRY_DELAYS = (60, 120, 240, 480, 960, 1800)
+    _RESTORE_FENCES = ('restore_recovery_required', 'local_recovery_restore_required')
+
+    @database_locked
+    def record_provider_attempt(self, reservation_id):
+        """Attribute one legacy gateway dispatch to the running autonomous cycle, if any."""
+        with self.connection:
+            cycle_id = self.get_state('active_cycle_id', '')
+            session_id = self.get_state('active_session_id', '')
+            if not (cycle_id and session_id and self.get_state('autonomous_owner_id', '')):
+                return None
+            return self.connection.execute(
+                "INSERT INTO provider_attempts(session_id,cycle_id,reservation_id,outcome,created_at) "
+                "VALUES(?,?,?,'dispatching',?)", (session_id, cycle_id, reservation_id, self.now())).lastrowid
+
+    @database_locked
+    def finish_provider_attempt(self, attempt_id, outcome):
+        if attempt_id is None:
+            return
+        if outcome not in {'not_reached', 'completed', 'uncertain'}:
+            raise ValueError('invalid provider attempt outcome')
+        with self.connection:
+            self.connection.execute(
+                "UPDATE provider_attempts SET outcome=?,finished_at=? WHERE attempt_id=? AND outcome='dispatching'",
+                (outcome, self.now(), attempt_id))
+
+    def _unsent_cycle_proven(self, session_id, cycle_id, owner_id):
+        """Caller holds the lock and transaction. Every check must pass, or the normal stop applies."""
+        state = dict(self.connection.execute('SELECT key,value FROM state').fetchall())
+        if (state.get('active_session_id', '') != session_id or state.get('active_cycle_id', '') != cycle_id
+                or state.get('autonomy_error', '') or state.get('paused', '0') == '1' or state.get('sleeping', '0') == '1'
+                or any(state.get(key, '0') == '1' for key in self._RESTORE_FENCES)):
+            return False
+        cycle = self.connection.execute("SELECT 1 FROM cycles WHERE cycle_id=? AND session_id=? AND status='running'",
+                                        (cycle_id, session_id)).fetchone()
+        checkpoint = self.connection.execute('SELECT owner_revision FROM cycle_recovery_checkpoints WHERE cycle_id=?',
+                                             (cycle_id,)).fetchone()
+        if not cycle or not checkpoint or checkpoint[0] != state.get('owner_control_revision', '0'):
+            return False
+        attempts = self.connection.execute('SELECT session_id,reservation_id,outcome FROM provider_attempts WHERE cycle_id=?',
+                                           (cycle_id,)).fetchall()
+        if not attempts or any(row[0] != session_id or row[2] != 'not_reached' for row in attempts):
+            return False
+        if self.connection.execute(
+                'SELECT 1 FROM budget_reservations WHERE reservation_id IN (SELECT reservation_id FROM provider_attempts WHERE cycle_id=?) LIMIT 1',
+                (cycle_id,)).fetchone():
+            return False
+        if self.connection.execute('SELECT 1 FROM cycle_tool_attempts WHERE cycle_id=? LIMIT 1', (cycle_id,)).fetchone():
+            return False
+        if self.connection.execute("SELECT 1 FROM model_turn_receipts WHERE cycle_id=? AND state='completed'", (cycle_id,)).fetchone():
+            return False
+        if self.connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='recovery_attempts'").fetchone() and \
+                self.connection.execute("SELECT 1 FROM recovery_attempts WHERE json_extract(binding_json,'$.session_id')=? LIMIT 1",
+                                        (session_id,)).fetchone():
+            return False
+        return not self.connection.execute(
+            "SELECT 1 FROM messages WHERE owner_id=? AND role='user' AND queued=3 LIMIT 1", (owner_id,)).fetchone()
+
+    def _put_state(self, updates):
+        for key, value in updates.items():
+            self.connection.execute('INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                                    (key, str(value)))
+
+    @database_locked
+    def schedule_unsent_provider_retry(self, session_id, cycle_id, owner_id, now):
+        """End a cycle whose every provider attempt is proven unsent and schedule a backoff restart.
+
+        Returns the retry time, or None when the proof is incomplete or the backoff is exhausted.
+        """
+        with self.connection:
+            if not self._unsent_cycle_proven(session_id, cycle_id, owner_id):
+                return None
+            streak = int(self.get_state('provider_retry_streak', '0') or '0')
+            if streak >= len(self.PROVIDER_RETRY_DELAYS):
+                return None
+            retry_at = now.astimezone(timezone.utc) + timedelta(seconds=self.PROVIDER_RETRY_DELAYS[streak])
+            self.connection.execute("UPDATE cycles SET status='failed',ended_at=? WHERE cycle_id=? AND status='running'",
+                                    (self.now(), cycle_id))
+            self._research_event('cycle_finished', outcome='failed', session_id=session_id, cycle_id=cycle_id)
+            self.connection.execute("DELETE FROM state WHERE key='active_cycle_id' AND value=?", (cycle_id,))
+            self._put_state({'active_session_id': '', 'active_session_started_at': '',
+                             'active_session_status': 'provider_unreachable',
+                             'session_start_requested': 'provider_retry',
+                             'provider_retry_at': retry_at.isoformat(timespec='seconds'),
+                             'provider_retry_owner_revision': self.get_state('owner_control_revision', '0'),
+                             'provider_retry_streak': str(streak + 1)})
+            self.connection.execute('INSERT INTO activity(event,created_at) VALUES(?,?)', (
+                f'Provider unreachable before any request was sent; autonomous retry {streak + 1} scheduled', self.now()))
+            return retry_at
+
+    @database_locked
+    def start_provider_retry_session(self, session_id, now, owner_id):
+        """Atomically start a due provider retry, or cancel it if the owner or lifecycle changed."""
+        with self.connection:
+            state = dict(self.connection.execute('SELECT key,value FROM state').fetchall())
+            if state.get('session_start_requested', '') != 'provider_retry':
+                return False
+            try:
+                retry_at = datetime.fromisoformat(state.get('provider_retry_at', ''))
+                valid = retry_at.tzinfo is not None
+            except ValueError:
+                valid = False
+            if valid and now < retry_at:
+                return False
+            if (not valid or state.get('owner_control_revision', '0') != state.get('provider_retry_owner_revision')
+                    or state.get('paused', '0') == '1' or state.get('sleeping', '0') == '1'
+                    or state.get('autonomy_error', '') or state.get('active_session_id', '')
+                    or any(state.get(key, '0') == '1' for key in self._RESTORE_FENCES)):
+                self._put_state({'session_start_requested': '', 'provider_retry_at': ''})
+                self.connection.execute('INSERT INTO activity(event,created_at) VALUES(?,?)', (
+                    'Scheduled provider retry cancelled by an owner control or lifecycle change', self.now()))
+                return False
+            if self.pending_owner_input(owner_id):
+                return False
+            self._put_state({'active_session_id': session_id,
+                             'active_session_started_at': now.astimezone(timezone.utc).isoformat(timespec='seconds'),
+                             'active_session_status': 'running', 'session_start_requested': '',
+                             'session_recovery_checkpoint': '', 'provider_retry_at': ''})
+            self.connection.execute('INSERT INTO activity(event,created_at) VALUES(?,?)',
+                                    ('Autonomous session started (provider_retry)', self.now()))
+            return True
 
     @database_locked
     def cycle_count(self, local_day):

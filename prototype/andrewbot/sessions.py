@@ -78,6 +78,23 @@ class SessionRunner:
         if interrupted:
             self.store.add_activity(f"Interrupted {interrupted} unfinished autonomous cycle(s) during recovery")
 
+    def _schedule_unsent_retry(self, error, session_id, cycle_id, now):
+        recovery = getattr(self.agent, 'local_recovery', None)
+        if (not isinstance(error, LettaTurnError) or error.safe_category != 'provider_not_reached'
+                or (recovery is not None and getattr(recovery, 'enabled', False))):
+            return False
+        try:
+            retry_at = self.store.schedule_unsent_provider_retry(session_id, cycle_id, self.controller.owner_id, now)
+        except Exception:
+            logging.warning('Unsent provider retry could not be scheduled; retaining failure handling')
+            return False
+        if retry_at is None:
+            return False
+        logging.warning('Provider unreachable before sending; autonomous retry scheduled')
+        self.active_session_id = ''
+        self.started_at = None
+        return True
+
     def _record_incident(self, session_id, reason, started_at=""):
         zone = ZoneInfo("America/Toronto")
         try:
@@ -154,7 +171,13 @@ class SessionRunner:
             trigger = self.store.get_state("session_start_requested", "")
             if not trigger:
                 return False
-            if not self.start(trigger, current):
+            if trigger == 'provider_retry':
+                session_id = uuid.uuid4().hex
+                if not self.store.start_provider_retry_session(session_id, current, self.controller.owner_id):
+                    return False
+                self.active_session_id = session_id
+                self.started_at = current
+            elif not self.start(trigger, current):
                 self.store.clear_session_request(trigger, revision)
                 return False
         return self.run_cycle(self.active_session_id, current)
@@ -247,6 +270,8 @@ class SessionRunner:
                         return False
             except Exception:
                 logging.warning('Completed-turn recovery could not be persisted; retaining failure handling')
+            if cycle_started and stage == 'agent_turn' and self._schedule_unsent_retry(error, session_id, cycle_id, current):
+                return False
             # Use fixed categories: exception messages can contain credentials,
             # provider payloads, or private conversation content.
             category = "unexpected_error"
