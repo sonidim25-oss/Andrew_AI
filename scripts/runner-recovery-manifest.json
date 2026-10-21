@@ -19,12 +19,12 @@
     "controller.py": {
       "allow_missing": false,
       "baseline": "51c41be72a13d6c0be0992e55ddc1c9cb99c687aa5b0346b7d97d92e2c7a9694",
-      "tested": "51c41be72a13d6c0be0992e55ddc1c9cb99c687aa5b0346b7d97d92e2c7a9694"
+      "tested": "6a156522eb6e815502c476f20827cfe48eb7c9678ef375465448a005cb1bbb3d"
     },
     "dispatch.py": {
       "allow_missing": false,
       "baseline": "b2c70e4db94bd46529d07de2b83a10e206ab15f67613a45f06b0be3f5e135159",
-      "tested": "b2c70e4db94bd46529d07de2b83a10e206ab15f67613a45f06b0be3f5e135159"
+      "tested": "d472a67ee208b323e80a0ba84bcaeded4922267917211348c21e0160eadb3dc6"
     },
     "gateway.py": {
       "allow_missing": false,
@@ -39,7 +39,7 @@
     "main.py": {
       "allow_missing": false,
       "baseline": "66948b169ff443c63cde8da6b49368523d9af25f4a0727973c1b016950571c4a",
-      "tested": "66948b169ff443c63cde8da6b49368523d9af25f4a0727973c1b016950571c4a"
+      "tested": "a586b0ff74eebd2455545d21a41dd1598325817cc0fab4020b9bd85db78d3268"
     },
     "media.py": {
       "allow_missing": false,
@@ -153,8 +153,8 @@
     },
     "store.py": {
       "allow_missing": false,
-      "baseline": "a1f55c6e5a0ac9c99058fd602af5d1905a4e23778095a3b1c964205bffd748b7",
-      "tested": "c476403c9aeb562517cf5b887c867b1b0239ac214bcd6f39517b36919cee9221"
+      "baseline": "c476403c9aeb562517cf5b887c867b1b0239ac214bcd6f39517b36919cee9221",
+      "tested": "f22290aa32c61cc6c4302923cc6f91a030740f5815320337c86847e40df7f12f"
     },
     "telegram.py": {
       "allow_missing": false,
