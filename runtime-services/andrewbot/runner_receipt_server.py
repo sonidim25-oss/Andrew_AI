@@ -76,8 +76,12 @@ async def _run_and_save(server, identity, request, cancel_event):
     try:
         response = await _durable(server.runner.run, request, cancel_event)
         cleanup_verified = getattr(server.runner, 'cleanup_verified', False) is True
+        if not cleanup_verified:
+            server._cleanup_failed = True
         return await _persist(server,server.receipts.finish, identity, response, cleanup_verified=cleanup_verified)
     except Exception:
+        if getattr(server.runner, 'cleanup_verified', False) is not True:
+            server._cleanup_failed = True
         await _persist(server,server.receipts.mark_uncertain, identity)
         raise _failure() from None
 
@@ -89,7 +93,7 @@ async def _execute(server, reader, writer, identity, request):
     if old.state != 'missing':
         await _send(writer, old.to_dict())
         return
-    if not server.receipts_enabled or server._busy or server._receipt_storage_failed:
+    if not server.receipts_enabled or server._busy or not server._worker_available():
         raise _failure()
     server._busy = True
     try:
@@ -97,6 +101,8 @@ async def _execute(server, reader, writer, identity, request):
         if not prepared.created:
             await _send(writer, prepared.evidence.to_dict())
             return
+        if not server._worker_available():
+            raise _failure()
         ready = envelope('ready', operation_sha=digest(identity.to_dict()), challenge=secrets.token_hex(32))
         await _send(writer, ready)
         document = await asyncio.wait_for(read_frame_async(reader, limit=MAX_METADATA_BYTES), 5)
@@ -105,10 +111,14 @@ async def _execute(server, reader, writer, identity, request):
         grant = validate_grant(document['grant'])
         _live_grant(grant, ready)
         await _no_extra_input(reader)
+        if not server._worker_available():
+            raise _failure()
         await _persist(server,server.receipts.admit, identity)
         try:
             _live_grant(grant, ready)
             await _no_extra_input(reader)
+            if not server._worker_available():
+                raise _failure()
         except BaseException:
             await _persist(server,server.receipts.mark_uncertain, identity)
             raise
@@ -148,7 +158,7 @@ async def handle_receipt(server, request, reader, writer):
     action = validate_envelope(request)
     if action == 'capabilities':
         capabilities = await asyncio.to_thread(server.receipts.capabilities)
-        await _send(writer, {**capabilities, 'execution_enabled': server.receipts_enabled and not server._receipt_storage_failed})
+        await _send(writer, {**capabilities, 'execution_enabled': server.receipts_enabled and server._worker_available()})
     elif action == 'lookup':
         identity = validate_identity(request['identity'])
         evidence = await asyncio.to_thread(server.receipts.lookup, identity)

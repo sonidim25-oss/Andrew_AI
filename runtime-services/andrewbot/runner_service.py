@@ -173,6 +173,11 @@ class RunnerSocketServer:
         self.receipts_enabled = receipts_enabled
         self._busy = False
         self._receipt_storage_failed = False
+        self._cleanup_failed = False
+
+    def _worker_available(self):
+        return (not self._receipt_storage_failed and not self._cleanup_failed
+                and getattr(self.runner, 'healthy', True) is True)
 
     async def handle(self, reader, writer):
         try:
@@ -186,7 +191,7 @@ class RunnerSocketServer:
             if wire_size > MAX_REQUEST_BYTES:
                 raise ValueError('runner request exceeded protocol limits')
             encode_frame(request, limit=MAX_REQUEST_BYTES)
-            if self._busy or self._receipt_storage_failed:
+            if self._busy or not self._worker_available():
                 result = {"status": "error", "stdout": "", "stderr": "", "artifacts": [], "safe_error": "worker_unavailable"}
             else:
                 self._busy = True
