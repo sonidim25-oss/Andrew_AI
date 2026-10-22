@@ -1,4 +1,7 @@
 import json
+import copy
+import hashlib
+import re
 import http.client
 import math
 import time
@@ -102,6 +105,71 @@ def retry_after_seconds(value):
         return None
 
 
+_WIRE_TOOL_PREFIX = '__andrew_wire_'
+_WIRE_TOOL_NAME = re.compile(r'[a-zA-Z0-9_-]{1,64}')
+
+
+def _tool_name_slots(payload):
+    """Yield only protocol tool-name dictionaries, never user content or arguments."""
+    for tool in payload.get('tools') or []:
+        if isinstance(tool, dict) and isinstance(tool.get('function'), dict):
+            yield tool['function']
+    choice = payload.get('tool_choice')
+    if isinstance(choice, dict) and isinstance(choice.get('function'), dict):
+        yield choice['function']
+    for message in payload.get('messages') or []:
+        if not isinstance(message, dict):
+            continue
+        if message.get('role') == 'tool':
+            yield message
+        if message.get('role') == 'assistant':
+            for call in message.get('tool_calls') or []:
+                if isinstance(call, dict) and isinstance(call.get('function'), dict):
+                    yield call['function']
+
+
+def _wire_tool_names(payload):
+    """Use request-local aliases without changing canonical gateway identities."""
+    payload = copy.deepcopy(payload)
+    slots = list(_tool_name_slots(payload))
+    names = {slot['name'] for slot in slots if isinstance(slot.get('name'), str)}
+    occupied = set(names)
+    aliases = {}
+    for name in sorted(names):
+        if _WIRE_TOOL_NAME.fullmatch(name):
+            continue
+        attempt = 0
+        while True:
+            material = name if attempt == 0 else name + '\0' + str(attempt)
+            alias = _WIRE_TOOL_PREFIX + hashlib.sha256(material.encode('utf-8')).hexdigest()[:48]
+            if alias not in occupied:
+                break
+            attempt += 1
+        occupied.add(alias)
+        aliases[name] = alias
+    for slot in slots:
+        if isinstance(slot.get('name'), str) and slot['name'] in aliases:
+            slot['name'] = aliases[slot['name']]
+    return payload, {alias: name for name, alias in aliases.items()}, names
+
+
+def _restore_tool_names(data, aliases, canonical_names):
+    for choice in data['choices']:
+        if not isinstance(choice, dict) or not isinstance(choice.get('message'), dict):
+            continue
+        for call in choice['message'].get('tool_calls') or []:
+            if not isinstance(call, dict) or not isinstance(call.get('function'), dict):
+                continue
+            function = call['function']
+            name = function.get('name')
+            if not isinstance(name, str):
+                continue
+            if name in aliases:
+                function['name'] = aliases[name]
+            elif name.startswith(_WIRE_TOOL_PREFIX) and name not in canonical_names:
+                raise ProviderRequestError('invalid_response')
+
+
 class OpenRouterModel:
     endpoint = "https://openrouter.ai/api/v1/chat/completions"
     model_id = "qwen/qwen3.8-flash"
@@ -183,6 +251,10 @@ class OpenRouterModel:
 
     def complete(self, payload):
         payload = dict(payload)
+        aliases, canonical_names = {}, set()
+        openai_names = self.model_id.startswith('openai/')
+        if openai_names:
+            payload, aliases, canonical_names = _wire_tool_names(payload)
         payload["model"] = self.model_id
         payload["stream"] = False
         request = urllib.request.Request(
@@ -211,4 +283,6 @@ class OpenRouterModel:
             raise ProviderRequestError('network_error') from None
         if not isinstance(data, dict) or not isinstance(data.get("choices"), list):
             raise ProviderRequestError('invalid_response')
+        if openai_names:
+            _restore_tool_names(data, aliases, canonical_names)
         return data

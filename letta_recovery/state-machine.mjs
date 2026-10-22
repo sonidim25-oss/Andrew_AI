@@ -34,7 +34,7 @@ export function transition(previous,event){
  }
  case 'provider_retry':{
   requirePhase('provider_backoff');const item=state.steps.at(-1);
-  if(item.effect_id!==event.effect_id||item.state!=='rejected')throw Error('invalid transition');
+  if(item.effect_id!==event.effect_id||item.state!=='rejected'||item.rejection?.retryable===false)throw Error('invalid transition');
   item.state='admitted';state.phase='provider_admitted';break;
  }
  case 'tool_prepare':{

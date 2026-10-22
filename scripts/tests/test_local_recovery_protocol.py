@@ -352,6 +352,45 @@ class LocalRecoveryProtocolTests(unittest.TestCase):
             self.assertEqual(len(results),1)
             self.assertFalse(json.loads(results[0]['content'])['executed'])
 
+    def test_invalid_legacy_tool_name_can_be_closed_without_retrying_provider(self):
+        from andrewbot.model import ProviderRequestError
+        agent,controller,coordinator,runner=self.coordinated_agent();store=self.fixture.store
+        class InvalidFirst(list):
+            first=True
+            def pop(self,index=-1):
+                if self.first:
+                    self.first=False
+                    raise ProviderRequestError('http_error',400)
+                return super().pop(index)
+        self.responses=InvalidFirst(self.responses)
+        session=runner.start('owner_wake',datetime.now(timezone.utc))
+        self.assertFalse(runner.run_cycle(session))
+        self.assertEqual(len(self.fixture.provider_calls),1)
+        owner={'from':{'id':17},'chat':{'id':17,'type':'private'}}
+        controller.handle_update({'message':{**owner,'text':'/pause'}})
+        row=store.connection.execute('SELECT * FROM recovery_attempts ORDER BY rowid DESC LIMIT 1').fetchone()
+        binding=json.loads(row['binding_json'])
+        effect=store.connection.execute("SELECT * FROM recovery_effects WHERE binding_sha=? AND kind='provider'",(row['binding_sha'],)).fetchone()
+        directory=next(self.fixture.root.rglob('local-recovery-v1'))
+        checkpoint=next(path for path in (directory/'conversations').glob('*.json') if len(path.stem)==64)
+        snapshot=json.loads(checkpoint.read_text())
+        request=json.loads((directory/'blobs'/checkpoint.stem/snapshot['steps'][-1]['request_ref']).read_text())
+        activity=store.connection.execute("SELECT id FROM activity WHERE event='Letta model gateway provider request failed (category=http_error, http_status=400)' ORDER BY id DESC LIMIT 1").fetchone()[0]
+        evidence={'http_status':400,'type':'invalid_request_error','code':'invalid_value','parameter':'tools[9].name',
+                  'pattern':'^[a-zA-Z0-9_-]+$','diagnostic_sha':'d'*64,'activity_id':activity,'adapter':'unmapped_tool_names_v1'}
+        coordinator.records.revoke(row['admission_id'])
+        proof=coordinator.records.reject_invalid_tool_names(effect['admission_id'],request,evidence)
+        self.assertFalse(proof['retryable'])
+        coordinator.records.revoke(row['admission_id'])
+        self.assertTrue(coordinator.close_superseded())
+        state=self.command('recovery_inspect',binding=binding)
+        self.assertEqual(state['phase'],'terminal_committed');self.assertTrue(state['terminal']['acknowledged'])
+        self.assertTrue(state['terminal']['settled']);self.assertFalse(coordinator.has_pending())
+        self.assertEqual(len(self.fixture.provider_calls),1)
+        controller.handle_update({'message':{**owner,'text':'/wake'}})
+        reply,_=agent.reply([{'role':'user','content':'Fresh turn after permanent rejection.'}])
+        self.assertEqual(reply,'Persisted fixture answer.');self.assertEqual(len(self.fixture.provider_calls),2)
+
     def test_owner_arriving_during_autonomy_yields_without_replaying_prepared_tool(self):
         agent,controller,coordinator,runner=self.coordinated_agent();store=self.fixture.store
         self.responses.insert(0,{'id':'interrupted-step','choices':[{'index':0,'message':{'role':'assistant','content':None,

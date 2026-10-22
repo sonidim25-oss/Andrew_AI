@@ -337,9 +337,12 @@
       ],
       "372a77e2b83109f19d901681d839509257c78b02af6c656f6d18bf6b520af51d": [
         "d22b891-pre-provider-backoff"
+      ],
+      "8216b290b258e102a4793149e9009497d4880f43c704423bd947a2982303c1b8": [
+        "f304537-installed-owner-cancel-closure"
       ]
     },
-    "tested": "8216b290b258e102a4793149e9009497d4880f43c704423bd947a2982303c1b8"
+    "tested": "9628a7532d15f015af49edd5e023c6d23dc94bc6600dc3199f7cd5d62f4203b6"
   },
   "process_limits.py": {
     "original": "882f32d92829068265f22c3eeef94efec1da1e06fbbc3f7f6cfe1eff8b32b135",
@@ -400,9 +403,12 @@
       ],
       "d05a72a10d3be606a9377705c59895a9d4ec31718dc20dc527e615f811320663": [
         "93815b9-installed-process-cleanup"
+      ],
+      "fc9197922800b6acfc99817010fe056db96e3aeeb3d9618caee2fe63d9059af1": [
+        "f304537-installed-owner-cancel-closure"
       ]
     },
-    "tested": "fc9197922800b6acfc99817010fe056db96e3aeeb3d9618caee2fe63d9059af1"
+    "tested": "82a3524fb49f76875ed71977b8c6cfec4afc33647ac7d41c8899431fa3af79d2"
   },
   "runner_client.py": {
     "original": "c49bf7290f85b816b9fd057dde7372beaa8f128b77e5f7ce372eb929fa0d71f6",

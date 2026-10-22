@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import math
+import re
 import secrets
 import uuid
 import time
@@ -40,6 +41,10 @@ def initialize_schema(store):
             admission_id TEXT PRIMARY KEY REFERENCES recovery_effects(admission_id),
             result_sha TEXT NOT NULL,result_json TEXT NOT NULL,usage_json TEXT,created_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS recovery_provider_rejections'''+PROVIDER_REJECTIONS+''';
+        CREATE TABLE IF NOT EXISTS recovery_provider_validation_rejections(
+            admission_id TEXT PRIMARY KEY REFERENCES recovery_effects(admission_id),
+            request_sha TEXT NOT NULL,proof_json TEXT NOT NULL,evidence_json TEXT NOT NULL,
+            invalid_paths_json TEXT NOT NULL,conservative_cost_usd REAL NOT NULL,created_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS recovery_owner_yields(
             binding_sha TEXT PRIMARY KEY,receipt_id TEXT NOT NULL UNIQUE,
             admission_ids_json TEXT NOT NULL,created_at TEXT NOT NULL,
@@ -280,7 +285,7 @@ class RecoveryRecords:
             row=self._validate_dispatch(metadata,request,{'provider','compaction'})
             if row['state']=='rejected':
                 rejection=self._provider_rejection(row['admission_id'])
-                if rejection is None or rejection['retry_at_ms']>int(time.time()*1000):return None
+                if rejection is None or rejection.get('retryable') is False or rejection['retry_at_ms']>int(time.time()*1000):return None
             elif row['state']!='prepared':return None
             reservation_id='local-recovery-'+row['admission_id']
             self.store.connection.execute('INSERT INTO budget_reservations VALUES(?,?,?,?,?)',(reservation_id,month,day,reserved,self.store.now()))
@@ -288,6 +293,13 @@ class RecoveryRecords:
             return reservation_id
 
     def _provider_rejection(self,admission_id):
+        permanent=self.store.connection.execute('SELECT * FROM recovery_provider_validation_rejections WHERE admission_id=?',(admission_id,)).fetchone()
+        if permanent is not None:
+            proof=json.loads(permanent['proof_json']);evidence=json.loads(permanent['evidence_json'])
+            effect=self.store.connection.execute('SELECT request_sha FROM recovery_effects WHERE admission_id=?',(admission_id,)).fetchone()
+            if (effect is None or effect['request_sha']!=permanent['request_sha'] or proof.get('evidence_sha')!=digest(evidence)
+                    or proof.get('reason')!='invalid_tool_name' or proof.get('retryable') is not False):raise ValueError('Recovery state_corrupt')
+            return proof
         row=self.store.connection.execute('SELECT * FROM recovery_provider_rejections WHERE admission_id=? ORDER BY attempt DESC LIMIT 1',(admission_id,)).fetchone()
         if row is None:return None
         rejection=dict(row)
@@ -324,6 +336,61 @@ class RecoveryRecords:
             delay=max(5*2**min(attempt-1,6),retry_after or 0)
             now=int(time.time()*1000);retry_at=now+math.ceil(delay*1000)
             self.store.connection.execute('INSERT INTO recovery_provider_rejections(admission_id,attempt,http_status,rejected_at_ms,retry_at_ms,reason) VALUES(?,?,?,?,?,?)',(admission_id,attempt,http_status,now,retry_at,reason))
+            self.store.connection.execute('DELETE FROM budget_reservations WHERE reservation_id=?',(row['reservation_id'],))
+            self.store.connection.execute("UPDATE recovery_effects SET state='rejected',reservation_id=NULL WHERE admission_id=?",(admission_id,))
+            return self.effect_result(admission_id)
+
+    def reject_invalid_tool_names(self,admission_id,request,evidence):
+        """Offline owner reconciliation of a proven legacy wire-name rejection.
+
+        This is not exposed by the HTTP gateway. The exact request, observed
+        historical HTTP400 and captured validation diagnostic must agree. Cost
+        stays conservative: consume the full provisional reservation as an
+        estimate, never assert zero billing. This receipt never permits retry.
+        """
+        keys={'http_status','type','code','parameter','pattern','diagnostic_sha','activity_id','adapter'}
+        if (not isinstance(evidence,dict) or set(evidence)!=keys or evidence['http_status']!=400
+                or evidence['type']!='invalid_request_error' or evidence['code']!='invalid_value'
+                or not isinstance(evidence['parameter'],str) or not re.fullmatch(r'(?:input|tools)\[\d+\]\.name',evidence['parameter'])
+                or evidence['pattern']!='^[a-zA-Z0-9_-]+$' or evidence['adapter']!='unmapped_tool_names_v1'
+                or not isinstance(evidence['diagnostic_sha'],str) or not HASH.fullmatch(evidence['diagnostic_sha'])
+                or type(evidence['activity_id']) is not int or evidence['activity_id']<1):raise ValueError('Invalid validation evidence')
+        if not isinstance(request,dict):raise ValueError('Recovery binding_mismatch')
+        names=[]
+        for index,tool in enumerate(request.get('tools',[])):
+            names.append((f'tools[{index}].function.name',tool.get('function',{}).get('name')))
+        for index,message in enumerate(request.get('messages',[])):
+            for offset,call in enumerate(message.get('tool_calls') or []):
+                names.append((f'messages[{index}].tool_calls[{offset}].function.name',call.get('function',{}).get('name')))
+        invalid=[{'path':path,'name_sha':digest(name)} for path,name in names if not isinstance(name,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',name)]
+        if not invalid:raise ValueError('No invalid legacy wire name')
+        with self.store._lock,self.store.connection:
+            self.store.connection.execute('BEGIN IMMEDIATE')
+            row=self.store.connection.execute('SELECT * FROM recovery_effects WHERE admission_id=?',(admission_id,)).fetchone()
+            if row is None or row['kind']!='provider' or row['request_sha']!=digest(request):raise ValueError('Recovery binding_mismatch')
+            scope=self.store.connection.execute('SELECT * FROM recovery_attempts WHERE admission_id=?',(row['scope_id'],)).fetchone()
+            if scope is None or scope['origin']!='autonomous' or scope['untrusted'] or scope['state'] not in ('held','revoked'):raise ValueError('Recovery owner_blocked')
+            binding=validate_binding(json.loads(scope['binding_json']))
+            state=dict(self.store.connection.execute('SELECT key,value FROM state'))
+            if (state.get('paused')!='1' or not superseded_owner_yield(state,binding)
+                    or (self.store.path.parent/'runner-restore-required.json').exists()):raise ValueError('Recovery owner_blocked')
+            activity=self.store.connection.execute('SELECT * FROM activity WHERE id=?',(evidence['activity_id'],)).fetchone()
+            expected='Letta model gateway provider request failed (category=http_error, http_status=400)'
+            if activity is None or activity['event']!=expected or activity['created_at']<row['created_at']:raise ValueError('Missing historical rejection evidence')
+            old=self.store.connection.execute('SELECT evidence_json FROM recovery_provider_validation_rejections WHERE admission_id=?',(admission_id,)).fetchone()
+            if old is not None:
+                if old['evidence_json']!=canonical(evidence):raise ValueError('Recovery binding_mismatch')
+                return self.effect_result(admission_id)
+            if row['state']!='admitted':raise ValueError('Recovery provider_uncertain')
+            reservation=self.store.connection.execute('SELECT * FROM budget_reservations WHERE reservation_id=?',(row['reservation_id'],)).fetchone()
+            if reservation is None:raise ValueError('Recovery provider_uncertain')
+            previous=self._provider_rejection(admission_id);now=int(time.time()*1000)
+            proof={'reason':'invalid_tool_name','http_status':400,'attempt':previous['attempt']+1 if previous else 1,
+                   'rejected_at_ms':now,'retry_at_ms':now,'retryable':False,'validation_rule':'function_name_pattern_v1','evidence_sha':digest(evidence)}
+            self.store.connection.execute('INSERT INTO recovery_provider_validation_rejections VALUES(?,?,?,?,?,?,?)',
+                (admission_id,row['request_sha'],canonical(proof),canonical(evidence),canonical(invalid),reservation['cost_usd'],self.store.now()))
+            self.store.connection.execute('INSERT INTO usage(month,day,cost_usd,input_tokens,output_tokens,created_at) VALUES(?,?,?,?,?,?)',
+                (reservation['month'],reservation['day'],reservation['cost_usd'],0,0,self.store.now()))
             self.store.connection.execute('DELETE FROM budget_reservations WHERE reservation_id=?',(row['reservation_id'],))
             self.store.connection.execute("UPDATE recovery_effects SET state='rejected',reservation_id=NULL WHERE admission_id=?",(admission_id,))
             return self.effect_result(admission_id)

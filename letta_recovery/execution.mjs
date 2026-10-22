@@ -150,6 +150,7 @@ export class RecoveryExecution{
   }
   if(state.phase==='provider_admitted')return this._confirm(binding,claim,state.steps.at(-1).kind??'provider',state.steps.at(-1));
   if(state.phase==='provider_backoff'){
+   if(state.steps.at(-1)?.rejection?.retryable===false)return this._hold(binding,claim,'owner_blocked');
    if(this.sdk.checkScope)await this.sdk.checkScope(binding,this.ownership.currentClaim(claim));
    const item=state.steps.at(-1),kind=item.kind??'provider';
    let proof;try{proof=await this.gate.result({admission_id:item.admission_id,binding,effect_id:item.effect_id,kind});}catch{throw Error('authority_lost');}

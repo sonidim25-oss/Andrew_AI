@@ -58,7 +58,7 @@ export const sameBinding=(left,right)=>canonical(validateBinding(left))===canoni
 // An explicit HTTP 429, or a transport failure the controller proved happened
 // before any request byte left. Receipts without a reason are HTTP 429 only.
 export function validRejection(proof,item){
- const typed=proof?.reason===undefined?proof?.http_status===429:proof?.reason==='provider_not_reached'&&proof.http_status===null;
+ const typed=proof?.reason===undefined?proof?.http_status===429:(proof?.reason==='provider_not_reached'&&proof.http_status===null)||(proof?.reason==='invalid_tool_name'&&proof.http_status===400&&proof.retryable===false&&proof.validation_rule==='function_name_pattern_v1'&&/^[a-f0-9]{64}$/.test(proof.evidence_sha??''));
  return proof?.state==='rejected'&&typed&&proof.admission_id===item.admission_id&&proof.request_sha===item.request_sha
   &&Number.isSafeInteger(proof.attempt)&&proof.attempt>0&&Number.isSafeInteger(proof.rejected_at_ms)&&proof.rejected_at_ms>=0
   &&Number.isSafeInteger(proof.retry_at_ms)&&proof.retry_at_ms>=proof.rejected_at_ms;

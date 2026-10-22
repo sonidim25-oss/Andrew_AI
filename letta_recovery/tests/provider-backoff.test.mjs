@@ -81,3 +81,18 @@ test('not_reached_receipt_requires_its_exact_typed_shape',async t=>{
   assert.equal(f.store.load(f.binding).phase,'held',JSON.stringify(kind));assert.equal(f.counts.provider,1);
  }
 });
+
+test('invalid_tool_name_rejection_can_yield_but_never_authorizes_provider_retry',async t=>{
+ const f=await executionFixture(t);rejectOnce(f,{kind:{http_status:400,reason:'invalid_tool_name',retryable:false,
+  validation_rule:'function_name_pattern_v1',evidence_sha:'d'.repeat(64)}});
+ await f.execution.advance(f.binding,f.claim);
+ assert.equal(f.store.load(f.binding).phase,'provider_backoff');
+ await assert.rejects(Promise.resolve().then(()=>f.store.commit(f.binding,f.store.load(f.binding).revision,
+  {type:'provider_retry',effect_id:f.store.load(f.binding).steps[0].effect_id,fence:f.claim.fence,claim_id:f.claim.claim_id})),/invalid transition/);
+ await f.execution.advance(f.binding,f.claim);
+ assert.equal(f.store.load(f.binding).phase,'held');assert.equal(f.counts.provider,1);
+ f.gate.ownerYield=async binding=>({state:'owner_yield',binding,receipt_id:'invalid-request-yield',cancelled_admission_ids:[],
+  admission_ids:[f.store.load(binding).steps[0].admission_id]});
+ const result=await f.execution.yieldOwner(f.binding,f.claim);
+ assert.equal(result.terminal.stop_reason,'owner_input_pending');assert.equal(f.counts.provider,1);
+});
