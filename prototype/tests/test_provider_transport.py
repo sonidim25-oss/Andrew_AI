@@ -163,18 +163,53 @@ class ProviderTransportEvidenceTests(unittest.TestCase):
         self.assertEqual(error.safe_category, 'network_error')
         self.assertTrue(error.request_sent)
 
-    def test_recovery_mode_keeps_proven_unsent_failure_held(self):
+    def recovery_fixture(self):
         from prototype.tests.test_recovery_dispatch import RecoveryDispatchTests
         fixture = RecoveryDispatchTests()
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)
+        return fixture, ModelGateway(self.provider, fixture.store, 'fixture-token')
+
+    def test_recovery_mode_backs_off_proven_unsent_failure_then_dispatches_once(self):
+        fixture, gateway = self.recovery_fixture()
         self.provider.endpoint = f'http://127.0.0.1:{refused_port()}/provider'
-        gateway = ModelGateway(self.provider, fixture.store, 'fixture-token')
         metadata = fixture.metadata()
         with self.assertLogs(level='WARNING'):
             status, result = gateway.complete('Bearer fixture-token', fixture.payload, recovery=metadata)
-        self.assertEqual((status, result['error']['code']), (422, 'provider_attempt_uncertain'))
-        self.assertEqual(fixture.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 1)
+        self.assertEqual((status, result['error']['code']), (503, 'provider_not_reached'))
+        proof = fixture.records.effect_result(metadata['admission_id'])
+        self.assertEqual((proof['state'], proof['reason'], proof['http_status']), ('rejected', 'provider_not_reached', None))
+        ledger = fixture.store.connection
+        self.assertEqual(ledger.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 0)
+        self.assertEqual(ledger.execute('SELECT count(*) FROM usage').fetchone()[0], 0)
+        with LocalServer() as server:
+            self.provider.endpoint = server.url
+            self.assertEqual(gateway.complete('Bearer fixture-token', fixture.payload, recovery=metadata)[0], 503)
+            self.assertEqual(server.posts(), [])
+            with patch('time.time', return_value=proof['retry_at_ms'] / 1000 + 1):
+                self.assertEqual(gateway.complete('Bearer fixture-token', fixture.payload, recovery=metadata)[0], 200)
+            self.assertEqual(len(server.posts()), 1)
+        self.assertEqual(ledger.execute('SELECT count(*) FROM usage').fetchone()[0], 1)
+        self.assertEqual(fixture.records.effect_result(metadata['admission_id'])['state'], 'confirmed')
+
+    def test_recovery_mode_keeps_maybe_sent_failure_held(self):
+        fixture, gateway = self.recovery_fixture()
+        original = http.client.HTTPConnection.send
+        with LocalServer() as server:
+            def send_then_fail(connection, data):
+                original(connection, data)
+                if isinstance(data, bytes) and data.startswith(b'{'):
+                    self.assertTrue(server.accepted.wait(2))
+                    raise ConnectionResetError('synthetic failure after body transmission')
+            self.provider.endpoint = server.url
+            metadata = fixture.metadata()
+            with patch.object(http.client.HTTPConnection, 'send', send_then_fail), self.assertLogs(level='WARNING'):
+                status, result = gateway.complete('Bearer fixture-token', fixture.payload, recovery=metadata)
+            self.assertEqual((status, result['error']['code']), (422, 'provider_attempt_uncertain'))
+            self.assertEqual(fixture.records.effect_result(metadata['admission_id'])['state'], 'uncertain')
+            self.assertEqual(fixture.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0], 1)
+            self.assertEqual(gateway.complete('Bearer fixture-token', fixture.payload, recovery=metadata)[0], 422)
+            self.assertEqual(len(server.posts()), 1)
 
 
 if __name__ == '__main__':

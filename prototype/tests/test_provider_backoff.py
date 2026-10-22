@@ -123,4 +123,99 @@ class ProviderBackoffTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'rejection receipts conflict'):_preserve_newer_ledgers(old,self.path)
 
 
+    def not_reached(self):
+        metadata=self.metadata()
+        self.provider.complete.side_effect=ProviderRequestError('network_error',request_sent=False)
+        with self.assertLogs(level='WARNING'):
+            status,result=self.gateway.complete('Bearer fixture-token',self.payload,recovery=metadata)
+        self.assertEqual((status,result['error']['code']),(503,'provider_not_reached'))
+        return metadata,self.records.effect_result(metadata['admission_id'])
+
+    def test_proven_unsent_failure_is_a_typed_rejection_that_survives_restart(self):
+        metadata,proof=self.not_reached()
+        self.assertEqual((proof['state'],proof['reason'],proof['http_status'],proof['attempt']),('rejected','provider_not_reached',None,1))
+        self.assertEqual(proof['retry_at_ms']-proof['rejected_at_ms'],5000)
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0],0)
+        coordinator=RecoveryCoordinator(self.store,self.controller,enabled=True,config_sha='b'*64)
+        coordinator._check_outcomes(self.binding)
+        self.store.close();self.store=Store(self.path);self.gateway.store=self.store;self.records=RecoveryRecords(self.store)
+        self.assertEqual(self.records.effect_result(metadata['admission_id']),proof)
+        self.assertEqual(self.gateway.complete('Bearer fixture-token',self.payload,recovery=metadata)[0],503)
+        self.provider.complete.side_effect=None
+        with patch('time.time',return_value=proof['retry_at_ms']/1000+1):
+            self.assertEqual(self.gateway.complete('Bearer fixture-token',self.payload,recovery=metadata)[0],200)
+        self.assertEqual(self.provider.complete.call_count,2)
+
+    def test_repeated_unsent_failures_back_off_then_a_lost_retry_is_held(self):
+        metadata,first=self.not_reached()
+        with patch('time.time',return_value=first['retry_at_ms']/1000+1),self.assertLogs(level='WARNING'):
+            self.assertEqual(self.gateway.complete('Bearer fixture-token',self.payload,recovery=metadata)[0],503)
+        second=self.records.effect_result(metadata['admission_id'])
+        self.assertEqual((second['attempt'],second['retry_at_ms']-second['rejected_at_ms']),(2,10000))
+        self.provider.complete.side_effect=ProviderRequestError('network_error')
+        with patch('time.time',return_value=second['retry_at_ms']/1000+1),self.assertLogs(level='WARNING'):
+            self.assertEqual(self.gateway.complete('Bearer fixture-token',self.payload,recovery=metadata)[0],422)
+        self.assertEqual(self.records.effect_result(metadata['admission_id'])['state'],'uncertain')
+        self.assertEqual(self.store.connection.execute('SELECT count(*) FROM budget_reservations').fetchone()[0],1)
+        coordinator=RecoveryCoordinator(self.store,self.controller,enabled=True,config_sha='b'*64)
+        with self.assertRaises(RecoveryInterrupted):coordinator._check_outcomes(self.binding)
+
+    def test_unsent_retry_still_requires_owner_authority(self):
+        metadata,proof=self.not_reached()
+        self.provider.complete.side_effect=None
+        with patch('time.time',return_value=proof['retry_at_ms']/1000+1):
+            for key,value in [('paused','1'),('sleeping','1'),('owner_control_revision','1')]:
+                old=self.store.get_state(key,'0');self.store.set_state(key,value)
+                self.assertEqual(self.gateway.complete('Bearer fixture-token',self.payload,recovery=metadata)[0],423)
+                self.store.set_state(key,old)
+        self.assertEqual(self.provider.complete.call_count,1)
+
+    def test_only_typed_rejections_are_recorded(self):
+        metadata=self.metadata()
+        self.provider.complete.side_effect=TimeoutError()
+        with self.assertLogs(level='WARNING'):self.gateway.complete('Bearer fixture-token',self.payload,recovery=metadata)
+        for fields in ({'http_status':503},{'http_status':429,'reason':'provider_not_reached'},{'reason':'provider_not_reached','retry_after':60},
+                       {'reason':'timeout'},{'http_status':None}):
+            with self.subTest(fields=fields),self.assertRaisesRegex(ValueError,'Not a retryable'):
+                self.records.reject_provider(metadata['admission_id'],**fields)
+        for status,reason in ((503,'provider_not_reached'),(None,'rate_limited'),(None,'timeout')):
+            with self.subTest(status=status,reason=reason),self.assertRaises(Exception),self.store.connection:
+                self.store.connection.execute('INSERT INTO recovery_provider_rejections(admission_id,attempt,http_status,rejected_at_ms,retry_at_ms,reason) VALUES(?,9,?,0,0,?)',(metadata['admission_id'],status,reason))
+        self.assertEqual(self.records.effect_result(metadata['admission_id'])['state'],'uncertain')
+
+    def test_existing_429_receipts_migrate_without_changing_their_proof(self):
+        metadata,proof=self.reject()
+        self.assertNotIn('reason',proof)
+        with self.store.connection:
+            self.store.connection.execute('ALTER TABLE recovery_provider_rejections RENAME TO current_rejections')
+            self.store.connection.execute('''CREATE TABLE recovery_provider_rejections(
+                admission_id TEXT NOT NULL REFERENCES recovery_effects(admission_id),
+                attempt INTEGER NOT NULL,http_status INTEGER NOT NULL CHECK(http_status=429),
+                rejected_at_ms INTEGER NOT NULL,retry_at_ms INTEGER NOT NULL,
+                PRIMARY KEY(admission_id,attempt))''')
+            self.store.connection.execute('INSERT INTO recovery_provider_rejections SELECT admission_id,attempt,http_status,rejected_at_ms,retry_at_ms FROM current_rejections')
+            self.store.connection.execute('DROP TABLE current_rejections')
+        self.store.close();self.store=Store(self.path);self.gateway.store=self.store;self.records=RecoveryRecords(self.store)
+        self.assertEqual(self.records.effect_result(metadata['admission_id']),proof)
+        self.assertEqual(self.store.connection.execute('SELECT reason FROM recovery_provider_rejections').fetchone()[0],'rate_limited')
+        self.assertEqual(self.store.connection.execute("SELECT count(*) FROM sqlite_master WHERE name LIKE 'recovery_provider_rejections%'").fetchone()[0],1)
+        self.provider.complete.side_effect=ProviderRequestError('network_error',request_sent=False)
+        with patch('time.time',return_value=proof['retry_at_ms']/1000+1),self.assertLogs(level='WARNING'):
+            self.assertEqual(self.gateway.complete('Bearer fixture-token',self.payload,recovery=metadata)[0],503)
+        self.assertEqual(self.records.effect_result(metadata['admission_id'])['attempt'],2)
+
+    def test_status_names_unreached_provider(self):
+        self.not_reached()
+        status=self.controller._command('/status')
+        self.assertIn('Provider not reached (request was not sent)',status)
+        self.assertNotIn('HTTP 429',status)
+
+    def test_restore_preserves_unsent_rejections(self):
+        from andrewbot.memory_backup import _preserve_newer_ledgers
+        old=Store(self.path.with_name('old.db'));self.addCleanup(old.close)
+        metadata,proof=self.not_reached()
+        self.assertTrue(_preserve_newer_ledgers(old,self.path))
+        self.assertEqual(RecoveryRecords(old).effect_result(metadata['admission_id']),proof)
+
+
 del RecoveryDispatchTests

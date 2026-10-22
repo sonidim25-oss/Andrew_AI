@@ -43,9 +43,9 @@ def available_port():
 
 
 class Harness:
-    def __init__(self,test,*,phase=None,moment=None,controller_fault=None,compaction=False,rate_limit=False,owner_arrives=False):
+    def __init__(self,test,*,phase=None,moment=None,controller_fault=None,compaction=False,rate_limit=False,owner_arrives=False,unreached_first=False):
         self.test=test;self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
-        self.provider_calls=[];self.effects=[];fixture=self;self.compaction=compaction
+        self.provider_calls=[];self.effects=[];fixture=self;self.compaction=compaction;self.unreached_first=unreached_first
         class Provider(BaseHTTPRequestHandler):
             def log_message(self,*args):pass
             def do_POST(self):
@@ -102,8 +102,9 @@ class Harness:
         if fault:command+=['--fault',fault]
         if self.compaction:command+=['--compaction']
         if recovery_once:command+=['--recovery-once']
+        if self.unreached_first and mode=='start':command+=['--unreached-first']
         log=(self.root/'controller.log').open('a')
-        environment={**os.environ,'PYTHONPATH':str(ROOT/'prototype')}
+        environment={**os.environ,'PYTHONPATH':str(ROOT/'prototype'),'NO_PROXY':'*','no_proxy':'*'}
         self.controller=subprocess.Popen(command,cwd=self.root,env=environment,stdout=log,stderr=log);log.close()
 
     def wait_file(self,name,timeout=20):
@@ -184,6 +185,20 @@ class LocalRecoveryCrashProtocolTests(unittest.TestCase):
                         self.assertTrue(result['completed']);self.assertEqual(len(fixture.provider_calls),3)
                         self.assertEqual(result['reservations'],0);self.assertEqual(len(fixture.effects),1)
                     fixture.close()
+
+    def test_proven_unsent_provider_failure_backs_off_and_completes_without_hold(self):
+        fixture=Harness(self,unreached_first=True)
+        result=fixture.wait_file('controller-done.json',timeout=40)
+        self.assertTrue(result['completed'],result)
+        self.assertEqual(result['receipts'][0]['state'],'completed')
+        self.assertEqual((len(fixture.provider_calls),len(fixture.effects)),(2,1))
+        self.assertEqual(result['reservations'],0);self.assertEqual(result['held_messages'],1)
+        import sqlite3
+        with sqlite3.connect(fixture.root/'controller.sqlite3') as db:
+            self.assertEqual(db.execute('SELECT attempt,http_status,reason FROM recovery_provider_rejections').fetchall(),[(1,None,'provider_not_reached')])
+            self.assertIn(db.execute("SELECT value FROM state WHERE key='autonomy_error'").fetchone(),(None,('',)))
+            self.assertEqual(db.execute("SELECT count(*) FROM recovery_effects WHERE state='admitted'").fetchone()[0],0)
+        fixture.close()
 
     def test_backend_loss_around_backoff_checkpoint_keeps_rejection_evidence(self):
         for moment in ('before','after'):

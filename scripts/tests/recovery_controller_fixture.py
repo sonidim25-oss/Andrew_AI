@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
 import sys
 import time
 import urllib.request
@@ -20,7 +21,7 @@ from andrewbot.recovery_dispatch import RecoveryDispatch
 from andrewbot.recovery_records import RecoveryRecords
 from andrewbot.sessions import SessionRunner
 from andrewbot.workers import ModelWorker
-from andrewbot.model import ProviderRequestError, retry_after_seconds
+from andrewbot.model import OpenRouterModel, ProviderRequestError, retry_after_seconds
 
 
 def main():
@@ -30,14 +31,21 @@ def main():
     parser.add_argument('--fault',choices=['provider_before','provider_after','tool_before','tool_after','rejection_before','rejection_after','yield_before','yield_after','handoff_before','handoff_after'])
     parser.add_argument('--compaction',action='store_true')
     parser.add_argument('--recovery-once',action='store_true')
+    parser.add_argument('--unreached-first',action='store_true')
     args=parser.parse_args();root=args.root
     def save(name,value):
         path=root/name;temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps(value,sort_keys=True));os.replace(temporary,path)
     def post(path,payload):
         request=urllib.request.Request(args.provider_url+path,json.dumps(payload).encode(),{'Content-Type':'application/json'},method='POST')
         with urllib.request.urlopen(request,timeout=10) as response:return json.load(response)
+    unreached=[args.unreached_first]
     class Provider:
         def complete(self,payload):
+            if unreached.pop() if unreached else False:
+                # Real transport against a closed port: proven not sent.
+                probe=socket.socket();probe.bind(('127.0.0.1',0));port=probe.getsockname()[1];probe.close()
+                model=OpenRouterModel('fixture-key',timeout=5);model.endpoint=f'http://127.0.0.1:{port}/provider'
+                return model.complete(payload)
             try:return post('/provider',payload)
             except urllib.error.HTTPError as error:
                 raise ProviderRequestError('http_error',error.code,retry_after=retry_after_seconds(error.headers.get('Retry-After'))) from None

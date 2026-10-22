@@ -149,6 +149,9 @@ class ModelGateway:
                 if proof['state'] == 'confirmed':
                     return 200, proof['result']
                 if proof['state'] == 'rejected' and proof['retry_at_ms'] > int(time.time()*1000):
+                    if proof.get('reason') == 'provider_not_reached':
+                        return 503, {'error': {'message': 'Provider was not reached; waiting for retry',
+                                               'type': 'server_error', 'code': 'provider_not_reached'}}
                     return 429, {'error': {'message': 'Provider rate limited; waiting for retry', 'type': 'rate_limit_error'}}
             except (ValueError, KeyError, TypeError):
                 return 423, {'error': {'message': 'Recovery dispatch blocked', 'type': 'recovery_blocked'}}
@@ -297,6 +300,17 @@ class ModelGateway:
                     return self.uncertain_response()
                 self.store.set_state('model_turn_progress',json.dumps({'phase':'waiting for provider rate limit','at':datetime.now(timezone.utc).timestamp()}))
                 return 429, {'error': {'message': 'Provider rate limited; retry scheduled', 'type': 'rate_limit_error', 'retry_at_ms': proof['retry_at_ms']}}
+            if recovery_records is not None and isinstance(error, ProviderRequestError) and not error.request_sent:
+                # Proven before any request byte left: journaled work backs off
+                # and retries the same step instead of holding as uncertain.
+                try:
+                    proof=recovery_records.reject_provider(recovery['admission_id'],reason='provider_not_reached')
+                except Exception:
+                    logging.warning('Provider not-reached receipt could not be saved; request remains held')
+                    return self.uncertain_response()
+                self.store.set_state('model_turn_progress',json.dumps({'phase':'waiting to reconnect to the provider','at':datetime.now(timezone.utc).timestamp()}))
+                return 503, {'error': {'message': 'Provider connection failed; request was not sent; retry scheduled',
+                                       'type': 'server_error', 'code': 'provider_not_reached', 'retry_at_ms': proof['retry_at_ms']}}
             if (isinstance(error, ProviderRequestError) and not error.request_sent
                     and recovery_records is None):
                 self.store.settle_usage(reservation_id, month, day, 0.0, 0, 0)

@@ -637,9 +637,11 @@ class Controller:
             provider_status = ''
             if waiting:
                 retry_time = datetime.fromtimestamp(waiting['retry_at_ms']/1000, timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-                provider_status = f" Provider rate limited (HTTP 429); retry eligible at {retry_time}; rejected attempts: {waiting['attempt']}."
+                unreached = waiting.get('reason') == 'provider_not_reached'
+                cause = 'Provider not reached (request was not sent)' if unreached else 'Provider rate limited (HTTP 429)'
+                provider_status = f" {cause}; retry eligible at {retry_time}; rejected attempts: {waiting['attempt']}."
                 if not self.store.get_state('autonomy_error','') and self.store.get_state('paused', '0')!='1' and self.store.get_state('sleeping', '0')!='1':
-                    state = 'awake, waiting for the provider rate limit'
+                    state = 'awake, waiting to reconnect to the provider' if unreached else 'awake, waiting for the provider rate limit'
             return (f"Andrew is {state}. Session: {session}. Autonomous schedule: {schedule}; fallback: {fallback}. "
                     f"Next self-scheduled wake: {wake_display}. "
                     f"Autonomous cycles today: {cycles}. Queued messages: {queues['queued_messages']}; "

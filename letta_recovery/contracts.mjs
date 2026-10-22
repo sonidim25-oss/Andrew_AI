@@ -55,8 +55,11 @@ export function validateSnapshot(value){
 }
 export const sameBinding=(left,right)=>canonical(validateBinding(left))===canonical(validateBinding(right));
 
+// An explicit HTTP 429, or a transport failure the controller proved happened
+// before any request byte left. Receipts without a reason are HTTP 429 only.
 export function validRejection(proof,item){
- return proof?.state==='rejected'&&proof.http_status===429&&proof.admission_id===item.admission_id&&proof.request_sha===item.request_sha
+ const typed=proof?.reason===undefined?proof?.http_status===429:proof?.reason==='provider_not_reached'&&proof.http_status===null;
+ return proof?.state==='rejected'&&typed&&proof.admission_id===item.admission_id&&proof.request_sha===item.request_sha
   &&Number.isSafeInteger(proof.attempt)&&proof.attempt>0&&Number.isSafeInteger(proof.rejected_at_ms)&&proof.rejected_at_ms>=0
   &&Number.isSafeInteger(proof.retry_at_ms)&&proof.retry_at_ms>=proof.rejected_at_ms;
 }

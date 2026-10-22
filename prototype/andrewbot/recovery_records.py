@@ -13,6 +13,17 @@ from .recovery_identity import FIELDS, ID, HASH, canonical, digest, valid_id, va
 MAX_PAYLOAD=16*1024*1024
 
 
+# A retryable rejection is either an explicit HTTP 429 or a transport failure
+# proven to have happened before any request byte left (no HTTP status exists).
+PROVIDER_REJECTIONS='''(
+            admission_id TEXT NOT NULL REFERENCES recovery_effects(admission_id),
+            attempt INTEGER NOT NULL,http_status INTEGER,
+            rejected_at_ms INTEGER NOT NULL,retry_at_ms INTEGER NOT NULL,
+            reason TEXT NOT NULL DEFAULT 'rate_limited',
+            CHECK((reason='rate_limited' AND http_status IS 429) OR (reason='provider_not_reached' AND http_status IS NULL)),
+            PRIMARY KEY(admission_id,attempt))'''
+
+
 def initialize_schema(store):
     store.connection.executescript('''
         CREATE TABLE IF NOT EXISTS recovery_attempts(
@@ -28,11 +39,7 @@ def initialize_schema(store):
         CREATE TABLE IF NOT EXISTS recovery_results(
             admission_id TEXT PRIMARY KEY REFERENCES recovery_effects(admission_id),
             result_sha TEXT NOT NULL,result_json TEXT NOT NULL,usage_json TEXT,created_at TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS recovery_provider_rejections(
-            admission_id TEXT NOT NULL REFERENCES recovery_effects(admission_id),
-            attempt INTEGER NOT NULL,http_status INTEGER NOT NULL CHECK(http_status=429),
-            rejected_at_ms INTEGER NOT NULL,retry_at_ms INTEGER NOT NULL,
-            PRIMARY KEY(admission_id,attempt));
+        CREATE TABLE IF NOT EXISTS recovery_provider_rejections'''+PROVIDER_REJECTIONS+''';
         CREATE TABLE IF NOT EXISTS recovery_owner_yields(
             binding_sha TEXT PRIMARY KEY,receipt_id TEXT NOT NULL UNIQUE,
             admission_ids_json TEXT NOT NULL,created_at TEXT NOT NULL,
@@ -40,6 +47,14 @@ def initialize_schema(store):
     ''')
     if 'cancelled_ids_json' not in {row[1] for row in store.connection.execute('PRAGMA table_info(recovery_owner_yields)')}:
         store.connection.execute("ALTER TABLE recovery_owner_yields ADD COLUMN cancelled_ids_json TEXT NOT NULL DEFAULT '[]'")
+    if 'reason' not in {row[1] for row in store.connection.execute('PRAGMA table_info(recovery_provider_rejections)')}:
+        # Older receipts were HTTP 429 only; rebuild to drop that CHECK, keeping each row exact.
+        with store.connection:
+            store.connection.execute('BEGIN IMMEDIATE')
+            store.connection.execute('ALTER TABLE recovery_provider_rejections RENAME TO recovery_provider_rejections_v1')
+            store.connection.execute('CREATE TABLE recovery_provider_rejections'+PROVIDER_REJECTIONS)
+            store.connection.execute("INSERT INTO recovery_provider_rejections(admission_id,attempt,http_status,rejected_at_ms,retry_at_ms,reason) SELECT admission_id,attempt,http_status,rejected_at_ms,retry_at_ms,'rate_limited' FROM recovery_provider_rejections_v1")
+            store.connection.execute('DROP TABLE recovery_provider_rejections_v1')
     columns={row[1] for row in store.connection.execute('PRAGMA table_info(recovery_attempts)')}
     for name,declaration in (('origin', "TEXT NOT NULL DEFAULT 'autonomous'"),('terminal_json','TEXT'),('untrusted','INTEGER NOT NULL DEFAULT 0'),('hold_reason','TEXT')):
         if name not in columns:store.connection.execute('ALTER TABLE recovery_attempts ADD COLUMN '+name+' '+declaration)
@@ -243,20 +258,28 @@ class RecoveryRecords:
 
     def _provider_rejection(self,admission_id):
         row=self.store.connection.execute('SELECT * FROM recovery_provider_rejections WHERE admission_id=? ORDER BY attempt DESC LIMIT 1',(admission_id,)).fetchone()
-        return dict(row) if row else None
+        if row is None:return None
+        rejection=dict(row)
+        # HTTP 429 receipts keep their original shape for existing backend checkpoints.
+        if rejection['reason']=='rate_limited':del rejection['reason']
+        return rejection
 
     def waiting_provider(self):
         with self.store._lock:
             row=self.store.connection.execute("SELECT e.admission_id FROM recovery_effects e WHERE e.state='rejected' AND EXISTS (SELECT 1 FROM recovery_attempts a WHERE a.binding_sha=e.binding_sha AND a.state='active') ORDER BY e.rowid DESC LIMIT 1").fetchone()
             return self.effect_result(row['admission_id']) if row else None
 
-    def reject_provider(self,admission_id,*,http_status,retry_after=None):
-        """Atomically record an explicit HTTP 429 and release only its reservation.
+    def reject_provider(self,admission_id,*,http_status=None,retry_after=None,reason='rate_limited'):
+        """Atomically record a retryable rejection and release only its reservation.
 
-        A later dispatch moves the effect back to admitted BEFORE network I/O.
-        Old rejection receipts can therefore never authorize replay of a lost retry.
+        Only an explicit HTTP 429 or a transport failure proven to precede any
+        sent request byte qualifies. A later dispatch moves the effect back to
+        admitted BEFORE network I/O, so old rejection receipts can never
+        authorize replay of a lost retry.
         """
-        if type(http_status) is not int or http_status!=429:raise ValueError('Not a retryable provider rejection')
+        if not ((reason=='rate_limited' and type(http_status) is int and http_status==429)
+                or (reason=='provider_not_reached' and http_status is None and retry_after is None)):
+            raise ValueError('Not a retryable provider rejection')
         if retry_after is not None and (type(retry_after) not in (int,float) or not math.isfinite(retry_after) or not 0<=retry_after<=315360000):raise ValueError('Invalid retry delay')
         with self.store._lock,self.store.connection:
             self.store.connection.execute('BEGIN IMMEDIATE')
@@ -269,7 +292,7 @@ class RecoveryRecords:
             # Exponential backoff is capped; an explicit provider delay is never shortened.
             delay=max(5*2**min(attempt-1,6),retry_after or 0)
             now=int(time.time()*1000);retry_at=now+math.ceil(delay*1000)
-            self.store.connection.execute('INSERT INTO recovery_provider_rejections VALUES(?,?,?,?,?)',(admission_id,attempt,429,now,retry_at))
+            self.store.connection.execute('INSERT INTO recovery_provider_rejections(admission_id,attempt,http_status,rejected_at_ms,retry_at_ms,reason) VALUES(?,?,?,?,?,?)',(admission_id,attempt,http_status,now,retry_at,reason))
             self.store.connection.execute('DELETE FROM budget_reservations WHERE reservation_id=?',(row['reservation_id'],))
             self.store.connection.execute("UPDATE recovery_effects SET state='rejected',reservation_id=NULL WHERE admission_id=?",(admission_id,))
             return self.effect_result(admission_id)
