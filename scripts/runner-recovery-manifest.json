@@ -19,7 +19,7 @@
     "controller.py": {
       "allow_missing": false,
       "baseline": "e89224aeb06551399bd62a92bc9fe09acb857a394fd01adf613a9c98112a38df",
-      "tested": "e89224aeb06551399bd62a92bc9fe09acb857a394fd01adf613a9c98112a38df"
+      "tested": "edce31d2a9b45bc53bdf380ef1b4c64393cd4b3108341ad339774c2008673bc3"
     },
     "diary.py": {
       "allow_missing": false,
@@ -34,7 +34,7 @@
     "gateway.py": {
       "allow_missing": false,
       "baseline": "116a8c6019621fb2d4d98741afc0421684953eeaffae95ac94010961b72b56bc",
-      "tested": "116a8c6019621fb2d4d98741afc0421684953eeaffae95ac94010961b72b56bc"
+      "tested": "3cee053ccb0e5a8a70abbb70ffd2bb818db306527815a09c11342b816c6636ec"
     },
     "gmail_tools.py": {
       "allow_missing": false,
@@ -94,7 +94,7 @@
     "recovery_records.py": {
       "allow_missing": false,
       "baseline": "d05a72a10d3be606a9377705c59895a9d4ec31718dc20dc527e615f811320663",
-      "tested": "d05a72a10d3be606a9377705c59895a9d4ec31718dc20dc527e615f811320663"
+      "tested": "43d42b46da09a3a8656ab1f7bbbd8df9ac931391e6af3ffe6e0e50c3f3702785"
     },
     "runner_adoption.py": {
       "allow_missing": false,
