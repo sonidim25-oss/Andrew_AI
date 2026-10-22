@@ -260,6 +260,7 @@ class ModelGateway:
                                'owner_retry': self.store.get_state('provider_retry_revision', '')},
                               sort_keys=True, ensure_ascii=False, separators=(',', ':'))
         reservation_id = 'provider-' + hashlib.sha256(identity.encode()).hexdigest()
+        reservation_instance = uuid.uuid4().hex
         if recovery_records is not None:
             try:
                 reservation_id = recovery_records.begin_provider(recovery, payload, month, day, reserved)
@@ -267,10 +268,12 @@ class ModelGateway:
                 return 423, {'error': {'message': 'Recovery dispatch blocked', 'type': 'recovery_blocked'}}
             if reservation_id is None:
                 return self.uncertain_response()
-        elif not self.store.reserve_usage(reservation_id, month, day, reserved):
+        elif not self.store.reserve_usage(reservation_id, month, day, reserved,
+                                         provider_instance=reservation_instance):
             self.store.add_activity('Letta model gateway blocked a repeated uncertain provider request')
             return self.uncertain_response()
-        provider_attempt = None if recovery_records is not None else self.store.record_provider_attempt(reservation_id)
+        provider_attempt = None if recovery_records is not None else self.store.record_provider_attempt(
+            reservation_id, reservation_instance=reservation_instance)
 
         outbound["model"] = self.model_id
         outbound.pop("max_tokens", None)

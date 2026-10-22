@@ -50,3 +50,30 @@ requires a newly built, reviewed package against the then-current installation.
 
 These checks use disposable fixtures. They do not constitute privileged
 deployment acceptance, a live recovery, or a new completed Andrew cycle.
+
+## Deployment package
+
+The `deploy/runner-pregrant-rejection-20261022` branch integrates the implementation
+with the installed P2-10 package `0c41bb3`; the original implementation commit
+remains available on `fix/runner-pregrant-rejection`. Pending timezone and memory
+packages are not installed and are not included here.
+
+The rollout entry point is `scripts/pregrant_deployment.py`, which reuses the
+reviewed budget deployment guards. The owner launcher pins this deployment
+commit. It requires the exact enabled P2-10 baseline, pause and quiescence, no
+restore barriers, and snapshot headroom before acceptance. Acceptance reuses
+the passing core log only for identical inputs and still requires the remaining
+privileged checks. Saved complete acceptance is verified on rerun. A prior
+installation record requires inspection rather than automatic overwrite.
+
+Expected installed controller digest:
+`680776f2e8d7f0adf75d84605fba866a9b048d3514ebb52e307d6d611271aade`.
+Expected installed runner digest:
+`5902ee5a385e07b97823c7065208115d0a4d2e347cd308b5e6161ce0636f60c6`.
+The backend release remains `3f5cfd7a...`. Only three controller modules and the
+shared runner socket module change from the installed P2-10 package.
+
+The rollout preserves owner controls, reservations, and billing, checks all four
+services/socket after enable, and does not wake Andrew, replay messages, or clear
+the existing error. Later timezone/memory rollout packages must be rebuilt
+against this new baseline after deployment; their older baseline pins will refuse.
