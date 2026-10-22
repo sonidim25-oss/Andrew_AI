@@ -409,7 +409,7 @@ class Controller:
         if self.store.get_state("sleeping", "0") == "1" and name not in read_tools:
             raise ToolRejected("sleep can only end at a scheduled wake or an owner wake")
         if (name in {"sleep", "wake_at"} and self.store.get_state("active_session_id", "")
-                and not self.store.diary_entry(datetime.now(ZoneInfo("America/Toronto")).date().isoformat())):
+                and not self.store.diary_entry(datetime.now(ZoneInfo(self.timezone_name)).date().isoformat())):
             raise ToolRejected("save today's diary before requesting autonomous sleep")
         if name in SKILL_TOOL_NAMES:
             return json.dumps(self.skill_catalog.execute(name, arguments), ensure_ascii=False)
@@ -547,7 +547,7 @@ class Controller:
             if (not isinstance(event_ids, list) or len(event_ids) > 20
                     or any(isinstance(item, bool) or not isinstance(item, int) or item <= 0 for item in event_ids)):
                 raise ToolRejected("activity event references are invalid")
-            local_date = datetime.now(ZoneInfo("America/Toronto")).date().isoformat()
+            local_date = datetime.now(ZoneInfo(self.timezone_name)).date().isoformat()
             try:
                 entry_id = self.store.create_diary_entry(
                     local_date, content, session_id=self.store.get_state("active_session_id", ""),
