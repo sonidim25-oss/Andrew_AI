@@ -92,15 +92,22 @@ def run_bounded(argv, payload=b"", timeout=120, output_limit=40 * 1024, stderr_l
             except subprocess.TimeoutExpired:
                 continue
     finally:
-        selector.close()
-        if timed_out or output_exceeded or cancelled or process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait(timeout=5)
-        for stream in streams:
-            if not stream.closed:
-                stream.close()
+        try:
+            selector.close()
+            if timed_out or output_exceeded or cancelled or process.poll() is None:
+                try:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                finally:
+                    # A failed signal does not prove the child is still alive;
+                    # attempt to reap it, retaining the bounded cleanup wait.
+                    process.wait(timeout=5)
+        finally:
+            # Signal/wait failures remain errors, but must not leak pipe handles.
+            for stream in streams:
+                if not stream.closed:
+                    stream.close()
     return ProcessResult(process.returncode, bytes(outputs[process.stdout]), bytes(outputs[process.stderr]),
                          timed_out, output_exceeded, cancelled)
