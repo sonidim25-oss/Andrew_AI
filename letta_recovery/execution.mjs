@@ -33,7 +33,7 @@ export class RecoveryExecution{
  async reconcileProvider(binding,claim,admissionId){
   this.ownership.assertOwned(claim);const state=this.store.load(binding),item=state.steps.at(-1);
   if(!item||item.admission_id!==admissionId||!['provider','compaction'].includes(item.kind??'provider'))throw Error('provider_uncertain');
-  const held=state.phase==='held'&&state.hold_reason==='provider_uncertain'&&state.held_phase==='provider_admitted'&&item.state==='admitted';
+  const held=(state.phase==='provider_admitted'||(state.phase==='held'&&state.hold_reason==='provider_uncertain'&&state.held_phase==='provider_admitted'))&&item.state==='admitted';
   const repeated=(state.phase==='provider_confirmed'&&item.state==='confirmed')||(state.phase==='provider_backoff'&&item.state==='rejected');
   if(!held&&!repeated)throw Error('provider_uncertain');
   const proof=await this.gate.result({admission_id:admissionId,binding,effect_id:item.effect_id,kind:item.kind??'provider'});

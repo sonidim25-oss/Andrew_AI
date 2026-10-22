@@ -226,6 +226,70 @@ class LocalRecoveryProtocolTests(unittest.TestCase):
         agent.initialize()
         return agent,controller,coordinator,SessionRunner(self.fixture.store,controller,agent,enabled=True)
 
+    def test_owner_sleep_during_provider_call_does_not_block_later_turns(self):
+        # Production 2026-10-22 02:15: /sleep cancelled an autonomous turn whose provider
+        # result the controller saved; the backend checkpoint stayed provider_admitted.
+        import threading
+        agent,controller,coordinator,runner=self.coordinated_agent();store=self.fixture.store
+        entered,release=threading.Event(),threading.Event()
+        class Held(list):
+            first=True
+            def pop(self,index=-1):
+                if Held.first:
+                    Held.first=False;entered.set();release.wait(10)
+                return super().pop(index)
+        self.responses=Held(self.responses)
+        session=runner.start('owner_wake',datetime.now(timezone.utc))
+        cycle=threading.Thread(target=lambda:runner.run_cycle(session),daemon=True);cycle.start()
+        self.assertTrue(entered.wait(10))
+        owner={'from':{'id':17},'chat':{'id':17,'type':'private'}}
+        controller.handle_update({'message':{**owner,'text':'/sleep'}})
+        release.set();cycle.join(15);self.assertFalse(cycle.is_alive())
+        self.assertEqual(len(self.fixture.provider_calls),1)
+        controller.handle_update({'message':{**owner,'text':'/wake'}})
+        self.responses.append({'id':'owner-response','choices':[{'index':0,'message':{'role':'assistant','content':'Owner answer after sleep.'},'finish_reason':'stop'}],
+            'usage':{'prompt_tokens':20,'completion_tokens':5,'cost':.000001}})
+        reply,_=agent.reply([{'role':'user','content':'Are you awake?'}])
+        self.assertEqual(reply,'Owner answer after sleep.')
+        self.assertEqual(len(self.fixture.provider_calls),2)
+        self.assertFalse(coordinator.has_pending())
+
+    def test_owner_pause_during_provider_call_is_closed_while_paused(self):
+        import threading
+        agent,controller,coordinator,runner=self.coordinated_agent();store=self.fixture.store
+        entered,release=threading.Event(),threading.Event()
+        class Held(list):
+            first=True
+            def pop(self,index=-1):
+                if Held.first:
+                    Held.first=False;entered.set();release.wait(10)
+                return super().pop(index)
+        self.responses=Held(self.responses)
+        session=runner.start('owner_wake',datetime.now(timezone.utc))
+        cycle=threading.Thread(target=lambda:runner.run_cycle(session),daemon=True);cycle.start()
+        self.assertTrue(entered.wait(10))
+        owner={'from':{'id':17},'chat':{'id':17,'type':'private'}}
+        controller.handle_update({'message':{**owner,'text':'/pause'}})
+        release.set();cycle.join(15);self.assertFalse(cycle.is_alive())
+        row=store.connection.execute('SELECT binding_json FROM recovery_attempts ORDER BY rowid DESC LIMIT 1').fetchone()
+        binding=json.loads(row[0])
+        self.assertEqual(self.command('recovery_inspect',binding=binding)['phase'],'provider_admitted')
+        # The dispatch pass closes it while Andrew stays paused; nothing is dispatched.
+        self.assertTrue(coordinator.close_superseded())
+        closed=self.command('recovery_inspect',binding=binding)
+        self.assertEqual(closed['phase'],'terminal_committed')
+        self.assertEqual(closed['terminal']['stop_reason'],'owner_input_pending')
+        self.assertTrue(closed['terminal']['acknowledged']);self.assertTrue(closed['terminal']['settled'])
+        self.assertEqual(closed['terminal']['cancelled_admission_ids'],[])
+        self.assertFalse(coordinator.close_superseded())
+        self.assertEqual(len(self.fixture.provider_calls),1)
+        self.assertEqual(store.get_state('paused'),'1');self.assertFalse(coordinator.has_pending())
+        controller.handle_update({'message':{**owner,'text':'/wake'}})
+        self.responses.append({'id':'owner-response','choices':[{'index':0,'message':{'role':'assistant','content':'Owner answer after pause.'},'finish_reason':'stop'}],
+            'usage':{'prompt_tokens':20,'completion_tokens':5,'cost':.000001}})
+        reply,_=agent.reply([{'role':'user','content':'Back?'}])
+        self.assertEqual(reply,'Owner answer after pause.');self.assertEqual(len(self.fixture.provider_calls),2)
+
     def test_owner_arriving_during_autonomy_yields_without_replaying_prepared_tool(self):
         agent,controller,coordinator,runner=self.coordinated_agent();store=self.fixture.store
         self.responses.insert(0,{'id':'interrupted-step','choices':[{'index':0,'message':{'role':'assistant','content':None,

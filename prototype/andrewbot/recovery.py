@@ -7,7 +7,7 @@ import uuid
 from dataclasses import asdict
 
 from .appserver import AppServerClient, LettaCommandError, LettaTurnCancelled, LettaTurnYielded
-from .recovery_records import RecoveryRecords, canonical, digest, validate_binding
+from .recovery_records import RecoveryRecords, canonical, digest, superseded_owner_yield, validate_binding
 
 CONTRACT='local_durable_recovery_v1'
 HOLD_REASONS=frozenset({'legacy_unproven','binding_mismatch','unsupported_contract','provider_uncertain',
@@ -88,6 +88,7 @@ class RecoveryCoordinator:
         self.client_factory=client_factory or (lambda:LocalRecoveryClient(AppServerClient(controller.model.url)))
         self.config_sha=config_sha
         self._active_lock=threading.Lock();self._active_client=None;self._active_scope=None;self._active_cancel=None
+        self._closed=set()
         if self.enabled:
             self.store.set_state('local_recovery_owner_id',str(controller.owner_id))
             if not self.store.get_state('local_recovery_controller_store_id',''):self.store.set_state('local_recovery_controller_store_id',uuid.uuid4().hex)
@@ -213,10 +214,58 @@ class RecoveryCoordinator:
             if state.get('state')=='interrupted':raise RecoveryInterrupted('authority_lost')
             cancelled.wait(.05)
 
+    def close_superseded(self,client=None):
+        """Close the latest autonomous turn an owner command cancelled, without continuing it.
+
+        A saved, settled provider result is imported as evidence first. Unknown
+        outcomes cannot be cancelled and leave the turn held as before.
+        """
+        if not self.enabled:return False
+        with self.store._lock:
+            row=self.store.connection.execute('SELECT * FROM recovery_attempts ORDER BY rowid DESC LIMIT 1').fetchone()
+            state=dict(self.store.connection.execute('SELECT key,value FROM state'))
+        if row is None or row['state']!='revoked' or row['origin']!='autonomous' or row['binding_sha'] in self._closed:return False
+        binding=validate_binding(json.loads(row['binding_json']))
+        if not superseded_owner_yield(state,binding):return False
+        own=client is None;client=client or self.client_factory()
+        try:
+            if client.capabilities()['store_id']!=binding['store_id']:return False
+            current=client.inspect(binding)
+            if current.get('binding')!=binding or current.get('phase')=='terminal_committed':
+                self._closed.add(row['binding_sha']);return False
+            if current.get('phase')=='provider_admitted':self._import_provider(client,binding,current)
+            scope=self.records.admit_scope(binding,origin='autonomous',yield_only=True)
+            self._activate(client,scope)
+            try:
+                claim=client.command('recovery_yield',binding=binding,expected_revision=client.inspect(binding)['revision'],**scope)
+                self._finish(client,binding,scope,claim,client.inspect(binding),'autonomous')
+            except LettaTurnYielded:pass
+            finally:self._deactivate()
+            self._closed.add(row['binding_sha'])
+            self.store.add_activity('Owner-cancelled autonomous turn closed without repeating it')
+            return True
+        finally:
+            if own:client.close()
+
+    def _import_provider(self,client,binding,state):
+        with self.store._lock:
+            effect=self.store.connection.execute("SELECT * FROM recovery_effects WHERE binding_sha=? AND kind IN ('provider','compaction') ORDER BY rowid DESC LIMIT 1",(digest(binding),)).fetchone()
+        if effect is None or effect['admission_id'] not in (state.get('effect_admission_ids') or []):return
+        proof=self.records.effect_result(effect['admission_id'])
+        if not (proof['state']=='rejected' or (proof['state']=='confirmed' and isinstance(proof.get('usage'),dict) and proof['usage'].get('settled') is True)):return
+        scope=self.records.admit_scope(binding,origin='autonomous',evidence_only=True)
+        self._activate(client,scope)
+        try:
+            claim=client.command('recovery_reconcile_provider',binding=binding,expected_revision=state['revision'],effect_admission_id=effect['admission_id'],**scope)
+            client.release(binding,scope,claim)
+        finally:self._deactivate()
+
     def run_turn(self,transport,runtime,text,*,origin='autonomous',cancelled=None):
         if not self.enabled:raise RecoveryInterrupted('unsupported_contract')
         cancelled=cancelled or threading.Event()
         client=LocalRecoveryClient(transport);capability=client.capabilities()
+        try:self.close_superseded(client)
+        except (RecoveryInterrupted,ValueError,OSError,TimeoutError):pass  # Anything left unclosed stays held below.
         if self.has_pending():raise RecoveryInterrupted('owner_blocked')
         config_sha=self.configuration_digest(transport);self.store.set_state('local_recovery_config_sha',config_sha)
         input={'model':self.controller.model.model_config.model_id,'messages':[{'role':'user','content':text}],

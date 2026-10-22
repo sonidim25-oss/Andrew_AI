@@ -316,6 +316,8 @@ class ControllerDispatch:
         if self._poll_stop.is_set() or self.should_stop():
             return
         recovery=getattr(self.sessions.agent,'local_recovery',None) if hasattr(self.sessions,'agent') else None
+        if recovery is not None and recovery.enabled is True:
+            self.guarded('Closing owner-cancelled turn',recovery.close_superseded)
         if recovery is not None and recovery.enabled is True and recovery.has_pending():
             self.guarded('Journaled model recovery',recovery.reconcile_one)
             return

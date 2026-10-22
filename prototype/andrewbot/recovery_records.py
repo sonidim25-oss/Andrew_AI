@@ -87,6 +87,16 @@ def awake_owner_yield(state,binding):
         and state.get('local_recovery_config_sha')==binding['config_sha'])
 
 
+def superseded_owner_yield(state,binding):
+    """A newer owner command ended this turn: it may be closed, never continued."""
+    try:newer=int(state.get('owner_control_revision','0'))>int(binding['owner_revision'])
+    except (ValueError,TypeError):return False
+    return (newer and state.get('active_session_id','')!=binding['session_id'] and state.get('active_cycle_id','')!=binding['cycle_id']
+        and not any(state.get(key)=='1' for key in ('restore_recovery_required','local_recovery_restore_required'))
+        and all(state.get('letta_'+key)==binding[key] for key in ('agent_id','conversation_id'))
+        and state.get('local_recovery_config_sha')==binding['config_sha'])
+
+
 class RecoveryRecords:
     def __init__(self,store):self.store=store
 
@@ -116,7 +126,7 @@ class RecoveryRecords:
         validate_binding(binding)
         if origin=='autonomous':
             state=dict(self.store.connection.execute('SELECT key,value FROM state'))
-            if paused_owner_yield(state,binding) or awake_owner_yield(state,binding):
+            if paused_owner_yield(state,binding) or awake_owner_yield(state,binding) or superseded_owner_yield(state,binding):
                 other=self.store.connection.execute("SELECT 1 FROM recovery_attempts WHERE state IN ('active','held','evidence','yielding') AND binding_sha!=? LIMIT 1",(digest(binding),)).fetchone()
                 if other is not None:raise ValueError('Recovery binding_mismatch')
                 return
@@ -164,7 +174,9 @@ class RecoveryRecords:
             if not self.store.connection.in_transaction:self.store.connection.execute('BEGIN IMMEDIATE')
             scope=self._scope(binding,claim,token,owner_yield=True)
             owner=int(self.store.get_state('local_recovery_owner_id','0'))
-            if scope['origin']!='autonomous' or not self.store.pending_owner_input(owner):raise ValueError('Recovery owner_blocked')
+            state=dict(self.store.connection.execute('SELECT key,value FROM state'))
+            # Waiting owner input, or a newer owner command that already ended this turn.
+            if scope['origin']!='autonomous' or not (self.store.pending_owner_input(owner) or superseded_owner_yield(state,binding)):raise ValueError('Recovery owner_blocked')
             effects=self.store.connection.execute('SELECT * FROM recovery_effects WHERE binding_sha=?',(digest(binding),)).fetchall()
             old=self.store.connection.execute('SELECT * FROM recovery_owner_yields WHERE binding_sha=?',(digest(binding),)).fetchone()
             cancelled=sorted(effect['admission_id'] for effect in effects if effect['state'] in ('prepared','cancelled'))

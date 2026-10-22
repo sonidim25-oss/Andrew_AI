@@ -19,8 +19,9 @@ export function transition(previous,event){
   item.state='rejected';item.rejection=event.rejection;state.phase='provider_backoff';break;
  }
  case 'provider_reconcile':{
-  requirePhase('held');const item=admitted(state.steps,event.effect_id);
-  if(state.hold_reason!=='provider_uncertain'||state.held_phase!=='provider_admitted'||item!==state.steps.at(-1)
+  // A held uncertain step, or one whose turn the owner cancelled before its receipt arrived.
+  requirePhase('held','provider_admitted');const item=admitted(state.steps,event.effect_id);
+  if((phase==='held'&&(state.hold_reason!=='provider_uncertain'||state.held_phase!=='provider_admitted'))||item!==state.steps.at(-1)
     ||item.admission_id!==event.admission_id||item.request_sha!==event.request_sha)throw Error('invalid transition');
   if(event.rejection){
    if(!validRejection(event.rejection,item))throw Error('invalid rejection');
