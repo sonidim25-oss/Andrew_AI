@@ -222,28 +222,57 @@ class RecoveryCoordinator:
         """
         if not self.enabled:return False
         with self.store._lock:
-            row=self.store.connection.execute('SELECT * FROM recovery_attempts ORDER BY rowid DESC LIMIT 1').fetchone()
+            rows=self.store.connection.execute("""SELECT * FROM recovery_attempts
+                WHERE rowid IN (SELECT max(rowid) FROM recovery_attempts GROUP BY binding_sha)
+                AND state IN ('revoked','evidence','yielding') AND origin='autonomous'
+                ORDER BY rowid DESC LIMIT 64""").fetchall()
             state=dict(self.store.connection.execute('SELECT key,value FROM state'))
-        if row is None or row['state']!='revoked' or row['origin']!='autonomous' or row['binding_sha'] in self._closed:return False
-        binding=validate_binding(json.loads(row['binding_json']))
-        if not superseded_owner_yield(state,binding):return False
+        candidates=[]
+        for row in rows:
+            if row['binding_sha'] in self._closed:continue
+            binding=validate_binding(json.loads(row['binding_json']))
+            if superseded_owner_yield(state,binding):candidates.append((row,binding))
+        if not candidates:return False
         own=client is None;client=client or self.client_factory()
         try:
-            if client.capabilities()['store_id']!=binding['store_id']:return False
-            current=client.inspect(binding)
-            if current.get('binding')!=binding or current.get('phase')=='terminal_committed':
-                self._closed.add(row['binding_sha']);return False
-            if current.get('phase')=='provider_admitted':self._import_provider(client,binding,current)
-            scope=self.records.admit_scope(binding,origin='autonomous',yield_only=True)
-            self._activate(client,scope)
-            try:
-                claim=client.command('recovery_yield',binding=binding,expected_revision=client.inspect(binding)['revision'],**scope)
-                self._finish(client,binding,scope,claim,client.inspect(binding),'autonomous')
-            except LettaTurnYielded:pass
-            finally:self._deactivate()
-            self._closed.add(row['binding_sha'])
-            self.store.add_activity('Owner-cancelled autonomous turn closed without repeating it')
-            return True
+            store_id=client.capabilities()['store_id']
+            for row,binding in candidates:
+                if store_id!=binding['store_id']:continue
+                try:current=client.inspect(binding)
+                except RecoveryInterrupted as error:
+                    # A later attempt can fail admission against an older open
+                    # checkpoint. A controller-only, never-fenced row must not
+                    # hide the actual checkpoint; it is not changed here.
+                    with self.store._lock:
+                        effect=self.store.connection.execute('SELECT 1 FROM recovery_effects WHERE binding_sha=? LIMIT 1',(row['binding_sha'],)).fetchone()
+                    if (error.category in ('state_corrupt','binding_mismatch') and row['fence']==0
+                            and row['backend_attempt_id'] is None and row['backend_revision'] is None
+                            and row['terminal_json'] is None and effect is None):continue
+                    raise
+                if current.get('binding')!=binding:continue
+                if current.get('phase')=='terminal_committed' and current.get('terminal',{}).get('stop_reason')!='owner_input_pending':continue
+                if (current.get('phase')=='provider_admitted' or (current.get('phase')=='held' and current.get('hold_reason')=='provider_uncertain')):
+                    self._import_provider(client,binding,current)
+                scope=self.records.admit_scope(binding,origin='autonomous',yield_only=True)
+                self._activate(client,scope)
+                claim=None
+                try:
+                    claim=client.command('recovery_yield',binding=binding,expected_revision=client.inspect(binding)['revision'],**scope)
+                    self._finish(client,binding,scope,claim,client.inspect(binding),'autonomous')
+                except LettaTurnYielded:pass
+                except Exception:
+                    # No dispatch authority survives a failed closure. Retain the
+                    # binding as revoked so a later pass can finish the same yield.
+                    if claim is not None:
+                        try:client.release(binding,scope,claim)
+                        except (RecoveryInterrupted,ValueError,OSError,TimeoutError):pass
+                    self.records.revoke(scope['admission_id'])
+                    raise
+                finally:self._deactivate()
+                self._closed.add(row['binding_sha'])
+                self.store.add_activity('Owner-cancelled autonomous turn closed without repeating it')
+                return True
+            return False
         finally:
             if own:client.close()
 
@@ -258,7 +287,9 @@ class RecoveryCoordinator:
         try:
             claim=client.command('recovery_reconcile_provider',binding=binding,expected_revision=state['revision'],effect_admission_id=effect['admission_id'],**scope)
             client.release(binding,scope,claim)
-        finally:self._deactivate()
+        finally:
+            self.records.revoke(scope['admission_id'])
+            self._deactivate()
 
     def run_turn(self,transport,runtime,text,*,origin='autonomous',cancelled=None):
         if not self.enabled:raise RecoveryInterrupted('unsupported_contract')

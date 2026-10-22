@@ -91,7 +91,8 @@ def superseded_owner_yield(state,binding):
     """A newer owner command ended this turn: it may be closed, never continued."""
     try:newer=int(state.get('owner_control_revision','0'))>int(binding['owner_revision'])
     except (ValueError,TypeError):return False
-    return (newer and state.get('active_session_id','')!=binding['session_id'] and state.get('active_cycle_id','')!=binding['cycle_id']
+    return (newer and not any(state.get(key) for key in ('active_session_id','active_cycle_id','model_turn_origin','autonomous_owner_id'))
+        and state.get('autonomy_error','') in ('','local_recovery_interrupted')
         and not any(state.get(key)=='1' for key in ('restore_recovery_required','local_recovery_restore_required'))
         and all(state.get('letta_'+key)==binding[key] for key in ('agent_id','conversation_id'))
         and state.get('local_recovery_config_sha')==binding['config_sha'])
@@ -124,9 +125,12 @@ class RecoveryRecords:
 
     def _guard_owner_yield(self,binding,origin):
         validate_binding(binding)
+        if (self.store.path.parent / 'runner-restore-required.json').exists():raise ValueError('Recovery restore_required')
         if origin=='autonomous':
             state=dict(self.store.connection.execute('SELECT key,value FROM state'))
-            if paused_owner_yield(state,binding) or awake_owner_yield(state,binding) or superseded_owner_yield(state,binding):
+            latest=self.store.connection.execute('SELECT state FROM recovery_attempts WHERE binding_sha=? ORDER BY rowid DESC LIMIT 1',(digest(binding),)).fetchone()
+            superseded=superseded_owner_yield(state,binding) and latest is not None and latest['state'] in ('revoked','evidence','yielding')
+            if paused_owner_yield(state,binding) or awake_owner_yield(state,binding) or superseded:
                 other=self.store.connection.execute("SELECT 1 FROM recovery_attempts WHERE state IN ('active','held','evidence','yielding') AND binding_sha!=? LIMIT 1",(digest(binding),)).fetchone()
                 if other is not None:raise ValueError('Recovery binding_mismatch')
                 return

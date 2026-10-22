@@ -255,6 +255,30 @@ class LocalRecoveryProtocolTests(unittest.TestCase):
         self.assertFalse(coordinator.has_pending())
 
     def test_owner_pause_during_provider_call_is_closed_while_paused(self):
+        self.close_paused_provider()
+
+    def test_owner_cancel_closure_retries_after_evidence_transport_failure(self):
+        self.close_paused_provider('recovery_reconcile_provider')
+
+    def test_owner_cancel_closure_retries_after_yield_transport_failure(self):
+        self.close_paused_provider('recovery_yield')
+
+    def test_owner_cancel_closure_retries_after_terminal_ack_failure(self):
+        self.close_paused_provider('ack')
+
+    def test_owner_cancel_closure_recovers_persistent_evidence_scope_after_restart(self):
+        self.close_paused_provider(interrupted_scope='evidence')
+
+    def test_owner_cancel_closure_recovers_persistent_yield_scope_after_restart(self):
+        self.close_paused_provider(interrupted_scope='yielding')
+
+    def test_owner_cancelled_provider_tool_calls_are_cancelled_before_next_turn(self):
+        self.close_paused_provider(tool_calls=True)
+
+    def test_owner_cancel_closure_skips_newer_never_admitted_revoked_binding(self):
+        self.close_paused_provider(newer_revoked=True)
+
+    def close_paused_provider(self, fail_command=None, interrupted_scope=None, tool_calls=False, newer_revoked=False):
         import threading
         agent,controller,coordinator,runner=self.coordinated_agent();store=self.fixture.store
         entered,release=threading.Event(),threading.Event()
@@ -264,6 +288,10 @@ class LocalRecoveryProtocolTests(unittest.TestCase):
                 if Held.first:
                     Held.first=False;entered.set();release.wait(10)
                 return super().pop(index)
+        if tool_calls:
+            self.responses[0]={'id':'cancelled-provider-tools','choices':[{'index':0,'message':{'role':'assistant','content':None,
+                'tool_calls':[{'id':'cancelled-activity','type':'function','function':{'name':'recent_activity','arguments':'{}'}}]},
+                'finish_reason':'tool_calls'}],'usage':{'prompt_tokens':20,'completion_tokens':5,'cost':.000001}}
         self.responses=Held(self.responses)
         session=runner.start('owner_wake',datetime.now(timezone.utc))
         cycle=threading.Thread(target=lambda:runner.run_cycle(session),daemon=True);cycle.start()
@@ -275,12 +303,42 @@ class LocalRecoveryProtocolTests(unittest.TestCase):
         binding=json.loads(row[0])
         self.assertEqual(self.command('recovery_inspect',binding=binding)['phase'],'provider_admitted')
         # The dispatch pass closes it while Andrew stays paused; nothing is dispatched.
+        if newer_revoked:
+            # A later attempt lost admission against this open checkpoint. Its
+            # revoked controller-only row must not hide the real backend turn.
+            later={**binding,'session_id':'unadmitted-session','cycle_id':'unadmitted-cycle',
+                   'client_message_id':'unadmitted-input','consumer_id':'unadmitted-consumer'}
+            with store.connection:
+                store.connection.execute('''INSERT INTO recovery_attempts
+                    (admission_id,binding_sha,binding_json,token_sha,state,created_at,origin)
+                    VALUES(?,?,?,?,'revoked',?,'autonomous')''',
+                    ('unadmitted-scope',digest(later),json.dumps(later),'0'*64,store.now()))
+        if interrupted_scope:
+            coordinator.records.admit_scope(binding,evidence_only=interrupted_scope=='evidence',yield_only=interrupted_scope=='yielding')
+            from andrewbot.recovery import RecoveryCoordinator
+            coordinator=RecoveryCoordinator(store,controller,coordinator.client_factory,enabled=True)
+        if fail_command:
+            client=coordinator.client_factory()
+            original=client.command
+            def fail_once(kind, **fields):
+                if kind==fail_command:raise TimeoutError('fixture transport interruption')
+                return original(kind, **fields)
+            if fail_command=='ack':
+                def fail_ack(*args, **kwargs):raise TimeoutError('fixture acknowledgement interruption')
+                client.ack=fail_ack
+            else:client.command=fail_once
+            try:
+                with self.assertRaises(TimeoutError):coordinator.close_superseded(client)
+            finally:client.close()
+            self.assertFalse(coordinator.has_pending(), 'Failed evidence/yield scopes must not prevent retry')
         self.assertTrue(coordinator.close_superseded())
         closed=self.command('recovery_inspect',binding=binding)
         self.assertEqual(closed['phase'],'terminal_committed')
         self.assertEqual(closed['terminal']['stop_reason'],'owner_input_pending')
         self.assertTrue(closed['terminal']['acknowledged']);self.assertTrue(closed['terminal']['settled'])
         self.assertEqual(closed['terminal']['cancelled_admission_ids'],[])
+        if tool_calls:
+            self.assertEqual(store.connection.execute("SELECT count(*) FROM recovery_effects WHERE kind='tool'").fetchone()[0],0)
         self.assertFalse(coordinator.close_superseded())
         self.assertEqual(len(self.fixture.provider_calls),1)
         self.assertEqual(store.get_state('paused'),'1');self.assertFalse(coordinator.has_pending())
@@ -289,6 +347,10 @@ class LocalRecoveryProtocolTests(unittest.TestCase):
             'usage':{'prompt_tokens':20,'completion_tokens':5,'cost':.000001}})
         reply,_=agent.reply([{'role':'user','content':'Back?'}])
         self.assertEqual(reply,'Owner answer after pause.');self.assertEqual(len(self.fixture.provider_calls),2)
+        if tool_calls:
+            results=[message for message in self.fixture.provider_calls[-1]['messages'] if message.get('role')=='tool' and message.get('tool_call_id')=='cancelled-activity']
+            self.assertEqual(len(results),1)
+            self.assertFalse(json.loads(results[0]['content'])['executed'])
 
     def test_owner_arriving_during_autonomy_yields_without_replaying_prepared_tool(self):
         agent,controller,coordinator,runner=self.coordinated_agent();store=self.fixture.store

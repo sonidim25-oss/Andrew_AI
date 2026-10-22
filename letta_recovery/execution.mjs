@@ -11,10 +11,43 @@ export class RecoveryExecution{
  _read(binding,ref){return JSON.parse(this.store.readPayload(binding,ref).toString('utf8'));}
  _commit(binding,claim,event){this.ownership.assertOwned(claim);const current=this.store.load(binding);return this.store.commit(binding,current.revision,{...event,fence:claim.fence,claim_id:claim.claim_id});}
  _hold(binding,claim,reason){return this._commit(binding,claim,{type:'hold',reason});}
+ _prepareTools(binding,claim,state,calls){
+  const step=state.steps.at(-1);
+    const input=this._read(binding,state.input_ref),allowed=new Set((input.tools??[]).map(tool=>tool.function?.name));
+    try{
+     if(!Array.isArray(calls)||calls.length>256)throw Error();
+     const prepared=calls.map(call=>{
+      if(!safeId(call.id)||!allowed.has(call.function?.name)||call.type!=='function')throw Error();
+      const args=JSON.parse(call.function.arguments);if(!args||typeof args!=='object'||Array.isArray(args))throw Error();
+      return {effect_id:'t-'+digest({run_id:state.run_id,provider_id:step.effect_id,call_id:call.id}),provider_id:step.effect_id,call_id:call.id,name:call.function.name,arguments:args,request_sha:digest({name:call.function.name,arguments:args})};
+     });
+     return this._commit(binding,claim,{type:'tool_prepare',calls:prepared});
+    }catch{return this._hold(binding,claim,'tool_uncertain');}
+ }
  async yieldOwner(binding,claim){
-  const state=this.store.load(binding);
+  let state=this.store.load(binding);
   if(state.phase==='terminal_committed'){
    if(state.terminal?.stop_reason!=='owner_input_pending')throw Error('owner_blocked');return state;
+  }
+  // Materialize saved calls without granting execution authority. The yield
+  // cancels them, so the next provider input has matching tool results.
+  if(state.phase==='provider_confirmed'&&state.steps.at(-1)?.kind!=='compaction'){
+   const response=this._read(binding,state.steps.at(-1).result_ref);
+   const choice=response?.choices?.length===1?response.choices[0]:null;
+   if(!choice||choice.message?.role!=='assistant')throw Error('state_corrupt');
+   const calls=choice.message.tool_calls??[];
+   if(!Array.isArray(calls))throw Error('tool_uncertain');
+   if(calls.length){
+    state=this._prepareTools(binding,claim,state,calls);
+    if(state.phase!=='tool_prepared')throw Error('tool_uncertain');
+   }
+  }
+  // A failed preparation must remain blocked on later closure attempts.
+  // Otherwise the held phase could bypass validation and project open calls.
+  if(state.phase==='held'&&state.held_phase==='provider_confirmed'&&state.steps.at(-1)?.kind!=='compaction'){
+   const response=this._read(binding,state.steps.at(-1).result_ref);
+   const calls=response?.choices?.[0]?.message?.tool_calls??[];
+   if(!Array.isArray(calls)||calls.length)throw Error('tool_uncertain');
   }
   const phases=['input_committed','provider_admitted','tool_admitted','provider_confirmed','provider_backoff','tool_prepared','tool_confirmed','continuation_ready'];
   if(!(phases.includes(state.phase)||(state.phase==='held'&&['owner_blocked','provider_uncertain','tool_uncertain'].includes(state.hold_reason)&&phases.includes(state.held_phase)))
@@ -149,18 +182,7 @@ export class RecoveryExecution{
     return this._commit(binding,claim,{type:'compaction',context});
    }
    const calls=choice.message.tool_calls??[];
-   if(calls.length){
-    const input=this._read(binding,state.input_ref),allowed=new Set((input.tools??[]).map(tool=>tool.function?.name));
-    try{
-     if(!Array.isArray(calls)||calls.length>256)throw Error();
-     const prepared=calls.map(call=>{
-      if(!safeId(call.id)||!allowed.has(call.function?.name)||call.type!=='function')throw Error();
-      const args=JSON.parse(call.function.arguments);if(!args||typeof args!=='object'||Array.isArray(args))throw Error();
-      return {effect_id:'t-'+digest({run_id:state.run_id,provider_id:step.effect_id,call_id:call.id}),provider_id:step.effect_id,call_id:call.id,name:call.function.name,arguments:args,request_sha:digest({name:call.function.name,arguments:args})};
-     });
-     return this._commit(binding,claim,{type:'tool_prepare',calls:prepared});
-    }catch{return this._hold(binding,claim,'tool_uncertain');}
-   }
+   if(calls.length)return this._prepareTools(binding,claim,state,calls);
    if(choice.finish_reason!=='stop'||typeof choice.message.content!=='string'||!choice.message.content.trim())return this._hold(binding,claim,'state_corrupt');
    const terminal={id:randomUUID(),run_id:state.run_id,consumer_id:binding.consumer_id,stop_reason:'end_turn',assistant_ids:['provider:'+step.effect_id],result_admission_id:step.admission_id};
    return this._commit(binding,claim,{type:'terminal',terminal});

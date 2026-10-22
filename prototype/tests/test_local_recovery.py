@@ -128,3 +128,35 @@ class LateProviderCoordinatorTests(unittest.TestCase):
         self.assertFalse(self.coordinator.reconcile_one())
         self.client.command.assert_not_called()
         self.assertEqual(self.coordinator._pending()[0]['state'],'held')
+
+
+class SupersededOwnerYieldTests(unittest.TestCase):
+    def setUp(self):
+        CoordinatorTests.setUp(self)
+        for key,value in {'owner_control_revision':'1','active_session_id':'','active_cycle_id':'',
+                          'letta_agent_id':self.binding['agent_id'],
+                          'letta_conversation_id':self.binding['conversation_id']}.items():
+            self.store.set_state(key,value)
+        self.records.revoke(self.scope['admission_id'])
+
+    def test_superseded_turn_can_only_acquire_yield_authority(self):
+        scope=self.records.admit_scope(self.binding,yield_only=True)
+        self.assertEqual(self.store.connection.execute('SELECT state FROM recovery_attempts WHERE admission_id=?',
+            (scope['admission_id'],)).fetchone()[0],'yielding')
+        with self.assertRaises(ValueError):self.records.admit_scope(self.binding)
+
+    def test_superseded_yield_refuses_current_turn_identity_or_restore_mismatch(self):
+        for key,value in [('owner_control_revision','0'),('owner_control_revision','invalid'),
+                          ('active_session_id',self.binding['session_id']),('active_cycle_id',self.binding['cycle_id']),
+                          ('letta_agent_id','another-agent'),('letta_conversation_id','another-conversation'),
+                          ('local_recovery_config_sha','c'*64),('restore_recovery_required','1'),
+                          ('local_recovery_restore_required','1')]:
+            with self.subTest(key=key):
+                previous=self.store.get_state(key,'');self.store.set_state(key,value)
+                try:
+                    with self.assertRaises(ValueError):self.records.admit_scope(self.binding,yield_only=True)
+                finally:self.store.set_state(key,previous)
+
+    def test_superseded_yield_respects_restore_file_fence(self):
+        (self.store.path.parent/'runner-restore-required.json').write_text('{}')
+        with self.assertRaises(ValueError):self.records.admit_scope(self.binding,yield_only=True)

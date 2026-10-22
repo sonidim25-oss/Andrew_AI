@@ -18,6 +18,9 @@
       "64d25b20b4f0232e8f481801ffea66dd440e9ff7f382b10bef295deb2d25a9ba": [
         "81ee6be-installed-media"
       ],
+      "6c9c6abe3db5894d33adab06e6e47bc1aa145e10f6c2c408764825d866681113": [
+        "c24bd8e-installed-held-turn-handoff"
+      ],
       "76b1e9f07d5d24ab6b151ddc1c19868fd173e5c8df004a11b1ebd847a543c976": [
         "c6c09cb0e383c48908ee082ddd42a5514be78f19"
       ],
@@ -34,7 +37,7 @@
         "locally-tested-incident-recovery-2026-10-16"
       ]
     },
-    "tested": "6c9c6abe3db5894d33adab06e6e47bc1aa145e10f6c2c408764825d866681113"
+    "tested": "4654bac264c8da874a475189c2e7bf864a1d44f0dbd06c37588eaa125ae85390"
   },
   "browser_history.py": {
     "original": "a6640c5533e6f84992bb5f68fe74d44d80a57f25a5a5c43bb4ee068b74a60fbc",
@@ -166,6 +169,9 @@
       "d0a008f029f957b4e8131f5361d75a1a44ecb334ed0b96911a663c256ebb9d68": [
         "fc0950c-installed-baseline"
       ],
+      "d472a67ee208b323e80a0ba84bcaeded4922267917211348c21e0160eadb3dc6": [
+        "c24bd8e-installed-held-turn-handoff"
+      ],
       "ddc0e4881e1eba39fca3486972d29f4aef3abd97f5b07bd0497da2a4ec8dc4f4": [
         "pre-local-recovery-source"
       ],
@@ -180,7 +186,7 @@
         "b5708ac"
       ]
     },
-    "tested": "d472a67ee208b323e80a0ba84bcaeded4922267917211348c21e0160eadb3dc6"
+    "tested": "106e1a3643d04d112805cf04bbe4dd33963b7653020ad471ab4d695ff76a0b25"
   },
   "gateway.py": {
     "original": "8b702d58d2359b963b42bc548d1549789996aeb8535d13fb3ffdcb6666200047",
@@ -356,11 +362,14 @@
       "3e0763c61ca064e745c183ea467e43d6d950ad3c78071187d5425a15e8222ca0": [
         "pre-local-recovery-source"
       ],
+      "b7f96838d84a7aeeade8978608d1af4174e22a05107f76c49b5ab698cc0b0dce": [
+        "c24bd8e-installed-held-turn-handoff"
+      ],
       "ff899c8a9d2e9543dcec634c7672bb2fca5d634d94429c65d8f4c5a1028b2333": [
         "8319419-installed-provider-not-reached"
       ]
     },
-    "tested": "b7f96838d84a7aeeade8978608d1af4174e22a05107f76c49b5ab698cc0b0dce"
+    "tested": "2d3cd123fda026d2935f7872b15cdf958eea3da029549b05754ecf47bdd045d5"
   },
   "recovery_dispatch.py": {
     "original": null,
@@ -386,11 +395,14 @@
       "93f9a1bbf5f67448704897a32adaf271c130646901386856059f96de87394122": [
         "pre-local-recovery-source"
       ],
+      "9e51495f901317c9c0f42a508b0521e8ebb26df5b4e6842faa4d27cc1f8682f9": [
+        "c24bd8e-installed-held-turn-handoff"
+      ],
       "d05a72a10d3be606a9377705c59895a9d4ec31718dc20dc527e615f811320663": [
         "93815b9-installed-process-cleanup"
       ]
     },
-    "tested": "9e51495f901317c9c0f42a508b0521e8ebb26df5b4e6842faa4d27cc1f8682f9"
+    "tested": "fc9197922800b6acfc99817010fe056db96e3aeeb3d9618caee2fe63d9059af1"
   },
   "runner_client.py": {
     "original": "c49bf7290f85b816b9fd057dde7372beaa8f128b77e5f7ce372eb929fa0d71f6",

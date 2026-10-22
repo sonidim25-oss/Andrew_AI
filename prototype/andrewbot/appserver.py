@@ -849,6 +849,13 @@ class LettaAgent:
         client = None
         memory_context_token = MEMORY_SOURCE_CONTEXT.set({'untrusted': False})
         try:
+            recovery=getattr(self,'local_recovery',None)
+            if recovery is not None and recovery.enabled:
+                # Close cancelled work before marking this new turn active.
+                # Yield authority deliberately refuses any active-turn marker.
+                from .recovery import RecoveryInterrupted
+                try:recovery.close_superseded()
+                except (RecoveryInterrupted,ValueError,OSError,TimeoutError):pass
             self.store.set_state('model_turn_origin', origin)
             self.store.set_state('owner_reply_rounds', '0')
             self.store.set_state('model_turn_progress', json.dumps({'phase': 'starting conversation', 'at': time.time()}))

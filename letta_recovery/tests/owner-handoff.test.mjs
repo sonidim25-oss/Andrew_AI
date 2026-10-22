@@ -56,3 +56,16 @@ for(const kind of ['provider','tool'])test(`owner_after_${kind}_authorization_ca
  assert.equal((kind==='tool'?yielded.tools:yielded.steps).at(-1).state,'cancelled');
  assert.deepEqual(f.counts,{provider:kind==='tool'?1:0,tool:0});
 });
+
+test('invalid_saved_tool_calls_remain_held_across_owner_yield_retries',async t=>{
+ const invalid=structuredClone(toolResponse);
+ invalid.choices[0].message.tool_calls[0].function.name='unadvertised_tool';
+ const f=await executionFixture(t,{responses:[invalid]});gate(f);
+ await f.execution.advance(f.binding,f.claim);
+ for(let retry=0;retry<2;retry++){
+  await assert.rejects(f.execution.yieldOwner(f.binding,f.claim),/tool_uncertain/);
+  assert.equal(f.store.load(f.binding).phase,'held');
+  assert.equal(f.store.load(f.binding).terminal,null);
+ }
+ assert.deepEqual(f.counts,{provider:1,tool:0});
+});
