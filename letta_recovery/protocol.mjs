@@ -39,7 +39,7 @@ export class RecoveryProtocol{
  }
  async _handleRecoveryCommand(command){
   this._assertOpen();validateCommand(command);
-  if(command.type==='recovery_capabilities')return {contract:CONTRACT,version:1,store_id:this.storeId,owner_handoff:1,late_provider_receipt:1,local_diary_reconciliation:1,runner_result_recovery_v1:1,held_tool_result_v1:1};
+  if(command.type==='recovery_capabilities')return {contract:CONTRACT,version:1,store_id:this.storeId,owner_handoff:1,late_provider_receipt:1,local_diary_reconciliation:1,runner_result_recovery_v1:1,held_tool_result_v1:1,runner_tool_evidence_v1:1};
   const binding=validateBinding(command.binding);if(binding.store_id!==this.storeId)throw Error('binding_mismatch');
   if(['recovery_inspect','recovery_status','recovery_subscribe'].includes(command.type))return this._status(binding,command.attempt_id);
   assertNotRestored(this.root);
@@ -59,7 +59,7 @@ export class RecoveryProtocol{
    await this.sdk.assertAdoptable(binding);this._assertOpen();adopt(this.root,binding);
    const snapshot=command.previous_binding?this.store.admitNext(binding,command.input,command.previous_binding,command.expected_revision):await this.execution.admitInput(binding,command.input);return this._status(snapshot.binding);
   }
-  if(['recovery_claim','recovery_yield','recovery_reconcile_provider','recovery_reconcile_local_diary'].includes(command.type)){
+  if(['recovery_claim','recovery_yield','recovery_reconcile_provider','recovery_reconcile_local_diary','recovery_import_runner_tool'].includes(command.type)){
    this._scope(command,null);
    const claim=await this.ownership.claim(binding,command.expected_revision,command.admission_id);
    try{
@@ -67,6 +67,11 @@ export class RecoveryProtocol{
     if(command.type==='recovery_reconcile_provider'){
      await this.sdk.checkEvidence(binding,claim);this._assertOpen();
      await this.execution.reconcileProvider(binding,claim,command.effect_admission_id);
+    }else if(command.type==='recovery_import_runner_tool'){
+     // Historical evidence only: records a saved runner result, grants no continuation.
+     await this.sdk.checkEvidence(binding,claim);this._assertOpen();
+     const repaired=await this.execution.reconcileTool(binding,claim,command.effect_admission_id);
+     await this.execution.projectTranscript(repaired,claim);
     }else if(command.type==='recovery_reconcile_local_diary'){
      await this.sdk.checkEvidence(binding,claim);this._assertOpen();
      const repaired=await this.execution.reconcileLocalDiary(binding,claim,command.effect_admission_id);

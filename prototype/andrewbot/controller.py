@@ -163,6 +163,12 @@ class Controller:
         if self.store.get_state('autonomy_error', ''):
             self.store.add_activity('Owner message queued while automatic model calls are stopped')
             return 'Your message is saved and has not been sent to the model. Automatic model calls are stopped after an error. Use /wake to resume.'
+        recovery = getattr(self, 'local_recovery', None)
+        if recovery is not None and recovery.enabled is True and recovery.has_pending():
+            # Held journaled work hands over to waiting owner input before any new
+            # turn may start; the queued message is answered after that handoff.
+            self.store.add_activity('Owner message queued behind held journaled work')
+            return 'Your message is saved. I’m first closing an earlier unfinished step without repeating it; then I’ll answer.'
         owner_revision = self.store.get_state('owner_control_revision', '0')
         self.note_conversation(owner_revision)
         messages = self._bounded_messages([

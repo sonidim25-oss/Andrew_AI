@@ -139,3 +139,35 @@ class RunnerBackendProtocolTests(unittest.TestCase):
         terminal=self.command('recovery_inspect',binding=self.binding)
         self.assertEqual(terminal['phase'],'terminal_committed');self.assertEqual(terminal['run_id'],state['run_id'])
         self.assertFalse(coordinator.has_pending());self.assertEqual(self.worker.calls,1);self.assertEqual(len(self.fixture.provider_calls),2)
+
+    def test_owner_wake_then_message_imports_saved_result_and_hands_over_without_dispatch(self):
+        # Production 2026-10-22: a held runner turn with a saved result, then /wake
+        # (newer revision, session ended) and an owner message.
+        scope,_,state=self.runner_turn();self.assertEqual(state['phase'],'held',state)
+        store=self.fixture.store
+        with store.connection:store.connection.execute("UPDATE recovery_attempts SET state='held',hold_reason='tool_uncertain',backend_attempt_id='runner-attempt' WHERE admission_id=?",(scope['admission_id'],))
+        self.fixture.restart()
+        controller=Controller(store,Mock(),17,autonomous_enabled=True);controller.runner_recovery=self.adapter
+        coordinator=RecoveryCoordinator(store,controller,lambda:LocalRecoveryClient(self.fixture.client),enabled=True,config_sha='b'*64)
+        def client():
+            result=LocalRecoveryClient(self.fixture.client);result.close=lambda:None;return result
+        coordinator.client_factory=client
+        self.assertTrue(coordinator.reconcile_one()) # runner result saved by the controller
+        for key,value in dict(owner_control_revision='1',active_session_id='',active_session_started_at='',active_cycle_id='',
+                              autonomy_error='',session_start_requested='owner_wake',paused='0',
+                              letta_agent_id=self.binding['agent_id'],letta_conversation_id=self.binding['conversation_id']).items():
+            store.set_state(key,value)
+        self.assertTrue(coordinator.reconcile_one()) # evidence import despite the newer revision
+        self.assertEqual(self.command('recovery_inspect',binding=self.binding)['phase'],'tool_confirmed')
+        self.assertFalse(coordinator.reconcile_one()) # no owner input: old work never continues
+        self.assertEqual(self.command('recovery_inspect',binding=self.binding)['phase'],'tool_confirmed')
+        controller.local_recovery=coordinator
+        store.add_message(17,'user','What happened?',queued=True)
+        self.assertTrue(coordinator.reconcile_one()) # owner handoff
+        terminal=self.command('recovery_inspect',binding=self.binding)
+        self.assertEqual(terminal['phase'],'terminal_committed');self.assertEqual(terminal['terminal']['stop_reason'],'owner_input_pending')
+        self.assertEqual(terminal['terminal']['cancelled_admission_ids'],[])
+        self.assertFalse(coordinator.has_pending())
+        self.assertEqual(len(self.fixture.provider_calls),1);self.assertEqual(self.worker.calls,1)
+        self.assertTrue(store.pending_owner_input(17))
+        self.assertEqual(store.get_state('owner_control_revision'),'1');self.assertEqual(store.get_state('autonomy_error'),'')

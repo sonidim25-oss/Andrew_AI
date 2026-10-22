@@ -72,6 +72,21 @@ def paused_owner_yield(state,binding):
         and state.get('local_recovery_config_sha')==binding['config_sha'])
 
 
+def awake_owner_yield(state,binding):
+    """After /wake, newer owner authority may cancel old held work for waiting owner input, never dispatch it."""
+    try:newer=int(state.get('owner_control_revision','0'))>int(binding['owner_revision'])
+    except (ValueError,TypeError):return False
+    # A start request only waits behind the held work; an active session or turn does not.
+    # model_turn_progress is a display hint that can outlive its gateway call; the turn
+    # markers below are authoritative and share the serialized model worker with handoff.
+    return (newer and state.get('paused','0')=='0' and state.get('sleeping','0')=='0'
+        and state.get('autonomy_error','') in ('','local_recovery_interrupted')
+        and not any(state.get(key) for key in ('active_session_id','active_cycle_id','model_turn_origin','autonomous_owner_id'))
+        and not any(state.get(key)=='1' for key in ('restore_recovery_required','local_recovery_restore_required'))
+        and all(state.get('letta_'+key)==binding[key] for key in ('agent_id','conversation_id'))
+        and state.get('local_recovery_config_sha')==binding['config_sha'])
+
+
 class RecoveryRecords:
     def __init__(self,store):self.store=store
 
@@ -101,7 +116,7 @@ class RecoveryRecords:
         validate_binding(binding)
         if origin=='autonomous':
             state=dict(self.store.connection.execute('SELECT key,value FROM state'))
-            if paused_owner_yield(state,binding):
+            if paused_owner_yield(state,binding) or awake_owner_yield(state,binding):
                 other=self.store.connection.execute("SELECT 1 FROM recovery_attempts WHERE state IN ('active','held','evidence','yielding') AND binding_sha!=? LIMIT 1",(digest(binding),)).fetchone()
                 if other is not None:raise ValueError('Recovery binding_mismatch')
                 return

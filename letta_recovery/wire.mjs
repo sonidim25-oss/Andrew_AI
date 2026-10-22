@@ -8,6 +8,7 @@ const fields={
  recovery_reconcile_provider:['binding','admission_id','scope_token','expected_revision','effect_admission_id'],
  recovery_reconcile_local_diary:['binding','admission_id','scope_token','expected_revision','effect_admission_id'],
  recovery_reconcile_tool:['binding','admission_id','scope_token','claim_id','fence','expected_revision','effect_admission_id'],
+ recovery_import_runner_tool:['binding','admission_id','scope_token','expected_revision','effect_admission_id'],
  recovery_yield:['binding','admission_id','scope_token','expected_revision'],
  recovery_resume:['binding','admission_id','scope_token','expected_revision','attempt_id','claim_id','fence'],
  recovery_renew:['binding','admission_id','scope_token','claim_id','fence'],

@@ -292,6 +292,17 @@ class RecoveryCoordinator:
             proof=self.records.effect_result(admission_id)
             if proof.get('state')!='confirmed' or not proof.get('runner_receipt'):return False
             if repeated and admission_id not in state.get('runner_receipt_admissions',[]):return False
+        if held and capability.get('runner_tool_evidence_v1')==1:
+            # Import is historical evidence only. Continuing afterwards still
+            # requires the same guards as every other resumed autonomous turn,
+            # and waiting owner input can then take over through the handoff.
+            scope=self.records.admit_scope(binding,origin=row['origin'],evidence_only=True)
+            self._activate(client,scope)
+            claim=client.command('recovery_import_runner_tool',binding=binding,expected_revision=state['revision'],effect_admission_id=admission_id,**scope)
+            client.release(binding,scope,claim)
+            self._state(scope['admission_id'],'active',revision=client.inspect(binding)['revision'])
+            self.store.add_activity('Saved runner result imported without executing the tool again')
+            return True
         # Import is historical. Acquiring new authority and continuing require
         # the same guards as every other resumed autonomous turn.
         self._check_outcomes(binding)
