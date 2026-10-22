@@ -67,6 +67,9 @@
       "6752a93923b405cb4cdc794e1d0f8e2ec9bfef30cf1a9bb63b7e1ac9472aaa6d": [
         "d5f1ac7a571235c0558d7a2e83c2119b448e95f3"
       ],
+      "6a156522eb6e815502c476f20827cfe48eb7c9678ef375465448a005cb1bbb3d": [
+        "1512974-installed-cleanup"
+      ],
       "6c17f2c3281004f27e5cb7fcd0bef65647dff5029a24a498a24caf68ea9bdbb5": [
         "70e06b6b73c9d42eaa79e0f6d4f9a283e2eaf27c"
       ],
@@ -108,7 +111,7 @@
         "6d31d27b3fe9f9985b6bbad80cb32d359e309688"
       ]
     },
-    "tested": "6a156522eb6e815502c476f20827cfe48eb7c9678ef375465448a005cb1bbb3d"
+    "tested": "e89224aeb06551399bd62a92bc9fe09acb857a394fd01adf613a9c98112a38df"
   },
   "diary.py": {
     "original": "fa8d71bc5057859623098c1e650ef69d3fe4de7c2c644c7b4de9e36bf2cbcaf2",
