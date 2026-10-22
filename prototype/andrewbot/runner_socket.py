@@ -21,6 +21,15 @@ def _failure():
     return RunnerProtocolError('runner receipt protocol unavailable')
 
 
+class RunnerTransportError(RunnerProtocolError):
+    """A transport failure, never a peer/identity/protocol validation refusal."""
+    def __init__(self, category='io_error'):
+        if category not in {'io_error', 'deadline_exceeded'}:
+            raise ValueError('invalid runner transport category')
+        self.category = category
+        super().__init__('runner receipt transport unavailable')
+
+
 def _credentials(ancillary, flags, expected_uid):
     credentials = []
     invalid = bool(flags & (socket.MSG_CTRUNC | socket.MSG_TRUNC))
@@ -59,15 +68,21 @@ def read_authenticated_frame(connection, *, expected_uid, limit=MAX_EVIDENCE_BYT
             if deadline is not None or cancel_event is not None:
                 remaining = None if deadline is None else deadline - time.monotonic()
                 if remaining is not None and remaining <= 0:
-                    raise _failure()
+                    raise RunnerTransportError('deadline_exceeded')
                 if not select.select([connection], [], [], .1 if remaining is None else min(.1, remaining))[0]:
                     continue
             data, ancillary, flags, _ = connection.recvmsg(
                 length - len(result), socket.CMSG_SPACE(struct.calcsize('3i')) + socket.CMSG_SPACE(32 * 4),
                 socket.MSG_CMSG_CLOEXEC)
+            # Linux EOF can carry zero credentials; there are no bytes to
+            # authenticate. Other ancillary data still requires validation and
+            # descriptor cleanup below, even when the payload is empty.
+            empty_credentials = [(socket.SOL_SOCKET, socket.SCM_CREDENTIALS, struct.pack('3i', 0, 0, 0))]
+            if not data and not flags & (socket.MSG_CTRUNC | socket.MSG_TRUNC) and ancillary in ([], empty_credentials):
+                raise RunnerTransportError()
             _credentials(ancillary, flags, expected_uid)
             if not data:
-                raise _failure()
+                raise RunnerTransportError()
             result.extend(data)
         return bytes(result)
     try:
@@ -77,7 +92,7 @@ def read_authenticated_frame(connection, *, expected_uid, limit=MAX_EVIDENCE_BYT
             raise _failure()
         return decode_frame(header + exact(size), limit=limit)
     except OSError:
-        raise _failure() from None
+        raise RunnerTransportError() from None
 
 
 def envelope(action, **values):
@@ -146,7 +161,7 @@ def _connection(client, deadline, cancel_event=None):
         connection.connect(client.socket_path)
         yield connection
     except OSError:
-        raise _failure() from None
+        raise RunnerTransportError() from None
     finally:
         connection.close()
 

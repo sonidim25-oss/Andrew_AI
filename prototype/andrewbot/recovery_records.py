@@ -443,6 +443,9 @@ class RecoveryRecords:
             if row is None:return {'state':'uncertain','admission_id':admission_id}
             usage=json.loads(row['usage_json']) if row['usage_json'] else None
             runner={}
+            if isinstance(usage,dict) and 'runner_pregrant_rejection' in usage:
+                from .runner_recovery import validate_pregrant_rejection
+                validate_pregrant_rejection(self.store,admission_id,row['result_sha'],json.loads(row['result_json']),usage)
             if isinstance(usage,dict) and 'runner_receipt' in usage:
                 from .runner_recovery import confirmed_runner_metadata
                 runner['runner_receipt']=confirmed_runner_metadata(self.store,admission_id,row['result_sha'],json.loads(row['result_json']),usage)

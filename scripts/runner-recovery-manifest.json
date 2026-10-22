@@ -93,8 +93,8 @@
     },
     "recovery_records.py": {
       "allow_missing": false,
-      "baseline": "fc9197922800b6acfc99817010fe056db96e3aeeb3d9618caee2fe63d9059af1",
-      "tested": "82a3524fb49f76875ed71977b8c6cfec4afc33647ac7d41c8899431fa3af79d2"
+      "baseline": "82a3524fb49f76875ed71977b8c6cfec4afc33647ac7d41c8899431fa3af79d2",
+      "tested": "ba36fb6e795ca565544a520112aeee1f69495e1bff0a1b8b52d185e1e67f4d95"
     },
     "runner_adoption.py": {
       "allow_missing": false,
@@ -134,7 +134,7 @@
     "runner_recovery.py": {
       "allow_missing": false,
       "baseline": "57cbc0048bedd713e7bbb5bbc23cb0da7a56292533921e2ae3ee7158e969fa81",
-      "tested": "57cbc0048bedd713e7bbb5bbc23cb0da7a56292533921e2ae3ee7158e969fa81"
+      "tested": "7600144ff772a32203d011827551652b2b7871a38d3ca9bbccc5cbe35eaa3028"
     },
     "runner_service.py": {
       "allow_missing": false,
@@ -144,7 +144,7 @@
     "runner_socket.py": {
       "allow_missing": false,
       "baseline": "a210806888d574ade8d95806aff52c2529219e68c73a871a454bed0bda9789f3",
-      "tested": "a210806888d574ade8d95806aff52c2529219e68c73a871a454bed0bda9789f3"
+      "tested": "f1e99e2e63c01aa8bcdb2b4afb5479d602091c88f85cad41909e051926e98221"
     },
     "runtime_readiness.py": {
       "allow_missing": false,
@@ -251,7 +251,7 @@
     "runner_socket.py": {
       "allow_missing": true,
       "baseline": "a210806888d574ade8d95806aff52c2529219e68c73a871a454bed0bda9789f3",
-      "tested": "a210806888d574ade8d95806aff52c2529219e68c73a871a454bed0bda9789f3"
+      "tested": "f1e99e2e63c01aa8bcdb2b4afb5479d602091c88f85cad41909e051926e98221"
     },
     "runtime_readiness.py": {
       "allow_missing": true,

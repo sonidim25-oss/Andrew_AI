@@ -137,8 +137,9 @@ class RunnerRecoveryDispatchTests(RunnerRecoveryFixture, unittest.TestCase):
             if point == 'grant_before_commit':
                 raise OSError('PRIVATE')
         self.adapter._fault = fault
-        with self.assertRaises(RunnerProtocolError):
-            self.adapter.execute(self.metadata, self.name, self.arguments)
+        result = json.loads(self.adapter.execute(self.metadata, self.name, self.arguments))
+        self.assertFalse(result['executed'])
+        self.assertEqual(result['error']['code'], 'runner_not_executed')
         self.assertEqual(self.operation()['state'], 'cancelled')
         self.assertEqual(self.client.calls, 0)
 

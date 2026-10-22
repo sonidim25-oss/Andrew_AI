@@ -33,7 +33,7 @@ class RunnerBackendProtocolTests(unittest.TestCase):
             if state.get('phase') in ('held','terminal_committed'):return state
             self.assertLess(time.monotonic(),deadline,state);time.sleep(.03)
 
-    def runner_turn(self,lose_reply=True,response=None):
+    def runner_turn(self,lose_reply=True,response=None,pregrant_failure=False):
         binding,input,unused_scope=self.prepare();self.binding=binding
         RecoveryRecords(self.fixture.store).revoke(unused_scope['admission_id'])
         capability=self.fixture.client.request(
@@ -45,6 +45,9 @@ class RunnerBackendProtocolTests(unittest.TestCase):
                               runner_receipts_enabled='1',runner_receipt_backend_capability='1').items():store.set_state(key,value)
         self.worker=EvidenceRunner(store);self.worker.lose_reply=lose_reply
         self.worker.response=response
+        if pregrant_failure:
+            def fail():raise OSError('PRIVATE synthetic handshake detail')
+            self.worker.before_grant=fail
         self.adapter=RunnerRecoveryAdapter(store,self.worker,expected_runner_uid=os.getuid(),runner_store_id=RUNNER_ID)
         self.fixture.model_gateway.recovery_tool_handler=lambda name,args,*,recovery:RecoveryDispatch(store,runner_adapter=self.adapter).run_tool(
             recovery,name,args,lambda:self.fail('generic callback executed'))
@@ -56,6 +59,24 @@ class RunnerBackendProtocolTests(unittest.TestCase):
         claim=self.command('recovery_claim',binding=binding,expected_revision=admitted['revision'],**scope)
         self.command('recovery_resume',binding=binding,attempt_id='runner-attempt',expected_revision=claim['revision'],claim_id=claim['claim_id'],fence=claim['fence'],**scope)
         return scope,claim,self.wait('runner-attempt')
+
+    def test_pregrant_cancellation_reaches_model_as_error_and_completes_without_worker_execution(self):
+        scope,claim,state=self.runner_turn(lose_reply=False,pregrant_failure=True)
+        self.assertEqual(state['phase'],'terminal_committed',state)
+        self.assertEqual(self.worker.calls,0)
+        self.assertEqual(len(self.fixture.provider_calls),2)
+        tool_result=self.fixture.provider_calls[-1]['messages'][-1]['content']
+        self.assertIn('runner_not_executed',tool_result)
+        self.assertNotIn('PRIVATE',tool_result)
+        store=self.fixture.store
+        effect=store.connection.execute("SELECT admission_id FROM recovery_effects WHERE kind='tool'").fetchone()[0]
+        proof=RecoveryRecords(store).effect_result(effect)
+        self.assertEqual(proof['state'],'confirmed')
+        self.assertNotIn('runner_receipt',proof)
+        self.assertEqual(store.connection.execute('SELECT count(*) FROM runner_imports').fetchone()[0],0)
+        self.fixture.restart()
+        self.assertEqual(RecoveryRecords(store).effect_result(effect),proof)
+        self.assertEqual(self.worker.calls,0)
 
     def test_lost_runner_result_recovers_exact_tool_and_one_continuation_after_restart(self,response=None):
         scope,claim,state=self.runner_turn(response=response)

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import secrets
 import sqlite3
 
@@ -12,7 +13,27 @@ from .runner_protocol import (
     CONTRACT, VERSION, TOOLS, DispatchGrant, OperationIdentity, ReceiptEvidence, _uuid,
     validate_evidence, validate_grant, validate_identity,
 )
-from .runner_socket import validate_envelope
+from .runner_socket import RunnerTransportError, validate_envelope
+
+
+PREGRANT_RESULT = canonical({'status': 'error', 'executed': False, 'error': {
+    'code': 'runner_not_executed',
+    'message': 'Runner communication failed before command admission; the command was not executed.'}})
+
+
+def _failure_category(error):
+    if isinstance(error, RunnerTransportError):
+        return error.category
+    if isinstance(error, OSError):
+        return 'io_error'
+    if isinstance(error, sqlite3.Error):
+        return 'storage_error'
+    if isinstance(error, RunnerProtocolError):
+        return 'protocol_error'
+    from .recovery import RecoveryInterrupted
+    if isinstance(error, RecoveryInterrupted):
+        return error.category
+    return 'authority_or_state_error' if isinstance(error, ValueError) else 'unexpected_error'
 
 
 def _failure():
@@ -111,6 +132,31 @@ def prepared_cancellation_proven(store, admission_id):
                 and store.connection.execute('SELECT 1 FROM recovery_results WHERE admission_id=?', (admission_id,)).fetchone() is None)
     except (ValueError, TypeError, sqlite3.Error):
         return False
+
+
+def validate_pregrant_rejection(store, admission_id, result_sha, result, usage):
+    """Validate a controller cancellation receipt, not a receiver execution result."""
+    marker = usage.get('runner_pregrant_rejection') if isinstance(usage, dict) else None
+    if (not isinstance(usage, dict) or set(usage) != {'runner_pregrant_rejection'} or not isinstance(marker, dict)
+            or set(marker) != {'contract', 'operation_id', 'identity_sha', 'category'}
+            or marker['contract'] != 'runner_not_executed_v1'
+            or marker['category'] not in {'io_error', 'deadline_exceeded'}
+            or result != PREGRANT_RESULT or result_sha != digest(result)):
+        raise _failure()
+    saved = store.connection.execute('SELECT identity_json FROM runner_operations WHERE admission_id=?', (admission_id,)).fetchone()
+    if saved is None:
+        raise _failure()
+    identity = validate_identity(json.loads(saved['identity_json']))
+    row, effect, legacy = _mapping(store, identity)
+    if (identity.admission_id != admission_id
+            or marker['operation_id'] != identity.operation_id or marker['identity_sha'] != digest(identity.to_dict())
+            or row['state'] != 'cancelled' or row['admitted_at'] is not None
+            or effect['state'] != 'confirmed' or legacy['outcome'] != 'not_executed'
+            or legacy['finished_at'] is None
+            or identity.controller_store_id != store.get_state('local_recovery_controller_store_id', '')
+            or identity.runner_store_id != store.get_state('runner_receipt_store_id', '')
+            or store.connection.execute('SELECT 1 FROM runner_imports WHERE operation_id=?', (identity.operation_id,)).fetchone()):
+        raise _failure()
 
 
 def cancel_prepared_mapping_locked(store, admission_id):
@@ -271,6 +317,27 @@ class RunnerRecoveryAdapter:
                 raise _failure()
             cancel_prepared_mapping_locked(self.store, identity.admission_id)
 
+    def _confirm_pregrant_rejection(self, metadata, identity, category):
+        """Only the live failure handler may confirm a just-fenced cancellation."""
+        if category not in {'io_error', 'deadline_exceeded'}:
+            raise _failure()
+        with self.store._lock, self.store.connection:
+            self.store.connection.execute('BEGIN IMMEDIATE')
+            self._enabled()
+            self.records._validate_dispatch_sha(metadata, identity.request_sha, {'tool'})
+            if not prepared_cancellation_proven(self.store, identity.admission_id):
+                raise _failure()
+            if not self.store.connection.execute("SELECT 1 FROM cycles WHERE cycle_id=? AND session_id=? AND status='running'",
+                    (identity.binding['cycle_id'], identity.binding['session_id'])).fetchone():
+                raise _failure()
+            from .recovery import check_recovery_outcomes
+            check_recovery_outcomes(self.store, dict(identity.binding))
+            usage = {'runner_pregrant_rejection': {'contract': 'runner_not_executed_v1',
+                'operation_id': identity.operation_id, 'identity_sha': digest(identity.to_dict()), 'category': category}}
+            self.records._confirm(identity.admission_id, canonical(PREGRANT_RESULT), usage)
+            validate_pregrant_rejection(self.store, identity.admission_id, digest(PREGRANT_RESULT), PREGRANT_RESULT, usage)
+        return PREGRANT_RESULT
+
     def execute(self, metadata, name, arguments):
         request = prepare_runner_request(name, arguments)
         identity = self.prepare(metadata, name, arguments)
@@ -280,22 +347,43 @@ class RunnerRecoveryAdapter:
             row, _, _ = _mapping(self.store, identity)
             if row['state'] == 'imported':
                 return self.records.effect_result(identity.admission_id)['result']
+            if row['state'] == 'cancelled':
+                proof = self.records.effect_result(identity.admission_id)
+                if proof['state'] == 'confirmed' and isinstance(proof.get('usage'), dict) and 'runner_pregrant_rejection' in proof['usage']:
+                    return proof['result']
+                raise _failure()
             if row['state'] != 'prepared':
                 raise _failure()
+        stage = 'capabilities'
         try:
             caps = self.client.receipt_capabilities(expected_runner_uid=self.expected_runner_uid)
             if (caps.get('contract') != CONTRACT or type(caps.get('version')) is not int or caps['version'] != VERSION
                     or caps.get('controller_store_id') != identity.controller_store_id or caps.get('runner_store_id') != self.runner_store_id
                     or caps.get('formatter') != FORMATTER or caps.get('execution_enabled') is not True):
                 raise _failure()
+            def grant(ready):
+                nonlocal stage
+                stage = 'grant'
+                value = self.grant(metadata, identity, ready)
+                stage = 'handshake'
+                return value
+            stage = 'handshake'
             evidence = self.client.execute_receipted(request, identity, expected_runner_uid=self.expected_runner_uid,
-                                                     grant_factory=lambda ready: self.grant(metadata, identity, ready))
+                                                     grant_factory=grant)
+            stage = 'import'
             return self.import_result(identity, evidence)
-        except Exception:
+        except Exception as error:
             with self.store._lock:
                 row, _, _ = _mapping(self.store, identity)
+            category = _failure_category(error)
+            logging.warning('Runner recovery failure (stage=%s, category=%s, admission=%s)', stage, category, row['state'])
             if row['state'] == 'prepared':
                 self.cancel_prepared(identity)
+                if isinstance(error, (OSError, RunnerTransportError)):
+                    try:
+                        return self._confirm_pregrant_rejection(metadata, identity, category)
+                    except Exception as refusal:
+                        logging.warning('Runner non-execution receipt withheld (category=%s)', _failure_category(refusal))
             elif row['state'] == 'admitted':
                 with self.store._lock, self.store.connection:
                     self.store.connection.execute("UPDATE cycle_tool_attempts SET outcome='uncertain',finished_at=? WHERE attempt_id=? AND outcome='started'",
