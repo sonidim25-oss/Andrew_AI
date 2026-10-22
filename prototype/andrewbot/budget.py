@@ -2,16 +2,13 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 
-TORONTO = ZoneInfo("America/Toronto")
-
-
 def budget_snapshot(store, now=None, monthly_limit_usd=10.0, monthly_reserve_usd=1.0,
                     daily_target_usd=0.30):
     """Report spending for Andrew to manage; legacy limit arguments are ignored."""
     current = datetime.now(timezone.utc) if now is None else now
     if current.tzinfo is None:
         raise ValueError("budget time must be timezone-aware")
-    local = current.astimezone(TORONTO)
+    local = current.astimezone(ZoneInfo(store.timezone_name))
     month = local.strftime("%Y-%m")
     day = local.strftime("%Y-%m-%d")
     totals = store.usage_totals(month, day)

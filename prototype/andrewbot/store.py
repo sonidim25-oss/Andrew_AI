@@ -21,8 +21,10 @@ def database_locked(method):
 
 
 class Store:
-    def __init__(self, path):
+    def __init__(self, path, timezone_name="America/Toronto"):
         self.path = Path(path)
+        ZoneInfo(timezone_name)
+        self.timezone_name = timezone_name
         self._lock = threading.RLock()
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path.parent.chmod(0o700)
@@ -229,6 +231,19 @@ class Store:
                 record_id UNINDEXED, record_type UNINDEXED, created_at UNINDEXED,
                 content, source UNINDEXED, tokenize='unicode61'
             );
+            CREATE TABLE IF NOT EXISTS memory_revisions (
+                record_id TEXT PRIMARY KEY REFERENCES memory_records(record_id),
+                superseded_by TEXT REFERENCES memory_records(record_id),
+                reason TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS memory_revisions_successor ON memory_revisions(superseded_by);
+            CREATE TRIGGER IF NOT EXISTS memory_revisions_immutable_update BEFORE UPDATE ON memory_revisions BEGIN
+                SELECT RAISE(ABORT,'Memory revisions are immutable');
+            END;
+            CREATE TRIGGER IF NOT EXISTS memory_revisions_immutable_delete BEFORE DELETE ON memory_revisions BEGIN
+                SELECT RAISE(ABORT,'Memory revisions are immutable');
+            END;
             CREATE TABLE IF NOT EXISTS cycles (
                 cycle_id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL,
@@ -2003,7 +2018,7 @@ class Store:
 
     @database_locked
     def usage_totals(self, month, day):
-        zone = ZoneInfo("America/Toronto")
+        zone = ZoneInfo(self.timezone_name)
         local_day = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=zone)
         day_start = local_day.astimezone(timezone.utc).isoformat(timespec="seconds")
         day_end = (local_day + timedelta(days=1)).astimezone(timezone.utc).isoformat(timespec="seconds")
@@ -2284,28 +2299,91 @@ class Store:
             raise ToolRejected("invalid memory source")
         event_ids = self._validate_reference_ids(event_ids, int)
         diary_ids = self._validate_reference_ids(diary_ids, str)
-        record_id = uuid.uuid4().hex
-        created_at = self.now()
         with self.connection:
             self._validate_memory_references(event_ids, diary_ids)
             provenance = self._prepare_memory_provenance(source, history_ids, owner_id, untrusted)
-            self.connection.execute(
-                "INSERT INTO memory_records(record_id,record_type,created_at,content,source) VALUES(?,?,?,?,?)",
-                (record_id, record_type, created_at, content.strip(), source),
-            )
-            self._insert_memory_provenance(record_id, provenance)
-            self._insert_memory_references(
-                "memory_event_refs", "memory_diary_refs", "record_id", record_id, event_ids, diary_ids
-            )
-            self.connection.execute(
-                "INSERT INTO memory_fts(record_id,record_type,created_at,content,source) VALUES(?,?,?,?,?)",
-                (record_id, record_type, created_at, content.strip(), source),
-            )
+            record_id = self._insert_memory_record(record_type, content.strip(), source, provenance, event_ids, diary_ids)
             self.connection.execute(
                 "INSERT INTO activity(event,created_at) VALUES(?,?)",
-                (f"Memory record created ({record_id}; type={record_type})", created_at),
+                (f"Memory record created ({record_id}; type={record_type})", self.now()),
             )
         return record_id
+
+    def _insert_memory_record(self, record_type, content, source, provenance, event_ids, diary_ids):
+        record_id = uuid.uuid4().hex
+        created_at = self.now()
+        self.connection.execute(
+            "INSERT INTO memory_records(record_id,record_type,created_at,content,source) VALUES(?,?,?,?,?)",
+            (record_id, record_type, created_at, content, source),
+        )
+        self._insert_memory_provenance(record_id, provenance)
+        self._insert_memory_references(
+            "memory_event_refs", "memory_diary_refs", "record_id", record_id, event_ids, diary_ids
+        )
+        self.connection.execute(
+            "INSERT INTO memory_fts(record_id,record_type,created_at,content,source) VALUES(?,?,?,?,?)",
+            (record_id, record_type, created_at, content, source),
+        )
+        return record_id
+
+    @database_locked
+    def revise_memory_records(self, record_ids, reason, content=None, record_type=None, event_ids=(), diary_ids=(), *,
+                              history_ids=(), owner_id=None, untrusted=False):
+        """Supersede Andrew's own records; old text, sources and links stay stored."""
+        record_ids = self._validate_reference_ids(record_ids, str)
+        if not 1 <= len(record_ids) <= 10:
+            raise ToolRejected("revise from 1 to 10 memory records")
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:
+            raise ToolRejected("invalid memory revision reason")
+        if content is None:
+            if record_type is not None or event_ids or diary_ids or history_ids:
+                raise ToolRejected("references and record type require replacement content")
+        else:
+            if record_type not in {"experience", "interest"}:
+                raise ToolRejected("invalid memory record type")
+            if not isinstance(content, str) or not content.strip() or len(content) > 4000:
+                raise ToolRejected("invalid memory content")
+        event_ids = self._validate_reference_ids(event_ids, int)
+        diary_ids = self._validate_reference_ids(diary_ids, str)
+        with self.connection:
+            marks = ",".join("?" for _ in record_ids)
+            rows = self.connection.execute(
+                "SELECT r.record_id,COALESCE(p.origin,'untrusted') AS origin,v.record_id IS NOT NULL AS revised "
+                "FROM memory_records r LEFT JOIN memory_provenance p ON p.record_id=r.record_id "
+                f"LEFT JOIN memory_revisions v ON v.record_id=r.record_id WHERE r.record_id IN ({marks})",
+                record_ids).fetchall()
+            if len(rows) != len(record_ids):
+                raise ToolRejected("unknown memory record; only experience and interest records can be revised")
+            if any(row['revised'] for row in rows):
+                raise ToolRejected("memory record was already revised; revise its replacement instead")
+            if any(row['origin'] in {'owner', 'system'} for row in rows):
+                raise ToolRejected("owner and system memories cannot be revised")
+            self._validate_memory_references(event_ids, diary_ids)
+            provenance = self._prepare_memory_provenance('andrew', history_ids, owner_id, untrusted)
+            if provenance[0] == 'untrusted' and any(row['origin'] != 'untrusted' for row in rows):
+                raise ToolRejected("revisions based on untrusted context can only revise untrusted memories")
+            replacement = None
+            if content is not None:
+                if any(row['origin'] == 'untrusted' for row in rows) and provenance[0] != 'untrusted':
+                    provenance = ('untrusted', 'revised_untrusted', provenance[2])
+                replacement = self._insert_memory_record(
+                    record_type, content.strip(), 'andrew', provenance, event_ids, diary_ids)
+            now = self.now()
+            self.connection.executemany(
+                "INSERT INTO memory_revisions(record_id,superseded_by,reason,created_at) VALUES(?,?,?,?)",
+                [(record_id, replacement, reason.strip(), now) for record_id in record_ids])
+            self.connection.execute(
+                "INSERT INTO activity(event,created_at) VALUES(?,?)",
+                (f"Memory revised ({len(record_ids)} superseded; replacement={replacement or 'none'})", now),
+            )
+        return {'record_id': replacement, 'superseded': list(record_ids)}
+
+    def _memory_revision_links(self, record_id):
+        row = self.connection.execute(
+            "SELECT superseded_by FROM memory_revisions WHERE record_id=?", (record_id,)).fetchone()
+        return {'superseded': row is not None, 'superseded_by': row['superseded_by'] if row else None,
+                'revises': [ref[0] for ref in self.connection.execute(
+                    "SELECT record_id FROM memory_revisions WHERE superseded_by=? ORDER BY record_id", (record_id,))]}
 
     @database_locked
     def ensure_founding_letter(self, default_content):
@@ -2383,7 +2461,7 @@ class Store:
         diary_ids = self._validate_reference_ids(diary_ids, str)
         revision_id = uuid.uuid4().hex
         created_at = self.now()
-        effective_date = datetime.now(ZoneInfo("America/Toronto")).date().isoformat()
+        effective_date = datetime.now(ZoneInfo(self.timezone_name)).date().isoformat()
         with self.connection:
             self._validate_memory_references(event_ids, diary_ids)
             provenance = self._prepare_memory_provenance(source, history_ids, owner_id, untrusted)
@@ -2522,6 +2600,7 @@ class Store:
         if row is not None:
             result = dict(row)
             result.update(self._memory_provenance(record_id))
+            result.update(self._memory_revision_links(record_id))
             result["event_ids"], result["diary_ids"] = self._memory_references(
                 "memory_event_refs", "memory_diary_refs", "record_id", record_id
             )
@@ -2532,17 +2611,20 @@ class Store:
         return self._personality_revision_row(row)
 
     @database_locked
-    def search_memory_rows(self, match_query, limit=8):
+    def search_memory_rows(self, match_query, limit=8, include_superseded=False):
         limit = max(1, min(20, int(limit)))
         rows = self.connection.execute(
             "SELECT record_id,record_type,created_at,content,source,bm25(memory_fts) AS rank "
-            "FROM memory_fts WHERE memory_fts MATCH ? ORDER BY rank ASC,created_at DESC LIMIT ?",
-            (match_query, limit),
+            "FROM memory_fts WHERE memory_fts MATCH ? AND (? OR NOT EXISTS("
+            "SELECT 1 FROM memory_revisions v WHERE v.record_id=memory_fts.record_id)) "
+            "ORDER BY rank ASC,created_at DESC LIMIT ?",
+            (match_query, int(bool(include_superseded)), limit),
         ).fetchall()
         results = []
         for row in rows:
             result = dict(row)
             result.update(self._memory_provenance(result['record_id']))
+            result.update(self._memory_revision_links(result['record_id']))
             if result["record_type"] == "personality":
                 events, diaries = self._memory_references(
                     "personality_event_refs", "personality_diary_refs", "revision_id", result["record_id"]

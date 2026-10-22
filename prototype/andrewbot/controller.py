@@ -19,7 +19,7 @@ from .runner_client import TOOL_CANCELLATION
 class Controller:
     def __init__(self, store, model, owner_id, monthly_limit_usd=10.0,
                  monthly_reserve_usd=1.0, daily_target_usd=0.30,
-                 timezone_name="America/Toronto", fallback_wake_time="09:00",
+                 timezone_name=None, fallback_wake_time="09:00",
                  autonomous_enabled=False, fallback_enabled=False, memory_service=None, model_config=None, credit_reader=None,
                  tool_runtime=None, visit_history=None, gmail_tools=None, conversation_idle_seconds=300, health_snapshot=None, media=None, skill_catalog=None,
                  daily_spend_alert_usd=None):
@@ -35,7 +35,7 @@ class Controller:
         # Notification only: spending stays agent-managed with no controller cap.
         self.daily_spend_alert_usd = float(daily_spend_alert_usd) if daily_spend_alert_usd else None
         self.credit_reader = credit_reader
-        self.timezone_name = timezone_name
+        self.timezone_name = store.timezone_name if timezone_name is None else timezone_name
         self.fallback_wake_time = fallback_wake_time
         self.autonomous_enabled = bool(autonomous_enabled)
         self.fallback_enabled = bool(fallback_enabled) and self.autonomous_enabled
@@ -405,8 +405,8 @@ class Controller:
 
     def _execute_tool(self, name, arguments):
         if not isinstance(arguments, dict):
-            if name in {"memory_add_experience", "memory_propose_personality_edit"} and self.memory_service:
-                kind = "personality" if name == "memory_propose_personality_edit" else "experience"
+            if name in {"memory_add_experience", "memory_propose_personality_edit", "memory_revise"} and self.memory_service:
+                kind = {"memory_propose_personality_edit": "personality", "memory_revise": "revision"}.get(name, "experience")
                 self.memory_service.reject_edit_attempt(kind)
             raise ToolRejected("tool arguments must be an object")
         read_tools = {"check_budget", "recent_activity", "memory_search", "session_search", "session_read", "gmail.status", "gmail.reconcile", "media.status", "media.get", "skills.list", "skills.load", 'research.list', 'research.get', 'research.observations'}
@@ -431,23 +431,30 @@ class Controller:
             except ResearchValidationError as error:
                 result = error.result()
             return json.dumps(result, ensure_ascii=False)
-        if name in {"memory_search", "memory_add_experience", "memory_propose_personality_edit"}:
+        if name in {"memory_search", "memory_add_experience", "memory_propose_personality_edit", "memory_revise"}:
             if self.memory_service is None:
                 raise ToolRejected("memory service is unavailable")
-            allowed = ({'query', 'limit'} if name == 'memory_search' else
+            allowed = ({'query', 'limit', 'include_superseded'} if name == 'memory_search' else
                        {'content', 'record_type', 'event_ids', 'diary_ids', 'history_ids'} if name == 'memory_add_experience' else
+                       {'record_ids', 'reason', 'content', 'record_type', 'event_ids', 'diary_ids', 'history_ids'}
+                       if name == 'memory_revise' else
                        {'content', 'reason', 'event_ids', 'diary_ids', 'history_ids'})
             if set(arguments) - allowed:
-                self.memory_service.reject_edit_attempt('personality' if name == 'memory_propose_personality_edit' else 'experience')
+                self.memory_service.reject_edit_attempt(
+                    {'memory_propose_personality_edit': 'personality', 'memory_revise': 'revision'}.get(name, 'experience'))
                 raise ToolRejected('unsupported memory arguments; provenance is assigned by the controller')
             if name == "memory_search":
-                rows = self.memory_service.search(arguments.get("query"), arguments.get("limit", 8))
+                rows = self.memory_service.search(arguments.get("query"), arguments.get("limit", 8),
+                                                  arguments.get("include_superseded", False))
                 if not rows:
                     return "No relevant memory records were found."
                 result = "Relevant memory records (read-only):\n" + "\n".join(
                     f"{row['record_type']} {row['record_id']} ({row['created_at']}; author={row['source']}; "
                     f"provenance={row['provenance']}; basis={row['provenance_basis']}): "
-                    f"{row['content']} [events={row['event_ids']}; diary={row['diary_ids']}; history={row['history_ids']}]"
+                    f"{row['content']} [events={row['event_ids']}; diary={row['diary_ids']}; history={row['history_ids']}"
+                    + (f"; revises={row['revises']}" if row.get('revises') else '')
+                    + (f"; superseded_by={row['superseded_by'] or 'none (retired)'}" if row.get('superseded') else '')
+                    + "]"
                     for row in rows
                 )
                 encoded = result.encode("utf-8")
@@ -457,6 +464,17 @@ class Controller:
                     available = maximum_bytes - len(marker.encode("utf-8"))
                     result = encoded[:available].decode("utf-8", errors="ignore").rstrip() + marker
                 return result
+            if name == "memory_revise":
+                revision = self.memory_service.revise(
+                    arguments.get("record_ids"), arguments.get("reason"), arguments.get("content"),
+                    arguments.get("record_type"), arguments.get("event_ids", []), arguments.get("diary_ids", []),
+                    history_ids=arguments.get('history_ids', []), owner_id=self.owner_id,
+                )
+                superseded = ", ".join(revision['superseded'])
+                if revision['record_id'] is None:
+                    return f"Memory records retired ({superseded}); they remain stored and searchable with include_superseded."
+                return (f"Memory revision saved ({revision['record_id']}; supersedes {superseded}); "
+                        "superseded records remain stored and searchable with include_superseded.")
             if name == "memory_add_experience":
                 record_id = self.memory_service.add_experience(
                     arguments.get("content"), arguments.get("record_type"),
