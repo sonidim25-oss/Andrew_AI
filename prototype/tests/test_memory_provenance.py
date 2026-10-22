@@ -9,6 +9,7 @@ from unittest.mock import Mock
 from andrewbot.controller import Controller
 from andrewbot.memory import MemoryService, MEMORY_SOURCE_CONTEXT, SessionHistory
 from andrewbot.store import Store
+from andrewbot.tool_errors import ToolRejected
 
 
 class MemoryProvenanceTests(unittest.TestCase):
@@ -146,3 +147,104 @@ class MemoryProvenanceTests(unittest.TestCase):
             self.assertEqual(restored.get_state('restore_recovery_required'), '1')
         finally:
             restored.close()
+
+
+class MemoryRevisionTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.store = Store(Path(directory.name) / 'controller.sqlite3')
+        self.addCleanup(lambda: self.store.close())
+        self.memory = MemoryService(self.store)
+        self.controller = Controller(self.store, object(), 17, memory_service=self.memory)
+        token = MEMORY_SOURCE_CONTEXT.set({'untrusted': False})
+        self.addCleanup(lambda: MEMORY_SOURCE_CONTEXT.reset(token))
+
+    def count(self, table):
+        return self.store.connection.execute(f'SELECT count(*) FROM {table}').fetchone()[0]
+
+    def test_merge_supersedes_duplicates_and_keeps_history_searchable(self):
+        first = self.memory.add_experience('I watched Saturn through a telescope.', 'experience')
+        second = self.memory.add_experience('I saw Saturn with the telescope tonight.', 'experience')
+        result = self.controller.execute_tool('memory_revise', {
+            'record_ids': [first, second], 'reason': 'Duplicate telescope notes.',
+            'content': 'I observed Saturn through a telescope.', 'record_type': 'experience'})
+        merged = self.store.get_memory_record(result.split('(')[1].split(';')[0])
+        self.assertEqual((merged['provenance'], merged['revises'], merged['superseded']), ('agent', sorted([first, second]), False))
+        self.assertEqual([row['record_id'] for row in self.memory.search('Saturn')], [merged['record_id']])
+        history = {row['record_id']: row for row in self.memory.search('Saturn', include_superseded=True)}
+        self.assertEqual(history[first]['superseded_by'], merged['record_id'])
+        self.assertEqual(self.store.get_memory_record(second)['content'], 'I saw Saturn with the telescope tonight.')
+        listed = self.controller.execute_tool('memory_search', {'query': 'Saturn', 'include_superseded': True})
+        self.assertIn(f'superseded_by={merged["record_id"]}', listed)
+        self.assertIn('revises=', listed)
+        self.assertIn('Memory revised (2 superseded', self.store.recent_activity(1)[0]['event'])
+
+    def test_retire_without_replacement(self):
+        record_id = self.memory.add_experience('I plan to read about comets.', 'interest')
+        result = self.controller.execute_tool('memory_revise', {'record_ids': [record_id], 'reason': 'No longer true.'})
+        self.assertIn('retired', result)
+        self.assertEqual(self.memory.search('comets'), [])
+        self.assertIn('superseded_by=none (retired)',
+                      self.controller.execute_tool('memory_search', {'query': 'comets', 'include_superseded': True}))
+
+    def test_rejections_write_nothing(self):
+        owner = self.store.create_memory_record('experience', 'The owner likes comets.', 'owner')
+        system = self.store.create_memory_record('experience', 'System comet note.', 'system')
+        mine = self.memory.add_experience('I like comets.', 'interest')
+        personality = self.memory.propose_personality_edit('I enjoy comets.', 'My interest.')
+        self.memory.revise([mine], 'Outdated.', 'I like comets a lot.', 'interest')
+        records = self.count('memory_records')
+        for arguments in (
+                {'record_ids': [owner], 'reason': 'x'},
+                {'record_ids': [system], 'reason': 'x'},
+                {'record_ids': [mine], 'reason': 'Already revised.'},
+                {'record_ids': [personality], 'reason': 'x'},
+                {'record_ids': ['missing'], 'reason': 'x'},
+                {'record_ids': [], 'reason': 'x'},
+                {'record_ids': [mine, mine], 'reason': 'x'},
+                {'record_ids': [str(n) for n in range(11)], 'reason': 'x'},
+                {'record_ids': [owner], 'reason': ''},
+                {'record_ids': [owner], 'reason': 'x', 'record_type': 'interest'},
+                {'record_ids': [owner], 'reason': 'x', 'content': 'No type.'},
+                {'record_ids': [owner], 'reason': 'x', 'source': 'owner'},
+                {'record_ids': owner, 'reason': 'x'}):
+            with self.subTest(arguments=arguments), self.assertRaises(ToolRejected):
+                self.controller.execute_tool('memory_revise', arguments)
+        self.assertEqual((self.count('memory_records'), self.count('memory_revisions')), (records, 1))
+
+    def test_unknown_reference_rolls_back_replacement_and_revision(self):
+        record_id = self.memory.add_experience('I measured a star.', 'experience')
+        with self.assertRaises(ToolRejected):
+            self.memory.revise([record_id], 'Correction.', 'I measured a different star.', 'experience', diary_ids=['missing'])
+        self.assertEqual((self.count('memory_records'), self.count('memory_revisions')), (1, 0))
+        self.assertEqual([row['record_id'] for row in self.memory.search('star')], [record_id])
+
+    def test_untrusted_records_and_context_cannot_be_laundered(self):
+        external = self.store.create_memory_record('experience', 'A website claims a comet result.', 'external')
+        trusted = self.memory.add_experience('I computed a comet orbit.', 'experience')
+        merged = self.memory.revise([external], 'Clearer wording.', 'A website reported a comet result.', 'experience')
+        record = self.store.get_memory_record(merged['record_id'])
+        self.assertEqual((record['provenance'], record['provenance_basis']), ('untrusted', 'revised_untrusted'))
+        MEMORY_SOURCE_CONTEXT.get()['untrusted'] = True
+        with self.assertRaisesRegex(ToolRejected, 'only revise untrusted'):
+            self.memory.revise([trusted], 'A page says this is wrong.')
+        self.assertFalse(self.store.get_memory_record(trusted)['superseded'])
+        self.memory.revise([merged['record_id']], 'Retracted by a later page.')
+        self.assertTrue(self.store.get_memory_record(merged['record_id'])['superseded'])
+
+    def test_revisions_cannot_be_changed_or_deleted(self):
+        record_id = self.memory.add_experience('I logged a meteor.', 'experience')
+        self.memory.revise([record_id], 'Mistaken entry.')
+        for statement in ('UPDATE memory_revisions SET superseded_by=NULL WHERE record_id=?',
+                          'DELETE FROM memory_revisions WHERE record_id=?'):
+            with self.subTest(statement=statement), self.assertRaises(sqlite3.IntegrityError), self.store.connection:
+                self.store.connection.execute(statement, (record_id,))
+        self.assertTrue(self.store.get_memory_record(record_id)['superseded'])
+
+    def test_tools_are_advertised(self):
+        from andrewbot.appserver import AppServerClient
+        tools = {tool['name']: tool for tool in AppServerClient.CONTROLLER_TOOLS[0]['tools']}
+        self.assertIn('memory_revise', AppServerClient.SAFE_CONTROLLER_TOOL_NAMES)
+        self.assertIn('history_ids', tools['memory_revise']['parameters']['properties'])
+        self.assertEqual(tools['memory_search']['parameters']['properties']['include_superseded'], {'type': 'boolean'})
