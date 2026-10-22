@@ -114,6 +114,61 @@ class EgressProxyTests(unittest.IsolatedAsyncioTestCase):
         finally:
             release.set()
             await first
+    async def test_simultaneous_burst_never_exceeds_connection_cap(self):
+        module = proxy_module(self)
+        proxy = module.EgressProxy()
+        full, release = asyncio.Event(), asyncio.Event()
+        admitted = []
+
+        class HoldingReader(FakeReader):
+            async def readuntil(self, separator):
+                admitted.append(1)
+                if len(admitted) == proxy.MAX_CONNECTIONS:
+                    full.set()
+                await release.wait()
+                return b"CONNECT 127.0.0.1:443 HTTP/1.1\r\n\r\n"
+
+        writers = [FakeWriter() for _ in range(proxy.MAX_CONNECTIONS * 3)]
+        tasks = [asyncio.create_task(proxy.handle_request(HoldingReader(b""), writer))
+                 for writer in writers]
+        try:
+            await asyncio.wait_for(full.wait(), 1)
+            self.assertEqual(proxy._connections, proxy.MAX_CONNECTIONS)
+            self.assertEqual(len(admitted), proxy.MAX_CONNECTIONS)
+            rejected = [writer for writer in writers if b"503 Service Unavailable" in writer.data]
+            self.assertEqual(len(rejected), proxy.MAX_CONNECTIONS * 2)
+            self.assertTrue(all(writer.closed for writer in rejected))
+        finally:
+            release.set()
+            await asyncio.gather(*tasks)
+        self.assertEqual(proxy._connections, 0)
+
+    async def test_cancellation_releases_slot_for_next_request(self):
+        module = proxy_module(self)
+        proxy = module.EgressProxy()
+        proxy.MAX_CONNECTIONS = 1
+        entered = asyncio.Event()
+
+        class HoldingReader(FakeReader):
+            async def readuntil(self, separator):
+                entered.set()
+                await asyncio.Event().wait()
+
+        task = asyncio.create_task(proxy.handle_request(HoldingReader(b""), FakeWriter()))
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            self.assertEqual(proxy._connections, 1)
+        finally:
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertEqual(proxy._connections, 0)
+        writer = FakeWriter()
+        await proxy.handle_request(FakeReader(b"CONNECT 127.0.0.1:443 HTTP/1.1\r\n\r\n"), writer)
+        self.assertNotIn(b"503 Service Unavailable", writer.data)
+        self.assertIn(b"502 Bad Gateway", writer.data)
+        self.assertEqual(proxy._connections, 0)
+
     async def test_tunnel_retrieves_both_failures(self):
         import gc
         from unittest.mock import AsyncMock
