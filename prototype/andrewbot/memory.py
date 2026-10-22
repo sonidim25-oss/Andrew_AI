@@ -169,7 +169,7 @@ class MemoryService:
         self.store.add_activity(f"Memory edit rejected ({kind}; validation)")
 
     def reject_edit_attempt(self, kind="experience"):
-        self._reject("personality" if kind == "personality" else "experience")
+        self._reject(kind if kind in {"personality", "revision"} else "experience")
 
     def propose_personality_edit(self, content, reason, event_ids=(), diary_ids=(), *, history_ids=(), owner_id=None):
         try:
@@ -203,13 +203,35 @@ class MemoryService:
             self._reject("experience")
             raise ValueError("memory record was rejected; check its type, text, and references") from None
 
-    def search(self, query, limit=8):
+    def revise(self, record_ids, reason, content=None, record_type=None, event_ids=(), diary_ids=(), *,
+               history_ids=(), owner_id=None):
+        try:
+            normalized_reason = validate_memory_text(reason, maximum=1000)
+            normalized = None if content is None else validate_memory_text(content)
+            if not isinstance(record_ids, (list, tuple)):
+                raise ToolRejected("memory record IDs are invalid")
+            events, diaries = self._validate_references(event_ids, diary_ids)
+            return self.store.revise_memory_records(
+                list(record_ids), normalized_reason, normalized, record_type, events, diaries,
+                history_ids=history_ids, owner_id=owner_id,
+                untrusted=bool((MEMORY_SOURCE_CONTEXT.get() or {}).get('untrusted')),
+            )
+        except ToolRejected:
+            self._reject("revision")
+            raise
+        except (TypeError, ValueError):
+            self._reject("revision")
+            raise ValueError("memory revision was rejected; check its records, text, and references") from None
+
+    def search(self, query, limit=8, include_superseded=False):
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
             raise ToolRejected("memory result limit must be from 1 to 20")
+        if not isinstance(include_superseded, bool):
+            raise ToolRejected("include_superseded must be true or false")
         normalized = normalize_memory_query(query)
         if not normalized:
             return []
-        rows = self.store.search_memory_rows(normalized, limit)
+        rows = self.store.search_memory_rows(normalized, limit, include_superseded)
         if any(row['provenance'] == 'untrusted' for row in rows):
             note_untrusted_memory_source()
         return rows
