@@ -19,7 +19,7 @@ from .runner_client import TOOL_CANCELLATION
 class Controller:
     def __init__(self, store, model, owner_id, monthly_limit_usd=10.0,
                  monthly_reserve_usd=1.0, daily_target_usd=0.30,
-                 timezone_name="America/Toronto", fallback_wake_time="09:00",
+                 timezone_name=None, fallback_wake_time="09:00",
                  autonomous_enabled=False, fallback_enabled=False, memory_service=None, model_config=None, credit_reader=None,
                  tool_runtime=None, visit_history=None, gmail_tools=None, conversation_idle_seconds=300, health_snapshot=None, media=None, skill_catalog=None,
                  daily_spend_alert_usd=None):
@@ -35,7 +35,7 @@ class Controller:
         # Notification only: spending stays agent-managed with no controller cap.
         self.daily_spend_alert_usd = float(daily_spend_alert_usd) if daily_spend_alert_usd else None
         self.credit_reader = credit_reader
-        self.timezone_name = timezone_name
+        self.timezone_name = store.timezone_name if timezone_name is None else timezone_name
         self.fallback_wake_time = fallback_wake_time
         self.autonomous_enabled = bool(autonomous_enabled)
         self.fallback_enabled = bool(fallback_enabled) and self.autonomous_enabled

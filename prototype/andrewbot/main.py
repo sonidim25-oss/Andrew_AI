@@ -4,6 +4,7 @@ import sys
 import signal
 import time
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .controller import Controller
 from .appserver import LettaAgent, StartupValidationError
@@ -134,8 +135,14 @@ def run(validate_only=False):
     except (TypeError, ValueError):
         logging.error("Startup validation failed: owner Telegram ID configuration (invalid value)")
         return 2
+    timezone_name = os.environ.get("ANDREW_TIMEZONE", "America/Toronto")
     try:
-        store = Store(root / "controller.sqlite3")
+        ZoneInfo(timezone_name)
+    except (ValueError, ZoneInfoNotFoundError):
+        logging.error("Startup validation failed: timezone configuration (invalid value)")
+        return 2
+    try:
+        store = Store(root / "controller.sqlite3", timezone_name=timezone_name)
     except Exception as error:
         logging.error("Startup validation failed: controller database access (%s)", type(error).__name__)
         return 2
@@ -219,7 +226,7 @@ def run(validate_only=False):
         agent,
         owner_id,
         **lifecycle_policy.budget_arguments(),
-        timezone_name=os.environ.get("ANDREW_TIMEZONE", "America/Toronto"),
+        timezone_name=timezone_name,
         fallback_wake_time=os.environ.get("ANDREW_FALLBACK_WAKE", "09:00"),
         autonomous_enabled=autonomous_enabled,
         fallback_enabled=fallback_enabled,
