@@ -110,11 +110,14 @@
       "e89224aeb06551399bd62a92bc9fe09acb857a394fd01adf613a9c98112a38df": [
         "93815b9-installed-process-cleanup"
       ],
+      "edce31d2a9b45bc53bdf380ef1b4c64393cd4b3108341ad339774c2008673bc3": [
+        "8319419-installed-provider-not-reached"
+      ],
       "ff4e0fd7c1cf53da5e9d7b5c13563df3dd3e3fc56aaa9999e102e5cd5c5c3f07": [
         "6d31d27b3fe9f9985b6bbad80cb32d359e309688"
       ]
     },
-    "tested": "edce31d2a9b45bc53bdf380ef1b4c64393cd4b3108341ad339774c2008673bc3"
+    "tested": "90a041f2d62df6035859db2b832871782b3c19bc65a230d95c0131b19cc175f7"
   },
   "diary.py": {
     "original": "fa8d71bc5057859623098c1e650ef69d3fe4de7c2c644c7b4de9e36bf2cbcaf2",
@@ -352,9 +355,12 @@
       ],
       "3e0763c61ca064e745c183ea467e43d6d950ad3c78071187d5425a15e8222ca0": [
         "pre-local-recovery-source"
+      ],
+      "ff899c8a9d2e9543dcec634c7672bb2fca5d634d94429c65d8f4c5a1028b2333": [
+        "8319419-installed-provider-not-reached"
       ]
     },
-    "tested": "ff899c8a9d2e9543dcec634c7672bb2fca5d634d94429c65d8f4c5a1028b2333"
+    "tested": "b7f96838d84a7aeeade8978608d1af4174e22a05107f76c49b5ab698cc0b0dce"
   },
   "recovery_dispatch.py": {
     "original": null,
@@ -374,6 +380,9 @@
       "34200cb25fce373e233a1d90b04f16c77f7db62e19ffef145d3dd1598334fe6c": [
         "d22b891-pre-provider-backoff"
       ],
+      "43d42b46da09a3a8656ab1f7bbbd8df9ac931391e6af3ffe6e0e50c3f3702785": [
+        "8319419-installed-provider-not-reached"
+      ],
       "93f9a1bbf5f67448704897a32adaf271c130646901386856059f96de87394122": [
         "pre-local-recovery-source"
       ],
@@ -381,7 +390,7 @@
         "93815b9-installed-process-cleanup"
       ]
     },
-    "tested": "43d42b46da09a3a8656ab1f7bbbd8df9ac931391e6af3ffe6e0e50c3f3702785"
+    "tested": "9e51495f901317c9c0f42a508b0521e8ebb26df5b4e6842faa4d27cc1f8682f9"
   },
   "runner_client.py": {
     "original": "c49bf7290f85b816b9fd057dde7372beaa8f128b77e5f7ce372eb929fa0d71f6",

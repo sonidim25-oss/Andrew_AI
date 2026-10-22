@@ -18,8 +18,8 @@
     },
     "controller.py": {
       "allow_missing": false,
-      "baseline": "e89224aeb06551399bd62a92bc9fe09acb857a394fd01adf613a9c98112a38df",
-      "tested": "edce31d2a9b45bc53bdf380ef1b4c64393cd4b3108341ad339774c2008673bc3"
+      "baseline": "edce31d2a9b45bc53bdf380ef1b4c64393cd4b3108341ad339774c2008673bc3",
+      "tested": "90a041f2d62df6035859db2b832871782b3c19bc65a230d95c0131b19cc175f7"
     },
     "diary.py": {
       "allow_missing": false,
@@ -79,7 +79,7 @@
     "recovery.py": {
       "allow_missing": false,
       "baseline": "ff899c8a9d2e9543dcec634c7672bb2fca5d634d94429c65d8f4c5a1028b2333",
-      "tested": "ff899c8a9d2e9543dcec634c7672bb2fca5d634d94429c65d8f4c5a1028b2333"
+      "tested": "b7f96838d84a7aeeade8978608d1af4174e22a05107f76c49b5ab698cc0b0dce"
     },
     "recovery_dispatch.py": {
       "allow_missing": false,
@@ -93,8 +93,8 @@
     },
     "recovery_records.py": {
       "allow_missing": false,
-      "baseline": "d05a72a10d3be606a9377705c59895a9d4ec31718dc20dc527e615f811320663",
-      "tested": "43d42b46da09a3a8656ab1f7bbbd8df9ac931391e6af3ffe6e0e50c3f3702785"
+      "baseline": "43d42b46da09a3a8656ab1f7bbbd8df9ac931391e6af3ffe6e0e50c3f3702785",
+      "tested": "9e51495f901317c9c0f42a508b0521e8ebb26df5b4e6842faa4d27cc1f8682f9"
     },
     "runner_adoption.py": {
       "allow_missing": false,
