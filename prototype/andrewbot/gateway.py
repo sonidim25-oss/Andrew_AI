@@ -7,8 +7,9 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from .budget import TORONTO, budget_snapshot
+from .budget import budget_snapshot
 from .configuration import OUTPUT_TOKEN_COST_ESTIMATE, ModelConfig, load_model_config
 from .model import ProviderRequestError
 
@@ -125,9 +126,8 @@ class ModelGateway:
         return 422, {'error': {'message': 'Provider attempt outcome uncertain; explicit owner replay required',
                               'type': 'invalid_request_error', 'code': 'provider_attempt_uncertain'}}
 
-    @staticmethod
-    def periods():
-        now = datetime.now(timezone.utc).astimezone(TORONTO)
+    def periods(self):
+        now = datetime.now(timezone.utc).astimezone(ZoneInfo(self.store.timezone_name))
         return now.strftime("%Y-%m"), now.strftime("%Y-%m-%d")
 
     def complete(self, authorization, payload, *, recovery=None):
