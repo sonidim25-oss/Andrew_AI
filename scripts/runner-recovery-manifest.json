@@ -18,7 +18,7 @@
     },
     "controller.py": {
       "allow_missing": false,
-      "baseline": "6a156522eb6e815502c476f20827cfe48eb7c9678ef375465448a005cb1bbb3d",
+      "baseline": "e89224aeb06551399bd62a92bc9fe09acb857a394fd01adf613a9c98112a38df",
       "tested": "e89224aeb06551399bd62a92bc9fe09acb857a394fd01adf613a9c98112a38df"
     },
     "diary.py": {
@@ -70,6 +70,11 @@
       "allow_missing": false,
       "baseline": "8216b290b258e102a4793149e9009497d4880f43c704423bd947a2982303c1b8",
       "tested": "8216b290b258e102a4793149e9009497d4880f43c704423bd947a2982303c1b8"
+    },
+    "process_limits.py": {
+      "allow_missing": false,
+      "baseline": "4b87317f24984288410be7e0203a5e45d1ad4b5e7c14e4a6af09e75cb1b354c7",
+      "tested": "2a7da271f767e20097502e044ba20568669e95e4af348b321bce94d2c3416051"
     },
     "recovery.py": {
       "allow_missing": false,
@@ -197,6 +202,11 @@
       "allow_missing": true,
       "baseline": "b6a2b179e4e580f5a41756bb8e46702c6a65f73b83496ff6da9a8ed2c09b0508",
       "tested": "b6a2b179e4e580f5a41756bb8e46702c6a65f73b83496ff6da9a8ed2c09b0508"
+    },
+    "process_limits.py": {
+      "allow_missing": false,
+      "baseline": "4b87317f24984288410be7e0203a5e45d1ad4b5e7c14e4a6af09e75cb1b354c7",
+      "tested": "2a7da271f767e20097502e044ba20568669e95e4af348b321bce94d2c3416051"
     },
     "recovery_identity.py": {
       "allow_missing": true,

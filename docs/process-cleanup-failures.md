@@ -20,3 +20,9 @@ child. The five-second cleanup timeout still raises in that case.
 Validation: 3 new cleanup + 5 existing capture + 10 unlimited-work tests pass in
 the controller package; the 8 cleanup/capture checks also pass against the
 runtime-services copy. No production services or data changed.
+
+Deployment packaging uses the verified installed diary timezone release 428adc0.
+The coordinated manifest includes process_limits.py for both roles, and exact
+package reconstruction changes only that module in each package. Root rollout
+requires owner pause and snapshot disk headroom before required acceptance.
+Owner controls and existing uncertain work are preserved; no wake is requested.
