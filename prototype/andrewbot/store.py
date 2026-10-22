@@ -21,8 +21,10 @@ def database_locked(method):
 
 
 class Store:
-    def __init__(self, path):
+    def __init__(self, path, timezone_name="America/Toronto"):
         self.path = Path(path)
+        ZoneInfo(timezone_name)
+        self.timezone_name = timezone_name
         self._lock = threading.RLock()
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path.parent.chmod(0o700)
@@ -1967,7 +1969,7 @@ class Store:
 
     @database_locked
     def usage_totals(self, month, day):
-        zone = ZoneInfo("America/Toronto")
+        zone = ZoneInfo(self.timezone_name)
         local_day = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=zone)
         day_start = local_day.astimezone(timezone.utc).isoformat(timespec="seconds")
         day_end = (local_day + timedelta(days=1)).astimezone(timezone.utc).isoformat(timespec="seconds")
@@ -2347,7 +2349,7 @@ class Store:
         diary_ids = self._validate_reference_ids(diary_ids, str)
         revision_id = uuid.uuid4().hex
         created_at = self.now()
-        effective_date = datetime.now(ZoneInfo("America/Toronto")).date().isoformat()
+        effective_date = datetime.now(ZoneInfo(self.timezone_name)).date().isoformat()
         with self.connection:
             self._validate_memory_references(event_ids, diary_ids)
             provenance = self._prepare_memory_provenance(source, history_ids, owner_id, untrusted)

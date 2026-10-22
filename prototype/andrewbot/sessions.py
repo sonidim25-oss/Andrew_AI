@@ -96,7 +96,7 @@ class SessionRunner:
         return True
 
     def _record_incident(self, session_id, reason, started_at=""):
-        zone = ZoneInfo("America/Toronto")
+        zone = ZoneInfo(self.store.timezone_name)
         try:
             local_date = datetime.fromisoformat(started_at).astimezone(zone).date().isoformat()
         except (TypeError, ValueError):
