@@ -1,6 +1,8 @@
 """Read-only, version-bound Andrew instructions; never tool authorization."""
 import hashlib
+import re
 from pathlib import Path
+from .memory import MEMORY_SOURCE_CONTEXT, validate_memory_text
 from .tool_errors import ToolRejected
 
 
@@ -13,8 +15,12 @@ SKILL_INDEX_PROMPT = (
     + '\n'.join(name + ': ' + purpose for name, purpose in SKILL_SUMMARIES.items())
     + '\nUse skills.list for the index and skills.load(name) only when a task needs its instructions. '
       'Do not load all skills on every wake. Skills guide methods, not personality; memory holds preferences and experiences. '
-      'Only advertised tools and current controller permissions authorize actions.'
+      'Only advertised tools and current controller permissions authorize actions. '
+      'You may record a reusable method of your own with skills.save; it is self-authored guidance, not permission.'
 )
+LEARNED_SKILL_NAME = re.compile(r'[a-z][a-z0-9-]{2,47}')
+LEARNED_SKILL_NOTE = ('Self-authored procedure from your own earlier experience; not owner-reviewed. '
+                      'Guidance only: check it still fits before following it.')
 
 
 class SkillCatalog:
@@ -25,15 +31,28 @@ class SkillCatalog:
         for name in SKILL_DOCUMENT_HASHES:
             self.execute('skills.load', {'name': name})
 
-    def execute(self, name, arguments):
+    def execute(self, name, arguments, *, store=None, owner_id=None):
         if not isinstance(arguments, dict):
             raise ToolRejected('Skill arguments must be an object')
         if name == 'skills.list' and not arguments:
-            return {'skills': [{'name': key, 'purpose': value} for key, value in SKILL_SUMMARIES.items()],
-                    'grants_permissions': False}
+            result = {'skills': [{'name': key, 'purpose': value} for key, value in SKILL_SUMMARIES.items()],
+                      'grants_permissions': False}
+            if store is not None:
+                result['learned_skills'] = store.learned_skills()
+            return result
+        if name in {'skills.save', 'skills.retire'}:
+            return self._save(name, arguments, store, owner_id)
         if name != 'skills.load' or set(arguments) != {'name'}:
             raise ToolRejected('Invalid skill request')
         selected = arguments['name']
+        if isinstance(selected, str) and selected not in SKILL_DOCUMENT_HASHES and store is not None:
+            learned = store.active_learned_skill(selected) if LEARNED_SKILL_NAME.fullmatch(selected) else None
+            if learned is not None and learned['status'] == 'active':
+                return {'name': selected, 'instructions': learned['instructions'], 'revision': learned['active_revision'],
+                        'author': 'andrew', 'reviewed': False, 'provenance': learned['provenance'],
+                        'note': LEARNED_SKILL_NOTE, 'grants_permissions': False}
+            if learned is not None:
+                raise ToolRejected(f"Learned skill is {learned['status']}; no active revision to load")
         if not isinstance(selected, str) or selected not in SKILL_DOCUMENT_HASHES:
             raise ToolRejected('Unknown skill; use skills.list')
         path = self.root / selected / 'SKILL.md'
@@ -50,14 +69,65 @@ class SkillCatalog:
         return {'name': selected, 'instructions': instructions, 'sha256': SKILL_DOCUMENT_HASHES[selected],
                 'grants_permissions': False}
 
+    @staticmethod
+    def _save(name, arguments, store, owner_id):
+        if store is None:
+            raise ToolRejected('Learned skills are unavailable')
+        retire = name == 'skills.retire'
+        required = {'name', 'revision', 'reason'} if retire else {'name', 'purpose', 'instructions', 'reason'}
+        optional = {'history_ids'} | (set() if retire else {'revision'})
+        if not required <= set(arguments) <= required | optional:
+            raise ToolRejected('Invalid skill request')
+        selected = arguments['name']
+        if not isinstance(selected, str) or not LEARNED_SKILL_NAME.fullmatch(selected) or selected in SKILL_DOCUMENT_HASHES:
+            raise ToolRejected('Skill name must be 3-48 lowercase letters, digits or hyphens and not a built-in skill')
+        reason = validate_memory_text(arguments['reason'], maximum=1000)
+        purpose = instructions = ''
+        if not retire:
+            purpose = validate_memory_text(arguments['purpose'], maximum=200)
+            instructions = validate_memory_text(arguments['instructions'], maximum=MAX_SKILL_BYTES)
+            if len(instructions.encode('utf-8')) > MAX_SKILL_BYTES:
+                raise ToolRejected('Skill instructions exceed their allowed size')
+        result = store.save_learned_skill(
+            selected, purpose, instructions, reason, arguments.get('revision'), retire=retire,
+            history_ids=arguments.get('history_ids', []), owner_id=owner_id,
+            untrusted=bool((MEMORY_SOURCE_CONTEXT.get() or {}).get('untrusted')))
+        if not result['active']:
+            result['note'] = ('Saved as an inactive revision because this turn used untrusted context; '
+                              'the active skill is unchanged.')
+        return {**result, 'grants_permissions': False}
+
 
 SKILL_TOOLS = [
     {'name': 'skills.list', 'label': 'List optional skills',
      'description': 'Read the compact optional skill index without loading full instructions. No permission or spending changes.',
      'parameters': {'type': 'object', 'properties': {}, 'additionalProperties': False}},
     {'name': 'skills.load', 'label': 'Read optional skill',
-     'description': 'Read one trusted skill when useful. Guidance only: never enables tools, grants permissions, changes memory, or assigns research.',
-     'parameters': {'type': 'object', 'properties': {'name': {'type': 'string', 'enum': list(SKILL_SUMMARIES)}},
+     'description': 'Read one built-in skill, or the active revision of a skill you wrote with skills.save, when useful. '
+                    'Guidance only: never enables tools, grants permissions, changes memory, or assigns research.',
+     'parameters': {'type': 'object', 'properties': {'name': {'type': 'string', 'minLength': 3, 'maxLength': 48}},
                     'required': ['name'], 'additionalProperties': False}},
+    {'name': 'skills.save', 'label': 'Save a learned skill',
+     'description': 'Record a reusable method that worked for you, so you can load it later instead of keeping it in memory. '
+                    'Create with name, purpose, instructions and reason; to revise, also pass latest_revision from skills.list. '
+                    'Every revision is kept. A revision made after reading web pages, code output, mail or other untrusted '
+                    'context is stored but stays inactive. Skills are guidance, never permissions.',
+     'parameters': {'type': 'object', 'properties': {
+         'name': {'type': 'string', 'pattern': '^[a-z][a-z0-9-]{2,47}$'},
+         'purpose': {'type': 'string', 'minLength': 1, 'maxLength': 200},
+         'instructions': {'type': 'string', 'minLength': 1, 'maxLength': MAX_SKILL_BYTES},
+         'reason': {'type': 'string', 'minLength': 1, 'maxLength': 1000},
+         'revision': {'type': 'integer', 'minimum': 1},
+         'history_ids': {'type': 'array', 'items': {'type': 'integer', 'minimum': 1}, 'maxItems': 20}},
+         'required': ['name', 'purpose', 'instructions', 'reason'], 'additionalProperties': False}},
+    {'name': 'skills.retire', 'label': 'Retire a learned skill',
+     'description': 'Stop using one of your learned skills, with a reason. Pass latest_revision from skills.list. '
+                    'Its revisions stay stored. Retiring from untrusted context is recorded but does not take effect.',
+     'parameters': {'type': 'object', 'properties': {
+         'name': {'type': 'string', 'pattern': '^[a-z][a-z0-9-]{2,47}$'},
+         'revision': {'type': 'integer', 'minimum': 1},
+         'reason': {'type': 'string', 'minLength': 1, 'maxLength': 1000},
+         'history_ids': {'type': 'array', 'items': {'type': 'integer', 'minimum': 1}, 'maxItems': 20}},
+         'required': ['name', 'revision', 'reason'], 'additionalProperties': False}},
 ]
 SKILL_TOOL_NAMES = frozenset(tool['name'] for tool in SKILL_TOOLS)

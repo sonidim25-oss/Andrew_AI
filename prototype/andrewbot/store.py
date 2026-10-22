@@ -244,6 +244,23 @@ class Store:
             CREATE TRIGGER IF NOT EXISTS memory_revisions_immutable_delete BEFORE DELETE ON memory_revisions BEGIN
                 SELECT RAISE(ABORT,'Memory revisions are immutable');
             END;
+            CREATE TABLE IF NOT EXISTS learned_skills (
+                skill_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK(revision >= 1),
+                purpose TEXT NOT NULL,
+                instructions TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                retired INTEGER NOT NULL CHECK(retired IN (0,1)),
+                created_at TEXT NOT NULL,
+                UNIQUE(name, revision)
+            );
+            CREATE TRIGGER IF NOT EXISTS learned_skills_immutable_update BEFORE UPDATE ON learned_skills BEGIN
+                SELECT RAISE(ABORT,'Learned skill revisions are immutable');
+            END;
+            CREATE TRIGGER IF NOT EXISTS learned_skills_immutable_delete BEFORE DELETE ON learned_skills BEGIN
+                SELECT RAISE(ABORT,'Learned skill revisions are immutable');
+            END;
             CREATE TABLE IF NOT EXISTS cycles (
                 cycle_id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL,
@@ -2377,6 +2394,72 @@ class Store:
                 (f"Memory revised ({len(record_ids)} superseded; replacement={replacement or 'none'})", now),
             )
         return {'record_id': replacement, 'superseded': list(record_ids)}
+
+    MAX_LEARNED_SKILLS = 50
+
+    @database_locked
+    def save_learned_skill(self, name, purpose, instructions, reason, revision=None, *, retire=False,
+                           history_ids=(), owner_id=None, untrusted=False):
+        """Append a skill revision; only agent-provenance revisions can become active."""
+        with self.connection:
+            latest = self.connection.execute(
+                'SELECT MAX(revision) FROM learned_skills WHERE name=?', (name,)).fetchone()[0]
+            if latest is None:
+                if revision is not None or retire:
+                    raise ToolRejected('unknown learned skill; omit revision to create it')
+                count = self.connection.execute('SELECT COUNT(DISTINCT name) FROM learned_skills').fetchone()[0]
+                if count >= self.MAX_LEARNED_SKILLS:
+                    raise ToolRejected('learned skill limit reached; retire or revise an existing skill')
+            elif isinstance(revision, bool) or revision != latest:
+                raise ToolRejected('stale or missing skill revision; use latest_revision from skills.list')
+            provenance = self._prepare_memory_provenance('andrew', history_ids, owner_id, untrusted)
+            skill_id = uuid.uuid4().hex
+            now = self.now()
+            self.connection.execute(
+                'INSERT INTO learned_skills(skill_id,name,revision,purpose,instructions,reason,retired,created_at) '
+                'VALUES(?,?,?,?,?,?,?,?)',
+                (skill_id, name, (latest or 0) + 1, purpose, instructions, reason, int(bool(retire)), now))
+            self._insert_memory_provenance(skill_id, provenance)
+            self.connection.execute(
+                'INSERT INTO activity(event,created_at) VALUES(?,?)',
+                (f"Learned skill {'retired' if retire else 'saved'} ({name} r{(latest or 0) + 1}; "
+                 f"provenance={provenance[0]})", now))
+        return {'name': name, 'revision': (latest or 0) + 1, 'active': provenance[0] == 'agent'}
+
+    def _learned_skill_rows(self, name=None):
+        return self.connection.execute(
+            'SELECT s.*,COALESCE(p.origin,\'untrusted\') AS provenance FROM learned_skills s '
+            'LEFT JOIN memory_provenance p ON p.record_id=s.skill_id '
+            'WHERE (? IS NULL OR s.name=?) ORDER BY s.name,s.revision', (name, name)).fetchall()
+
+    @staticmethod
+    def _learned_skill_summary(rows):
+        active = [row for row in rows if row['provenance'] == 'agent']
+        current = active[-1] if active else None
+        status = 'inactive' if current is None else 'retired' if current['retired'] else 'active'
+        return {'name': rows[0]['name'], 'status': status,
+                'purpose': current['purpose'] if status == 'active' else None,
+                'active_revision': current['revision'] if status == 'active' else None,
+                'latest_revision': rows[-1]['revision'],
+                'inactive_newer_revisions': sum(1 for row in rows if current is None or row['revision'] > current['revision'])}
+
+    @database_locked
+    def learned_skills(self):
+        grouped = {}
+        for row in self._learned_skill_rows():
+            grouped.setdefault(row['name'], []).append(row)
+        return [self._learned_skill_summary(rows) for rows in grouped.values()]
+
+    @database_locked
+    def active_learned_skill(self, name):
+        rows = self._learned_skill_rows(name)
+        if not rows:
+            return None
+        summary = self._learned_skill_summary(rows)
+        if summary['status'] != 'active':
+            return summary
+        row = next(row for row in rows if row['revision'] == summary['active_revision'])
+        return {**summary, 'instructions': row['instructions'], 'provenance': row['provenance']}
 
     def _memory_revision_links(self, record_id):
         row = self.connection.execute(

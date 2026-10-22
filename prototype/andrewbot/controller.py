@@ -418,7 +418,8 @@ class Controller:
                 and not self.store.diary_entry(datetime.now(ZoneInfo(self.timezone_name)).date().isoformat())):
             raise ToolRejected("save today's diary before requesting autonomous sleep")
         if name in SKILL_TOOL_NAMES:
-            return json.dumps(self.skill_catalog.execute(name, arguments), ensure_ascii=False)
+            return json.dumps(self.skill_catalog.execute(name, arguments, store=self.store, owner_id=self.owner_id),
+                              ensure_ascii=False)
         if name in {'session_search', 'session_read'}:
             return json.dumps(SessionHistory(self.store, self.owner_id).execute(name, arguments), ensure_ascii=False)
         if name in {'media.status', 'media.get', 'voice.generate', 'image.generate', 'image.edit', 'profile.propose_avatar'}:

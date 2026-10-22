@@ -13,7 +13,7 @@ KNOWN_TOOLS=frozenset({'sleep','wake_at','continue_activity','check_budget','rec
     'session_search','session_read','gmail.status','gmail.read','gmail.search','gmail.send',
     'gmail.draft','gmail.delete','gmail.reconcile','research.list','research.get',
     'research.observations','research.create','research.update','research.focus',
-    'skills.list','skills.load','media.status','media.get','image.generate','image.edit',
+    'skills.list','skills.load','skills.save','skills.retire','media.status','media.get','image.generate','image.edit',
     'voice.generate','profile.propose_avatar'})
 PHASES=frozenset({'input_committed','provider_admitted','provider_backoff','provider_confirmed',
     'tool_prepared','tool_admitted','tool_confirmed','continuation_ready','terminal_committed','held'})
