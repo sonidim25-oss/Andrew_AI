@@ -147,3 +147,34 @@ successfully (94 skips for optional runtime prerequisites). Independent review
 found and verified the reservation-instance correction, then reported no
 remaining actionable findings. Privileged coordinated deployment acceptance
 has not run and is still required before installation.
+
+## Prepared rollout command
+
+Andrew can remain active during preparation. Before installation, send `/pause`
+and wait for current work to settle, then run:
+
+```bash
+sudo /home/daniel/deploy-andrew-budget-reconciliation-20261022.sh
+```
+
+The launcher pins the deployment commit. It refuses dirty sources or a changed
+installed baseline (controller `6cd63b2e…`, runner `3b42b8e1…`, backend
+`3f5cfd7a…`). `scripts/budget_deployment.py` checks pause, no active turn/session,
+restore fences and snapshot headroom before acceptance. It reuses the exact
+837-test core proof only when all validated core inputs and Python match. It runs
+the remaining required privileged acceptance, including protocol and distinct-UID
+checks, against an isolated candidate before changing services. Valid complete
+acceptance is reused on retry; incomplete candidates are retained for inspection.
+
+Before applying, the command rechecks the exact owner state, adoption record,
+billing rows and snapshot space. The existing coordinated installer takes its
+normal backups and fences, then applies and enables the package. The backend and
+runner package remain unchanged. Final checks verify expected package digests,
+preserved pause/owner controls and unchanged usage, reservations and reconciliation
+audit rows. No settlement, wake or replay is part of this command.
+
+The stable pristine test package and saved core proof are under
+`/home/daniel/andrew-budget-preflight-20261022/`. The root-owned installation
+candidate will be `/var/backups/andrew-budget-reconciliation-20261022-candidate`.
+If installation has already started and stopped partway through, inspect
+`installation.json` before retrying; the wrapper refuses to overwrite that state.
