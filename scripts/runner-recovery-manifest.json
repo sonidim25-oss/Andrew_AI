@@ -33,8 +33,8 @@
     },
     "gateway.py": {
       "allow_missing": false,
-      "baseline": "116a8c6019621fb2d4d98741afc0421684953eeaffae95ac94010961b72b56bc",
-      "tested": "3cee053ccb0e5a8a70abbb70ffd2bb818db306527815a09c11342b816c6636ec"
+      "baseline": "3cee053ccb0e5a8a70abbb70ffd2bb818db306527815a09c11342b816c6636ec",
+      "tested": "1f47b89140480b4e74715383f9b42acd350e53083614c00b835747abc727f637"
     },
     "gmail_tools.py": {
       "allow_missing": false,
@@ -164,7 +164,7 @@
     "store.py": {
       "allow_missing": false,
       "baseline": "925d41481c83457b0cef91ac82a87681f1e71f5d6aefa35ecc904fba98af56b2",
-      "tested": "925d41481c83457b0cef91ac82a87681f1e71f5d6aefa35ecc904fba98af56b2"
+      "tested": "6b40cd79c32a27468fca55281fc91728fd775739d9e01571148faa9f87122f9b"
     },
     "telegram.py": {
       "allow_missing": false,

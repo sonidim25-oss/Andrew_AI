@@ -309,6 +309,24 @@ class Store:
                 created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS budget_reservations_period ON budget_reservations(month, day);
+            CREATE TABLE IF NOT EXISTS budget_reservation_reconciliations (
+                reservation_id TEXT PRIMARY KEY,
+                evidence_sha256 TEXT NOT NULL,
+                evidence_json TEXT NOT NULL,
+                reservation_json TEXT NOT NULL,
+                outcome TEXT NOT NULL CHECK(outcome IN ('not_reached','completed')),
+                provider_record_id TEXT UNIQUE,
+                usage_id INTEGER NOT NULL UNIQUE REFERENCES usage(id),
+                reconciled_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS legacy_provider_reservations (
+                reservation_id TEXT PRIMARY KEY,
+                instance_id TEXT NOT NULL UNIQUE
+            );
+            CREATE TABLE IF NOT EXISTS legacy_provider_attempt_instances (
+                attempt_id INTEGER PRIMARY KEY REFERENCES provider_attempts(attempt_id),
+                instance_id TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS research_entries (
                 seq INTEGER PRIMARY KEY AUTOINCREMENT,
                 record_id TEXT NOT NULL UNIQUE,
@@ -1398,16 +1416,28 @@ class Store:
     _RESTORE_FENCES = ('restore_recovery_required', 'local_recovery_restore_required')
 
     @database_locked
-    def record_provider_attempt(self, reservation_id):
+    def record_provider_attempt(self, reservation_id, *, reservation_instance=None):
         """Attribute one legacy gateway dispatch to the running autonomous cycle, if any."""
         with self.connection:
+            self.connection.execute('BEGIN IMMEDIATE')
+            if reservation_instance is not None:
+                instance = self.connection.execute(
+                    'SELECT instance_id FROM legacy_provider_reservations WHERE reservation_id=?',
+                    (reservation_id,)).fetchone()
+                if instance is None or instance[0] != reservation_instance or not self.connection.execute(
+                        'SELECT 1 FROM budget_reservations WHERE reservation_id=?', (reservation_id,)).fetchone():
+                    raise ValueError('Provider reservation instance changed before dispatch')
             cycle_id = self.get_state('active_cycle_id', '')
             session_id = self.get_state('active_session_id', '')
             if not (cycle_id and session_id and self.get_state('autonomous_owner_id', '')):
                 return None
-            return self.connection.execute(
+            attempt_id = self.connection.execute(
                 "INSERT INTO provider_attempts(session_id,cycle_id,reservation_id,outcome,created_at) "
                 "VALUES(?,?,?,'dispatching',?)", (session_id, cycle_id, reservation_id, self.now())).lastrowid
+            if reservation_instance is not None:
+                self.connection.execute('INSERT INTO legacy_provider_attempt_instances VALUES(?,?)',
+                                        (attempt_id, reservation_instance))
+            return attempt_id
 
     @database_locked
     def finish_provider_attempt(self, attempt_id, outcome):
@@ -1939,14 +1969,20 @@ class Store:
         self.connection.commit()
 
     @database_locked
-    def reserve_usage(self, reservation_id, month, day, cost_usd):
-        cursor = self.connection.execute(
-            "INSERT INTO budget_reservations(reservation_id,month,day,cost_usd,created_at) VALUES(?,?,?,?,?) "
-            "ON CONFLICT(reservation_id) DO NOTHING",
-            (reservation_id, month, day, max(0.0, float(cost_usd)), self.now()),
-        )
-        self.connection.commit()
-        return cursor.rowcount == 1
+    def reserve_usage(self, reservation_id, month, day, cost_usd, *, provider_instance=None):
+        with self.connection:
+            cursor = self.connection.execute(
+                "INSERT INTO budget_reservations(reservation_id,month,day,cost_usd,created_at) "
+                "SELECT ?,?,?,?,? WHERE NOT EXISTS "
+                "(SELECT 1 FROM budget_reservation_reconciliations WHERE reservation_id=?) "
+                "ON CONFLICT(reservation_id) DO NOTHING",
+                (reservation_id, month, day, max(0.0, float(cost_usd)), self.now(), reservation_id),
+            )
+            if cursor.rowcount:
+                self.connection.execute('INSERT INTO legacy_provider_reservations VALUES(?,?) '
+                    'ON CONFLICT(reservation_id) DO UPDATE SET instance_id=excluded.instance_id',
+                    (reservation_id, provider_instance or uuid.uuid4().hex))
+            return cursor.rowcount == 1
 
     @database_locked
     def settle_usage(self, reservation_id, month, day, cost_usd, input_tokens, output_tokens):
