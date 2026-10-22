@@ -1,6 +1,6 @@
 import {join} from 'node:path';
 import {readdirSync} from 'node:fs';
-import {canonical,digest,safeId} from './contracts.mjs';
+import {canonical,digest,safeId,validateSnapshot} from './contracts.mjs';
 import {safeDirectory,readJSON,readRegular,atomicWrite} from './payload-store.mjs';
 
 const pathFor=(root,kind,id)=>join(root,'adopted',kind+'-'+digest(id)+'.json');
@@ -32,6 +32,28 @@ function sameFields(current,patch){
  if(patch&&Object.getPrototypeOf(patch)===Object.prototype)return Object.entries(patch).every(([key,value])=>sameFields(current?.[key],value));
  return current!==undefined&&canonical(current)===canonical(patch);
 }
+// A model change keeps every other agent setting; tools, prompt and memory stay frozen.
+function modelOnlyChange(current,body){
+ if(!body||Object.getPrototypeOf(body)!==Object.prototype||!Object.hasOwn(body,'model')
+   ||Object.keys(body).some(key=>!['model','model_settings'].includes(key)))return false;
+ if(typeof body.model!=='string'||!/^openai-compatible\/[A-Za-z0-9][A-Za-z0-9._:\/-]{0,255}$/.test(body.model)||body.model.includes('..'))return false;
+ if(typeof current?.model!=='string'||current.model===body.model)return false;
+ return !Object.hasOwn(body,'model_settings')||sameFields(current,{model_settings:body.model_settings});
+}
+// Every journaled turn of the agent is finished, acknowledged and settled, with
+// no claim and no legacy run, so no held work can continue under another model.
+function agentQuiescent(root,agentId,backend){
+ if(!(backend?.activeRunByConversation instanceof Map)||backend.activeRunByConversation.size)return false;
+ const directory=join(root,'conversations');
+ if(!safeDirectory(directory))return true;
+ for(const name of readdirSync(directory)){
+  if(!/^[a-f0-9]{64}\.json$/.test(name))continue;
+  const snapshot=validateSnapshot(readJSON(join(directory,name)));
+  if(snapshot.binding.agent_id!==agentId)continue;
+  if(snapshot.phase!=='terminal_committed'||snapshot.terminal?.acknowledged!==true||snapshot.terminal?.settled!==true||snapshot.claim)return false;
+ }
+ return true;
+}
 export function assertNotRestored(root){
  try{readRegular(join(root,'restore-required.json'),1024);}catch(error){if(error.code==='ENOENT')return;throw error;}
  throw Error('restore_required');
@@ -48,6 +70,8 @@ export async function guardLegacy(command,{root,sdk}){
  if(command.type==='agent_update'){
   const current=sdk.backend.store.retrieveAgentRecord(command.agent_id);
   if(command.body&&Object.keys(command.body).length&&sameFields(current,command.body))return {agent:await sdk.backend.retrieveAgent(command.agent_id)};
+  // The ordinary handler applies an owner-configured model change only between turns.
+  if(modelOnlyChange(current,command.body)&&agentQuiescent(root,command.agent_id,sdk.backend))return false;
  }
  throw Error('unsupported_contract');
 }

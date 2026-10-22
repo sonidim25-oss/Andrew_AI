@@ -21,6 +21,7 @@ from andrewbot.recovery_dispatch import RecoveryDispatch
 from andrewbot.recovery_records import RecoveryRecords
 from andrewbot.sessions import SessionRunner
 from andrewbot.workers import ModelWorker
+from andrewbot.configuration import load_model_config
 from andrewbot.model import OpenRouterModel, ProviderRequestError, retry_after_seconds
 
 
@@ -32,6 +33,7 @@ def main():
     parser.add_argument('--compaction',action='store_true')
     parser.add_argument('--recovery-once',action='store_true')
     parser.add_argument('--unreached-first',action='store_true')
+    parser.add_argument('--model-id')
     args=parser.parse_args();root=args.root
     def save(name,value):
         path=root/name;temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps(value,sort_keys=True));os.replace(temporary,path)
@@ -49,7 +51,10 @@ def main():
             try:return post('/provider',payload)
             except urllib.error.HTTPError as error:
                 raise ProviderRequestError('http_error',error.code,retry_after=retry_after_seconds(error.headers.get('Retry-After'))) from None
-    store=Store(root/'controller.sqlite3');gateway=ModelGateway(Provider(),store,'fixture-token')
+    # An owner-configured model change uses the same environment as production.
+    model_config=load_model_config({'ANDREW_MODEL_ID':args.model_id,'ANDREW_MODEL_INPUT_USD_PER_MILLION':'0.10',
+                                    'ANDREW_MODEL_OUTPUT_USD_PER_MILLION':'0.50'}) if args.model_id else None
+    store=Store(root/'controller.sqlite3');gateway=ModelGateway(Provider(),store,'fixture-token',model_config=model_config)
     server=GatewayThread(make_server(gateway,port=0));server.start()
     def die(boundary):
         save('controller-fault.json',{'boundary':boundary});os.kill(os.getpid(),signal.SIGKILL)
@@ -66,7 +71,7 @@ def main():
             die(args.fault)
             return result
         setattr(RecoveryRecords,method,interrupted)
-    agent=LettaAgent(store,'fixture-token',url=args.backend_url)
+    agent=LettaAgent(store,'fixture-token',url=args.backend_url,model_config=model_config)
     controller=Controller(store,agent,17,autonomous_enabled=True)
     coordinator=RecoveryCoordinator(store,controller,enabled=True)
     agent.local_recovery=controller.local_recovery=coordinator;agent.tool_handler=controller.execute_tool

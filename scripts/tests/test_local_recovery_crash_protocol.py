@@ -45,7 +45,7 @@ def available_port():
 class Harness:
     def __init__(self,test,*,phase=None,moment=None,controller_fault=None,compaction=False,rate_limit=False,owner_arrives=False,unreached_first=False):
         self.test=test;self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
-        self.provider_calls=[];self.effects=[];fixture=self;self.compaction=compaction;self.unreached_first=unreached_first
+        self.provider_calls=[];self.effects=[];fixture=self;self.compaction=compaction;self.unreached_first=unreached_first;self.model_id=None
         class Provider(BaseHTTPRequestHandler):
             def log_message(self,*args):pass
             def do_POST(self):
@@ -103,6 +103,7 @@ class Harness:
         if self.compaction:command+=['--compaction']
         if recovery_once:command+=['--recovery-once']
         if self.unreached_first and mode=='start':command+=['--unreached-first']
+        if self.model_id:command+=['--model-id',self.model_id]
         log=(self.root/'controller.log').open('a')
         environment={**os.environ,'PYTHONPATH':str(ROOT/'prototype'),'NO_PROXY':'*','no_proxy':'*'}
         self.controller=subprocess.Popen(command,cwd=self.root,env=environment,stdout=log,stderr=log);log.close()
@@ -198,6 +199,40 @@ class LocalRecoveryCrashProtocolTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT attempt,http_status,reason FROM recovery_provider_rejections').fetchall(),[(1,None,'provider_not_reached')])
             self.assertIn(db.execute("SELECT value FROM state WHERE key='autonomy_error'").fetchone(),(None,('',)))
             self.assertEqual(db.execute("SELECT count(*) FROM recovery_effects WHERE state='admitted'").fetchone()[0],0)
+        fixture.close()
+
+    def test_model_change_between_settled_turns_applies_to_the_next_turn(self):
+        fixture=Harness(self)
+        self.assertTrue(fixture.wait_file('controller-done.json')['completed'])
+        first=len(fixture.provider_calls)
+        fixture.controller.kill();fixture.controller.wait(5)
+        fixture.model_id='openai/gpt-6-luna';fixture.start_controller('start')
+        result=fixture.wait_file('controller-done.json',timeout=40)
+        self.assertTrue(result['completed'],result)
+        self.assertGreater(len(fixture.provider_calls),first)
+        self.assertEqual({call['model'] for call in fixture.provider_calls[first:]},{'openai/gpt-6-luna'})
+        import sqlite3
+        with sqlite3.connect(fixture.root/'controller.sqlite3') as db:
+            state=dict(db.execute("SELECT key,value FROM state WHERE key IN ('letta_model_id','letta_model_handle')"))
+            configs=[row[0] for row in db.execute('SELECT DISTINCT json_extract(binding_json,"$.config_sha") FROM recovery_attempts')]
+        self.assertEqual(state,{'letta_model_id':'openai/gpt-6-luna','letta_model_handle':'openai-compatible/openai/gpt-6-luna'})
+        self.assertEqual(len(configs),2)
+        fixture.close()
+
+    def test_model_change_is_refused_while_a_turn_is_held(self):
+        fixture=Harness(self,phase='provider_admitted',moment='after')
+        fixture.wait_file('backend-fault.json');fixture.backend.wait(5)
+        fixture.wait_file('controller-done.json');fixture.controller.kill();fixture.controller.wait(5)
+        fixture.environment.pop('NODE_OPTIONS',None);fixture.environment.pop('ANDREW_TEST_FAULT_ROOT',None);fixture.start_backend()
+        calls=len(fixture.provider_calls)
+        fixture.model_id='openai/gpt-6-luna';fixture.start_controller('recover')
+        fixture.controller.wait(30)
+        self.assertNotEqual(fixture.controller.returncode,0)
+        self.assertIn('Letta model update failed (LettaCommandError)',(fixture.root/'controller.log').read_text())
+        self.assertEqual(len(fixture.provider_calls),calls)
+        import sqlite3
+        with sqlite3.connect(fixture.root/'controller.sqlite3') as db:
+            self.assertNotEqual(db.execute("SELECT value FROM state WHERE key='letta_model_id'").fetchone(),('openai/gpt-6-luna',))
         fixture.close()
 
     def test_backend_loss_around_backoff_checkpoint_keeps_rejection_evidence(self):
