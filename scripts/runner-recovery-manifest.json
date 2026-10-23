@@ -64,7 +64,7 @@
     "memory.py": {
       "allow_missing": false,
       "baseline": "f91ae0f04d2a39f37b239e3ab024da2a569647841b9219cd9df9c1bf4ed05a8b",
-      "tested": "f91ae0f04d2a39f37b239e3ab024da2a569647841b9219cd9df9c1bf4ed05a8b"
+      "tested": "0cef60cd955cdf057bac868b7d8f530eb896928bbc2a9aac44f4a8a0d6f8df00"
     },
     "memory_backup.py": {
       "allow_missing": false,
