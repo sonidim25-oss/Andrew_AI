@@ -505,7 +505,8 @@ class AppServerWebSocketTests(unittest.TestCase):
             client.connection = Connection()
             result = client.send_user_turn(runtime, "save a diary and sleep", tool_handler=controller.execute_tool)
             self.assertIn("sleep", result)
-            self.assertIsNotNone(store.diary_entry())
+            self.assertIsNone(store.diary_entry())
+            self.assertEqual(len(store.open_diary_drafts()), 1)
             self.assertEqual(store.get_state("sleeping"), "1")
             self.assertEqual(sum(item["type"] == "external_tool_call_response" for item in client.connection.sent), 2)
 

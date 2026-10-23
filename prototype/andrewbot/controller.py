@@ -4,7 +4,7 @@ import logging
 from .latency import record_failure
 from .budget import budget_snapshot
 from .configuration import OUTPUT_TOKEN_COST_ESTIMATE, ModelConfig, load_model_config
-from .diary import format_diary_entry, parse_diary_command, validate_diary_content
+from .diary import format_diary_entry, parse_diary_command
 from .telegram_menu import normalize_owner_text, HELP_TEXT
 from .appserver import AppServerClient, LettaTurnError, LettaTurnCancelled
 from .tool_errors import ToolRejected
@@ -419,9 +419,6 @@ class Controller:
             raise ToolRejected("owner pause can only be cleared by the owner with /wake")
         if self.store.get_state("sleeping", "0") == "1" and name not in read_tools:
             raise ToolRejected("sleep can only end at a scheduled wake or an owner wake")
-        if (name in {"sleep", "wake_at"} and self.store.get_state("active_session_id", "")
-                and not self.store.diary_entry(datetime.now(ZoneInfo(self.timezone_name)).date().isoformat())):
-            raise ToolRejected("save today's diary before requesting autonomous sleep")
         if name in SKILL_TOOL_NAMES:
             return json.dumps(self.skill_catalog.execute(name, arguments), ensure_ascii=False)
         if name in {'session_search', 'session_read'}:
@@ -561,33 +558,33 @@ class Controller:
                 raise ToolRejected("isolated runtime is unavailable")
             return self.tool_runtime.execute(name, arguments)
         if name == "save_diary_entry":
-            if not self.autonomous_enabled or not self.store.get_state("active_session_id", ""):
-                # This precondition rejects the request before any diary write.
-                # Return the rejection so durable dispatch can save its exact
-                # outcome instead of leaving an admitted, apparently lost tool.
+            from .diary import validate_diary_date, validate_diary_revision
+            owner_revision = self.store.get_state('owner_control_revision', '0')
+            session_id = self.store.get_state('active_session_id', '')
+            if not self.autonomous_enabled or not session_id:
                 return json.dumps({"status": "error", "error": "diary_requires_autonomous_session",
-                    "executed": False, "message": "Diary entry was not saved. This tool requires an active autonomous session; answer the owner without saving a diary."})
-            try:
-                content = validate_diary_content(arguments.get("content"))
-            except ValueError:
-                # Pure text validation only; no diary storage has been called.
-                raise ToolRejected('diary content was rejected; use safe text within 3000 characters') from None
-            event_ids = arguments.get("event_ids", [])
-            if (not isinstance(event_ids, list) or len(event_ids) > 20
-                    or any(isinstance(item, bool) or not isinstance(item, int) or item <= 0 for item in event_ids)):
-                raise ToolRejected("activity event references are invalid")
-            local_date = datetime.now(ZoneInfo(self.timezone_name)).date().isoformat()
-            try:
-                entry_id = self.store.create_diary_entry(
-                    local_date, content, session_id=self.store.get_state("active_session_id", ""),
-                    event_ids=event_ids,
-                )
-            except ToolRejected:
-                raise
-            except ValueError:
-                raise ValueError("diary entry was not saved; check the date and event references") from None
-            self.store.add_activity(f"Diary entry saved ({entry_id})")
-            return "Diary entry saved for today. It will be delivered to the owner by Telegram."
+                    "executed": False, "message": "Diary was not changed. This tool requires an active autonomous session; answer the owner without writing a diary."})
+            action = arguments.get('action', 'draft')
+            if not isinstance(action, str) or action not in {'read', 'draft', 'finalize'}:
+                raise ToolRejected('invalid diary action')
+            allowed = {'action', 'local_date', 'revision'} | ({'content', 'event_ids'} if action == 'draft' else set())
+            if set(arguments) - allowed:
+                raise ToolRejected('unsupported diary arguments')
+            local_date = validate_diary_date(arguments.get('local_date', self._periods()[1]))
+            if local_date > self._periods()[1]:
+                raise ToolRejected('diary date cannot be in the future')
+            revision = validate_diary_revision(arguments.get('revision', 0))
+            if action == 'read':
+                return json.dumps({'draft': self.store.diary_draft(local_date, revision),
+                    'finalized': self.store.diary_entry(local_date),
+                    'open_drafts': self.store.open_diary_drafts()}, ensure_ascii=False)
+            if action == 'draft':
+                result = self.store.save_diary_draft(local_date, arguments.get('content'), revision,
+                    session_id, owner_revision, arguments.get('event_ids', []))
+                return json.dumps({'status': 'draft', **result}, ensure_ascii=False)
+            entry_id = self.store.finalize_diary_draft(local_date, revision, session_id, owner_revision)
+            return json.dumps({'status': 'finalized', 'entry_id': entry_id, 'local_date': local_date,
+                               'delivery': 'queued'})
         raise ToolRejected("unsupported controller action")
 
     def _cancel_active_turn(self):

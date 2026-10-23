@@ -1,0 +1,18 @@
+{
+  "baseline_commit": "3bf02be",
+  "controller_files": {
+    "appserver.py": "9c550896fa58d9f027cbc4ecd426d8b6686441eb324f1893ac851919045ebd9b",
+    "controller.py": "c2cad97fd670b5af6c1a3d23a2a6f8319ba40e0f552eca885d8867ff64e76d1f",
+    "diary.py": "edab3cfe128b1c3d3805dbe3c4e46f687cd05aec696490f1f8acf391f9c9f560",
+    "recovery_dispatch.py": "6d95058f0bc8d912f5f786b077ba54f32969605868f655a520812f5b137b68ca",
+    "sessions.py": "d8bc3f877a4ec2fb3950bc8ab666c4c4ff11334ac14db30d5b24c24769e75ff0",
+    "store.py": "b67d0b8641d7e4aa9c8f618187ebc9ab77155fd82e100f94aaf6f4ae5972a534"
+  },
+  "verification": {
+    "controller_tests_run": 885,
+    "controller_tests_passed": 883,
+    "controller_tests_skipped": 2,
+    "isolated_letta_protocol_tests_passed": 1,
+    "production_changed": false
+  }
+}

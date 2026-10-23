@@ -155,6 +155,21 @@ class Store:
                 entry_id TEXT PRIMARY KEY REFERENCES diary_entries(entry_id),
                 token TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS diary_draft_revisions (
+                local_date TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK(revision > 0),
+                created_at TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                PRIMARY KEY(local_date, revision)
+            );
+            CREATE TABLE IF NOT EXISTS diary_draft_event_refs (
+                local_date TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                activity_id INTEGER NOT NULL REFERENCES activity(id),
+                PRIMARY KEY(local_date, revision, activity_id),
+                FOREIGN KEY(local_date, revision) REFERENCES diary_draft_revisions(local_date, revision)
+            );
             CREATE TABLE IF NOT EXISTS diary_delivery_retries (
                 entry_id TEXT PRIMARY KEY REFERENCES diary_entries(entry_id),
                 attempts INTEGER NOT NULL CHECK(attempts>0),
@@ -2056,6 +2071,83 @@ class Store:
         cursor = self.connection.execute("INSERT INTO activity(event,created_at) VALUES(?,?)", (event, self.now()))
         self.connection.commit()
         return cursor.lastrowid
+
+    @database_locked
+    def diary_draft(self, local_date, revision=0):
+        from .diary import validate_diary_date, validate_diary_revision
+        validate_diary_date(local_date)
+        validate_diary_revision(revision)
+        row = self.connection.execute(
+            'SELECT * FROM diary_draft_revisions WHERE local_date=? AND (?=0 OR revision=?) '
+            'ORDER BY revision DESC LIMIT 1', (local_date, revision, revision)).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result['event_ids'] = [item[0] for item in self.connection.execute(
+            'SELECT activity_id FROM diary_draft_event_refs WHERE local_date=? AND revision=? ORDER BY activity_id',
+            (local_date, result['revision']))]
+        final = self.diary_entry(local_date)
+        result['finalized_entry_id'] = final['entry_id'] if final else None
+        return result
+
+    @database_locked
+    def open_diary_drafts(self):
+        # Metadata only: draft prose is read explicitly and never sent to Telegram.
+        return [dict(row) for row in self.connection.execute(
+            'SELECT r.local_date, max(r.revision) AS revision FROM diary_draft_revisions r '
+            "WHERE NOT EXISTS(SELECT 1 FROM diary_entries d WHERE d.local_date=r.local_date AND d.record_type='diary') "
+            'GROUP BY r.local_date ORDER BY r.local_date DESC')]
+
+    def _diary_mutation_allowed(self, session_id, owner_revision):
+        if (self.get_state('paused', '0') == '1' or self.get_state('sleeping', '0') == '1'
+                or self.get_state('restore_recovery_required', '0') == '1'
+                or self._agent_error_blocks({'save_diary_entry'})
+                or not session_id or self.get_state('active_session_id', '') != session_id
+                or self.get_state('owner_control_revision', '0') != owner_revision):
+            raise ToolRejected('diary changes cannot override owner controls or a stopped session')
+
+    @database_locked
+    def save_diary_draft(self, local_date, content, revision, session_id, owner_revision, event_ids=()):
+        from .diary import validate_diary_date, validate_diary_revision, validate_diary_draft
+        validate_diary_date(local_date)
+        validate_diary_revision(revision)
+        content, event_ids = validate_diary_draft(content, event_ids)
+        with self.connection:
+            if not self.connection.in_transaction:
+                self.connection.execute('BEGIN IMMEDIATE')
+            self._diary_mutation_allowed(session_id, owner_revision)
+            if self.diary_entry(local_date):
+                raise ToolRejected('a finalized diary already exists for this date')
+            current = self.diary_draft(local_date)
+            if (current['revision'] if current else 0) != revision:
+                raise ToolRejected('diary draft changed; read it before editing')
+            self._validate_memory_references(event_ids, ())
+            self.connection.execute('INSERT INTO diary_draft_revisions VALUES(?,?,?,?,?)',
+                                    (local_date, revision + 1, self.now(), session_id, content))
+            self.connection.executemany('INSERT INTO diary_draft_event_refs VALUES(?,?,?)',
+                                        [(local_date, revision + 1, event_id) for event_id in event_ids])
+            self.connection.execute('INSERT INTO activity(event,created_at) VALUES(?,?)',
+                (f'Diary draft revision saved ({local_date}; revision={revision + 1})', self.now()))
+        return self.diary_draft(local_date)
+
+    @database_locked
+    def finalize_diary_draft(self, local_date, revision, session_id, owner_revision):
+        from .diary import validate_diary_date, validate_diary_revision
+        validate_diary_date(local_date)
+        validate_diary_revision(revision)
+        with self.connection:
+            if not self.connection.in_transaction:
+                self.connection.execute('BEGIN IMMEDIATE')
+            self._diary_mutation_allowed(session_id, owner_revision)
+            if self.diary_entry(local_date):
+                raise ToolRejected('a finalized diary already exists for this date')
+            draft = self.diary_draft(local_date)
+            if not draft or draft['revision'] != revision:
+                raise ToolRejected('diary draft missing or changed; read it before finalizing')
+            # Existing entry creation atomically saves text, references and delivery
+            # eligibility. Draft history stays append-only; no second finalize marker.
+            return self.create_diary_entry(local_date, draft['content'], session_id=session_id,
+                                           event_ids=draft['event_ids'])
 
     @database_locked
     def create_diary_entry(self, local_date, content, record_type="diary", session_id="", event_ids=()):

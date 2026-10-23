@@ -74,12 +74,15 @@ class LettaProtocolTests(unittest.TestCase):
                             elif len(calls) == 4:
                                 name, arguments = 'save_diary_entry', json.dumps({'content': 'I tested a small idea and will rest before returning.'})
                             elif len(calls) == 5:
+                                draft = store.open_diary_drafts()[0]
+                                name, arguments = 'save_diary_entry', json.dumps({'action': 'finalize', **draft})
+                            elif len(calls) == 6:
                                 name, arguments = 'sleep', json.dumps({'minutes': 1, 'reason': 'Return to this fixture later.'})
-                            elif len(calls) in (6, 7):
+                            elif len(calls) in (7, 8):
                                 entry = store.research_page()['entries'][0]
-                                name = 'research.get' if len(calls) == 6 else 'research.focus'
+                                name = 'research.get' if len(calls) == 7 else 'research.focus'
                                 arguments = json.dumps({'id': entry['record_id']})
-                            elif len(calls) == 8:
+                            elif len(calls) == 9:
                                 entry = store.research_page()['entries'][0]
                                 name, arguments = 'research.save', json.dumps({'id': entry['record_id'], 'revision': entry['revision'], 'findings': 'The fixture entry survived the backend and SQLite restart.'})
                             else:
@@ -137,7 +140,7 @@ class LettaProtocolTests(unittest.TestCase):
                     self.assertTrue(store.get_state("sleep_until"), "the sleep callback must save a deadline")
                     self.assertEqual(store.get_state("active_session_status"), "agent_sleep")
                     self.assertIn('expect to wake', store.next_reply()['text'])
-                    self.assertEqual(len(calls), 5)
+                    self.assertEqual(len(calls), 6)
                     self.assertTrue(all('max_tokens' not in call and 'max_completion_tokens' not in call for call in calls))
                     self.assertEqual(store.connection.execute("SELECT count(*) FROM budget_reservations").fetchone()[0], 0)
                     diary_id = store.diary_entry()["entry_id"]
@@ -167,13 +170,13 @@ class LettaProtocolTests(unittest.TestCase):
                     agent.tool_handler = controller.execute_tool
                     runner = SessionRunner(store, controller, agent, enabled=True)
                     runner.recover()
-                    self.assertEqual(len(calls), 5, "restart must not replay a model request")
+                    self.assertEqual(len(calls), 6, "restart must not replay a model request")
                     self.assertTrue(controller.check_scheduled_wake(datetime.fromisoformat(due)))
                     self.assertFalse(controller.check_scheduled_wake(datetime.fromisoformat(due)))
                     clock_now = datetime.fromisoformat(due)
                     with patch('andrewbot.controller.datetime', Clock):
                         self.assertTrue(runner.tick(clock_now))
-                    self.assertEqual(len(calls), 9)
+                    self.assertEqual(len(calls), 10)
                     research_entry = store.research_page()['entries'][0]
                     self.assertEqual(research_entry['revision'], 2)
                     self.assertIn('survived', research_entry['findings'])

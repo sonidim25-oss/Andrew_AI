@@ -8,7 +8,7 @@ from .tool_errors import ToolRejected
 
 _LOCAL_TOOL_AUTHORITY = ContextVar('local_recovery_tool_authority', default=None)
 _LOCAL_MUTATIONS = frozenset({'research.save', 'research.focus', 'research.delete',
-                              'sleep', 'wake_at', 'continue_activity'})
+                              'sleep', 'wake_at', 'continue_activity', 'save_diary_entry'})
 
 
 def authorized_interrupted_tool(store, names):

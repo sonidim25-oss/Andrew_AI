@@ -20,7 +20,7 @@ class SessionRunner:
         "with research.focus, record findings separately from doubts with research.save, or link a further question "
         "with parent_id. You can edit or delete your entries. Do not invent progress or a continuation to fill the journal. "
         "Use this conversation, persistent memory, and the tools actually advertised by the controller. You choose whether to continue this session, sleep for 1–1440 minutes, or request a "
-        "local wake time with your lifecycle tools. Unless today's diary is already saved, before voluntary sleep or scheduling a wake, save one concise, shareable "
+        "local wake time with your lifecycle tools. Diary writing is optional and independent of sleep. You may keep private draft notes with save_diary_entry (action=draft), read or revise them later, and explicitly finalize when ready (action=finalize with the current revision and local_date). Prefer reflecting on a meaningful period of activity; there is no fixed writing time or daily requirement. Unfinished drafts can cross midnight using their original local_date. Do not stay awake or create experiences or content for a diary. A finalized entry is immutable and shared with the owner. If you choose to write, keep it concise: a "
         "first-person diary entry with save_diary_entry. Include reflections and plans, not hidden reasoning, "
         "chat transcripts, credentials, or claims unsupported by your experience. Stay within controller limits. "
         "Use check_budget to inspect current spending and remaining allowance; this local read needs no approval. "
@@ -203,9 +203,6 @@ class SessionRunner:
         try:
             self.store.begin_cycle(session_id, cycle_id, day)
             cycle_started = True
-            stage = "diary_lookup"
-            _, diary_day = self.controller._periods(current)
-            diary_status = "already saved" if self.store.diary_entry(diary_day) else "not yet saved"
             stage = "agent_turn"
             research_context = self.controller.research.wake_context()
             # The gateway checks this only between provider requests. Finish the
@@ -219,7 +216,7 @@ class SessionRunner:
                                       'authorize replaying held messages or uncertain actions.' if recovery else '')
                 self.store.checkpoint_cycle_turn(cycle_id, 'model_started')
                 self.agent.autonomous_turn(
-                    self.SESSION_PROMPT + f" Today's diary is {diary_status}.\n" + research_context + recovery_context,
+                    self.SESSION_PROMPT + "\n" + research_context + recovery_context,
                     timeout=None,
                 )
                 self.store.checkpoint_cycle_turn(cycle_id, 'model_confirmed')

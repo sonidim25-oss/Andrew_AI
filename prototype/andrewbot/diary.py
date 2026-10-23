@@ -2,6 +2,7 @@ import re
 from datetime import datetime
 from .telegram import TelegramNotSent, deliver_saved_message
 from .latency import record_failure
+from .tool_errors import ToolRejected
 
 
 MAX_DIARY_CHARACTERS = 3000
@@ -30,6 +31,33 @@ def validate_diary_content(content):
     if _PRIVATE_REASONING.search(content):
         raise ValueError("diary content failed the safety check")
     return content
+
+
+def validate_diary_date(value):
+    try:
+        if not isinstance(value, str) or datetime.strptime(value, '%Y-%m-%d').date().isoformat() != value:
+            raise ValueError
+    except ValueError:
+        raise ToolRejected('invalid diary date') from None
+    return value
+
+
+def validate_diary_revision(value):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ToolRejected('diary revision must be a nonnegative integer')
+    return value
+
+
+def validate_diary_draft(content, event_ids):
+    try:
+        content = validate_diary_content(content)
+    except ValueError:
+        raise ToolRejected('diary content was rejected; use safe text within 3000 characters') from None
+    if (not isinstance(event_ids, (list, tuple)) or len(event_ids) > 20
+            or any(isinstance(item, bool) or not isinstance(item, int) or item <= 0 for item in event_ids)
+            or len(set(event_ids)) != len(event_ids)):
+        raise ToolRejected('invalid activity event references')
+    return content, tuple(event_ids)
 
 
 def format_diary_entry(entry):

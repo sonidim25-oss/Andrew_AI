@@ -27,8 +27,8 @@ class DiaryTimezoneTests(unittest.TestCase):
 
     def test_save_uses_configured_date(self):
         self.controller._execute_tool("save_diary_entry", {"content": "I reviewed my work today."})
-        self.assertIsNotNone(self.store.diary_entry("2026-10-22"))
-        self.assertIsNone(self.store.diary_entry("2026-10-21"))
+        self.assertIsNotNone(self.store.diary_draft("2026-10-22"))
+        self.assertIsNone(self.store.diary_draft("2026-10-21"))
 
     def test_configured_day_diary_allows_sleep(self):
         self.store.create_diary_entry("2026-10-22", "I reviewed my work today.",
@@ -36,9 +36,8 @@ class DiaryTimezoneTests(unittest.TestCase):
         self.controller._execute_tool("sleep", {"minutes": 30})
         self.assertEqual(self.store.get_state("sleeping"), "1")
 
-    def test_previous_toronto_day_does_not_allow_sleep(self):
+    def test_previous_day_entry_does_not_restrict_sleep(self):
         self.store.create_diary_entry("2026-10-21", "I reviewed my work today.",
                                       session_id="timezone-test")
-        with self.assertRaisesRegex(ToolRejected, "save today's diary"):
-            self.controller._execute_tool("sleep", {"minutes": 30})
-        self.assertNotEqual(self.store.get_state("sleeping", "0"), "1")
+        self.controller._execute_tool("sleep", {"minutes": 30})
+        self.assertEqual(self.store.get_state("sleeping", "0"), "1")
