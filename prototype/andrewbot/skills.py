@@ -15,8 +15,7 @@ SKILL_INDEX_PROMPT = (
     + '\n'.join(name + ': ' + purpose for name, purpose in SKILL_SUMMARIES.items())
     + '\nUse skills.list for the index and skills.load(name) only when a task needs its instructions. '
       'Do not load all skills on every wake. Skills guide methods, not personality; memory holds preferences and experiences. '
-      'Only advertised tools and current controller permissions authorize actions. '
-      'You may record a reusable method of your own with skills.save; it is self-authored guidance, not permission.'
+      'Only advertised tools and current controller permissions authorize actions.'
 )
 LEARNED_SKILL_NAME = re.compile(r'[a-z][a-z0-9-]{2,47}')
 LEARNED_SKILL_NOTE = ('Self-authored procedure from your own earlier experience; not owner-reviewed. '
