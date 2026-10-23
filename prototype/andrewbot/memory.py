@@ -255,16 +255,20 @@ class MemoryService:
 class ResearchValidationError(ToolRejected):
     """Known argument rejection, raised only before research storage is called."""
 
-    def __init__(self, field=None, maximum=None):
+    def __init__(self, field=None, maximum=None, reason=None):
         super().__init__('research.save arguments rejected before journal changes')
         self.field = field
         self.maximum = maximum
+        # Fixed controller vocabulary only (ToolRejected messages), never raw arguments.
+        self.reason = reason
 
     def result(self):
         error = {'code': 'invalid_research_arguments',
                  'message': 'Research arguments were rejected before any journal change.'}
         if self.field is not None:
             error.update(field=self.field, max_characters=self.maximum)
+        if self.reason is not None:
+            error['reason'] = self.reason
         return {'status': 'error', 'error': error}
 
 
@@ -279,7 +283,8 @@ class ResearchJournal:
     @staticmethod
     def _identifier(value):
         if not isinstance(value, str) or not re.fullmatch('[0-9a-f]{32}', value):
-            raise ToolRejected('research ID must identify a journal entry')
+            raise ToolRejected('research ID must be a 32-character record_id from research.list or research.get; '
+                               'omit id to create a new entry')
         return value
 
     @staticmethod
@@ -294,22 +299,31 @@ class ResearchJournal:
             allowed = {'id', 'revision', 'question', 'findings', 'doubts',
                        'next_step', 'status', 'parent_id', 'sources'}
             if not isinstance(arguments, dict) or set(arguments) - allowed:
-                raise ToolRejected('invalid research arguments')
+                raise ToolRejected('unsupported research fields')
+            arguments = dict(arguments)
+            if 'id' in arguments and arguments['id'] in ('', None):
+                # Models that fill every optional field send a blank id (and a
+                # placeholder revision) when creating; both mean "no entry yet".
+                del arguments['id']
+                if arguments.get('revision') is None or (
+                        isinstance(arguments['revision'], int) and not isinstance(arguments['revision'], bool)):
+                    arguments.pop('revision', None)
             record_id = self._identifier(arguments['id']) if 'id' in arguments else None
-            fields = {key: value for key, value in arguments.items() if key not in {'id', 'revision'}}
+            # Blank optional values mean "not provided": they never clear saved text,
+            # sources or a parent link, and never count as a new question.
+            fields = {key: value for key, value in arguments.items()
+                      if key not in {'id', 'revision'} and not (
+                          value is None or value == '' or (key == 'sources' and value == []))}
             if not fields or (not record_id and not fields.get('question')):
                 raise ToolRejected('a new research entry requires a question; updates require at least one field')
             if not record_id and 'revision' in arguments:
                 raise ToolRejected('revision is only used when editing an existing entry')
             for key, maximum in self.TEXT_LIMITS.items():
                 if key in fields:
-                    value = fields[key]
-                    if key != 'question' and value == '':
-                        continue
                     try:
-                        fields[key] = validate_memory_text(value, maximum)
-                    except ValueError:
-                        raise ResearchValidationError(key, maximum) from None
+                        fields[key] = validate_memory_text(fields[key], maximum)
+                    except ToolRejected as error:
+                        raise ResearchValidationError(key, maximum, str(error)) from None
             if 'status' in fields and (not isinstance(fields['status'], str) or fields['status'] not in {'open', 'paused', 'closed'}):
                 raise ToolRejected('invalid research status')
             if fields.get('parent_id') is not None:
@@ -330,9 +344,11 @@ class ResearchJournal:
             return fields, record_id, revision
         except ResearchValidationError:
             raise
+        except ToolRejected as error:
+            # Controller vocabulary tells Andrew what to correct; it never echoes arguments.
+            raise ResearchValidationError(reason=str(error)) from None
         except ValueError:
-            # Validation can raise messages containing URLs or sensitive input.
-            # Return only fixed vocabulary through the controller tool result.
+            # Other validation errors (e.g. URL parsing) can contain sensitive input.
             raise ResearchValidationError() from None
 
     def execute(self, operation, arguments):
