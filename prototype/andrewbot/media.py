@@ -78,9 +78,10 @@ class MediaPolicy:
                       self.image_job_usd, self.voice_character_usd):
             if not math.isfinite(value) or value <= 0:
                 raise ValueError('Media budgets must be positive finite amounts')
-        if self.tts_model != 'elevenlabs/eleven-v3' or self.voice not in {
-                'george', 'brian', 'daniel', 'adam', 'sarah', 'alice', 'jessica'}:
-            raise ValueError('Select Eleven v3 and an approved premade voice')
+        named_voices = {'george', 'brian', 'daniel', 'adam', 'sarah', 'alice', 'jessica'}
+        if (self.tts_model != 'elevenlabs/eleven-v3' or not isinstance(self.voice, str)
+                or (self.voice not in named_voices and re.fullmatch(r'[A-Za-z0-9]{20}', self.voice) is None)):
+            raise ValueError('Select Eleven v3 and a premade voice name or ElevenLabs voice ID')
         if self.image_model != 'openai/gpt-image-1-mini' or self.retention_days < 1:
             raise ValueError('Unsupported media configuration')
 

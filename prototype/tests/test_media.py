@@ -19,6 +19,32 @@ class MediaCase(unittest.TestCase):
 
 
 class MediaTests(MediaCase):
+    def test_configured_voice_id_is_saved_and_cannot_be_overridden_per_job(self):
+        import json
+        from andrewbot.media import load_media_policy
+        voice = 'pvY1pikBdoI4SB62vEVo'
+        policy = load_media_policy({'ANDREW_MEDIA_ENABLED': '1',
+                                   'ANDREW_MEDIA_CAPABILITIES_VERIFIED': '1',
+                                   'ANDREW_TTS_VOICE': voice})
+        media = MediaService(self.store, Path(self.tmp.name) / 'custom-voice', 42, policy)
+        job = media.submit('voice', 'Hello Andrew', 'chosen-voice', owner_requested=True)
+        payload = json.loads(media.job(job)['payload'])
+        self.assertEqual(payload['voice'], voice)
+        self.assertEqual(payload['model'], 'elevenlabs/eleven-v3')
+        with self.assertRaisesRegex(ValueError, 'configured voice'):
+            media.submit('voice', 'Hello Andrew', 'other-voice', owner_requested=True, voice_id='george')
+        restarted = MediaService(self.store, Path(self.tmp.name) / 'custom-voice', 42,
+                                 MediaPolicy(enabled=True, voice='george'))
+        self.assertEqual(json.loads(restarted.job(job)['payload'])['voice'], voice)
+
+    def test_voice_configuration_rejects_malformed_ids_and_keeps_named_voices(self):
+        for voice in ('george', 'brian', 'daniel', 'adam', 'sarah', 'alice', 'jessica'):
+            self.assertEqual(MediaPolicy(voice=voice).voice, voice)
+        for voice in ('', 'short', 'pvY1pikBdoI4SB62vEV/', 'pvY1pikBdoI4SB62vEVo\n',
+                      'https://example.test/voice', 'A' * 21, 'é' * 20, None, [], True):
+            with self.subTest(voice=voice), self.assertRaises(ValueError):
+                MediaPolicy(voice=voice)
+
     def test_disabled_and_recipient_policy(self):
         disabled = MediaService(self.store, Path(self.tmp.name) / 'media', 42, MediaPolicy())
         with self.assertRaises(ValueError):
@@ -64,6 +90,7 @@ class MediaTests(MediaCase):
 
 class ProviderTests(unittest.TestCase):
     def test_speech_endpoint_and_secret_safe_errors(self):
+        import json
         from andrewbot.media_provider import OpenRouterMedia
         calls = []
         class Response:
@@ -75,11 +102,14 @@ class ProviderTests(unittest.TestCase):
             calls.append((request, timeout))
             return Response()
         provider = OpenRouterMedia('secret', opener=opener)
-        data, mime, cost = provider.generate('voice', {'model': 'elevenlabs/eleven-v3', 'text': 'hi', 'voice': 'george'})
-        self.assertEqual('audio/mpeg', mime)
-        self.assertEqual('https://openrouter.ai/api/v1/audio/speech', calls[0][0].full_url)
-        self.assertEqual(120, calls[0][1])
-        self.assertIsNone(cost)
+        for voice in ('george', 'pvY1pikBdoI4SB62vEVo'):
+            data, mime, cost = provider.generate('voice', {'model': 'elevenlabs/eleven-v3', 'text': 'hi', 'voice': voice})
+            self.assertEqual('audio/mpeg', mime)
+            request, timeout = calls[-1]
+            self.assertEqual('https://openrouter.ai/api/v1/audio/speech', request.full_url)
+            self.assertEqual(json.loads(request.data)['voice'], voice)
+            self.assertEqual(120, timeout)
+            self.assertIsNone(cost)
 
     def test_telegram_upload_uses_bytes_and_owner_chat(self):
         import json

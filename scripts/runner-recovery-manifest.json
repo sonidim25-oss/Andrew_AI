@@ -54,7 +54,7 @@
     "media.py": {
       "allow_missing": false,
       "baseline": "92aa219e5f3b4db42e73bc6b8dff957305291022f80544ec6255f24e0c073c0a",
-      "tested": "92aa219e5f3b4db42e73bc6b8dff957305291022f80544ec6255f24e0c073c0a"
+      "tested": "1e5770a8f29bd1114b491aa47c407293f5864bdbd453de72a15740669bd0b3ad"
     },
     "memory.py": {
       "allow_missing": false,
