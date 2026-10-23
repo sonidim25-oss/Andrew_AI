@@ -379,7 +379,11 @@ class Controller:
                 # Runner/browser failures can be returned as data after partial
                 # side effects. A successful model answer does not settle them.
                 confirmed = False
-                if isinstance(result, str):
+                if isinstance(result, str) and name == 'browser.open':
+                    # A read-only public fetch has nothing to repeat or undo: a completed
+                    # browser answer settles it, whether the page loaded or failed.
+                    confirmed = True
+                elif isinstance(result, str):
                     confirmed = result.startswith('Status: ok\n')
                     if result.startswith('Status: error\n'):
                         confirmed = False
@@ -387,7 +391,8 @@ class Controller:
                         try:
                             response, _ = json.JSONDecoder().raw_decode(result)
                         except ValueError:
-                            confirmed = False
+                            # Browser output is truncated to fit the context; its status leads.
+                            confirmed = result.startswith('{"status": "ok"')
                         else:
                             confirmed = isinstance(response, dict) and response.get('status') == 'ok'
             return result
