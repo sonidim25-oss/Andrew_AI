@@ -16,6 +16,11 @@
       "baseline": "7aa89f0eca88c50d42ef0e1a32fe2339916360c20295b02cc4aee09b235bbb25",
       "tested": "389f08e0e5f418477e7f07a7171fd69a28973ee520d58e8fbea780206268a2f0"
     },
+    "browser_tools.py": {
+      "allow_missing": false,
+      "baseline": "1b8bd9c9edc233531427ba3052a5d9aa6d2279d3dea99b1f9c45b6acbb555f06",
+      "tested": "90e0f7053fc2729a987c706fd5e7aefc7cc6c9bb0a6a7b97089bfe18e0a9501a"
+    },
     "budget.py": {
       "allow_missing": false,
       "baseline": "07c164572f242358226d65eff0fb3088fd40f3b0124b73132f46420fd3e1cc56",
@@ -23,8 +28,8 @@
     },
     "controller.py": {
       "allow_missing": false,
-      "baseline": "90a041f2d62df6035859db2b832871782b3c19bc65a230d95c0131b19cc175f7",
-      "tested": "72f6aa6fd8221f822095863d3ec5e569f573b7765c747a83101cc1be79db8aa6"
+      "baseline": "72f6aa6fd8221f822095863d3ec5e569f573b7765c747a83101cc1be79db8aa6",
+      "tested": "0c3879e1b91c302a1ef441fa0d1ad17ee6bde1967f3c8fb02025cab281d867b0"
     },
     "diary.py": {
       "allow_missing": false,

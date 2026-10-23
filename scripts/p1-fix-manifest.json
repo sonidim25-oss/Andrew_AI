@@ -85,6 +85,9 @@
       "6cf9063287f58bbb5e26dea8aeb4ecaa7dd12b51e709602cd89b6e44f52121c4": [
         "927d9e399a0cbab106e820075838bad54b30d73b"
       ],
+      "72f6aa6fd8221f822095863d3ec5e569f573b7765c747a83101cc1be79db8aa6": [
+        "df2045e-installed-owner-voice"
+      ],
       "8452d73f34f7f9af77d5cbc91f3eab4056055d6dea8505e2d06aa85b602c9341": [
         "3acf8c31312207ab353836e7553836ffcbd7426d",
         "c4fd0621f95751237ecaad365c308f91e1206a55"
@@ -129,7 +132,7 @@
         "6d31d27b3fe9f9985b6bbad80cb32d359e309688"
       ]
     },
-    "tested": "72f6aa6fd8221f822095863d3ec5e569f573b7765c747a83101cc1be79db8aa6"
+    "tested": "0c3879e1b91c302a1ef441fa0d1ad17ee6bde1967f3c8fb02025cab281d867b0"
   },
   "diary.py": {
     "original": "fa8d71bc5057859623098c1e650ef69d3fe4de7c2c644c7b4de9e36bf2cbcaf2",
