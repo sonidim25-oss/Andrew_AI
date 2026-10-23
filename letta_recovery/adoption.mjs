@@ -40,6 +40,14 @@ function modelOnlyChange(current,body){
  if(typeof current?.model!=='string'||current.model===body.model)return false;
  return !Object.hasOwn(body,'model_settings')||sameFields(current,{model_settings:body.model_settings});
 }
+// An owner-released system prompt change keeps model, tools and memory frozen.
+function systemOnlyChange(current,body){
+ if(!body||Object.getPrototypeOf(body)!==Object.prototype||!Object.hasOwn(body,'system')
+   ||Object.keys(body).some(key=>!['system','model_settings'].includes(key)))return false;
+ if(typeof body.system!=='string'||!body.system.trim()||body.system.length>200000)return false;
+ if(typeof current?.system!=='string'||current.system===body.system)return false;
+ return !Object.hasOwn(body,'model_settings')||sameFields(current,{model_settings:body.model_settings});
+}
 // Every journaled turn of the agent is finished, acknowledged and settled, with
 // no claim and no legacy run, so no held work can continue under another model.
 function agentQuiescent(root,agentId,backend){
@@ -71,7 +79,8 @@ export async function guardLegacy(command,{root,sdk}){
   const current=sdk.backend.store.retrieveAgentRecord(command.agent_id);
   if(command.body&&Object.keys(command.body).length&&sameFields(current,command.body))return {agent:await sdk.backend.retrieveAgent(command.agent_id)};
   // The ordinary handler applies an owner-configured model change only between turns.
-  if(modelOnlyChange(current,command.body)&&agentQuiescent(root,command.agent_id,sdk.backend))return false;
+  if((modelOnlyChange(current,command.body)||systemOnlyChange(current,command.body))
+    &&agentQuiescent(root,command.agent_id,sdk.backend))return false;
  }
  throw Error('unsupported_contract');
 }

@@ -34,6 +34,7 @@ def main():
     parser.add_argument('--recovery-once',action='store_true')
     parser.add_argument('--unreached-first',action='store_true')
     parser.add_argument('--model-id')
+    parser.add_argument('--system-suffix')
     args=parser.parse_args();root=args.root
     def save(name,value):
         path=root/name;temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps(value,sort_keys=True));os.replace(temporary,path)
@@ -72,6 +73,8 @@ def main():
             return result
         setattr(RecoveryRecords,method,interrupted)
     agent=LettaAgent(store,'fixture-token',url=args.backend_url,model_config=model_config)
+    # An owner-released system prompt change reaches startup like a new controller release.
+    if args.system_suffix:agent.system_prompt=LettaAgent.system_prompt+'\n\n'+args.system_suffix
     controller=Controller(store,agent,17,autonomous_enabled=True)
     coordinator=RecoveryCoordinator(store,controller,enabled=True)
     agent.local_recovery=controller.local_recovery=coordinator;agent.tool_handler=controller.execute_tool
