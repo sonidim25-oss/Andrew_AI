@@ -1,5 +1,12 @@
 # Memory update
 
+## Flexible diary deployed — 2026-10-23
+
+- Owner explicitly authorized deployment after reviewing the offline implementation. Runtime implementation `58f8f6d`, deployment binding `45dc7b6`; coordinated candidate `/var/backups/andrew-flexible-diary-20261023-candidate` is installed and enabled. Controller digest `88db21a7152e1996a95d357742d070d3ce13ba008e3b15b4af28b5ae412a13ff`; runner and backend packages unchanged.
+- All six acceptance gates passed: 91 Node tests, reused source-identical 885-test core evidence (2 live skips), 327 script/integration tests, 88 pristine protocol tests (70 expected skips), service imports and distinct service-UID credentials.
+- Fresh controller startup and all four services verified. All 62 pre-existing database tables match the pre-deployment row hashes; only two empty diary draft tables were added. Existing agent/conversation, finalized diaries, memory, owner pause/sleep/deadline/revision, billing, reservations and held operations are preserved. The existing agent system prompt exactly matches the installed source.
+- Andrew remains paused and asleep. No wake, provider generation, diary publication or uncertain-action replay was requested. Future natural writing choices remain unobserved. Backups and evidence: [deployment record](docs/FLEXIBLE_DIARY_DEPLOYMENT.md).
+
 ## P3 session failure logging release — 2026-10-21
 
 - Claude `4d18f23` (replaces `ffdf610`) adds three fixed warnings for failed session bookkeeping without exception text or control-flow changes. Owner authorized shipping after the historical P0 repair. Claude reports the new regression plus 118 related session tests passed; no duplicate broad run performed during integration.

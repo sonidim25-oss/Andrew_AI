@@ -1,6 +1,8 @@
 # Flexible diary reflection
 
-Implementation candidate: `fix/flexible-diary-20261023`, based on `3bf02be` in a separate worktree at `/home/daniel/andrew-flexible-diary-20261023`. This is an offline source change, not a deployment. Production services, databases, owner controls and pending operations were not changed; Andrew was not woken and uncertain actions were not replayed.
+**Deployed and verified on 2026-10-23.** See the [deployment record](FLEXIBLE_DIARY_DEPLOYMENT.md). Andrew remains paused and asleep; no wake or replay was performed.
+
+Implementation was completed offline on `fix/flexible-diary-20261023`, based on `3bf02be`, in `/home/daniel/andrew-flexible-diary-20261023`. Production services, databases, owner controls and pending operations were left untouched during implementation. The subsequent deployment was explicitly authorized by the owner.
 
 ## Investigation and cause
 
@@ -55,7 +57,7 @@ The existing durable tool receipts also cover diary actions. Only the exact admi
 
 Encrypted whole-database backups retain drafts, versions and final entries. Restore retains its existing pause/recovery fence and quarantines pending delivery; it does not publish drafts or automatically resend finalized entries. Old snapshots remain valid and receive empty draft tables when opened. Restoring an older backup still restores its historical content; this change does not claim recovery of unsnapshotted later notes.
 
-The deployed tool's former content-only call now saves a private draft by default. Pending or uncertain production admissions must retain their existing conservative handling; this implementation does not replay them or modify their saved outcomes. Installing this candidate and updating the persistent agent instructions require the normal coordinated release process; no installer or wake was run here.
+The deployed tool's former content-only call now saves a private draft by default. Pending or uncertain production admissions must retain their existing conservative handling; this implementation does not replay them or modify their saved outcomes. The owner-authorized deployment used the normal coordinated release process and verified that the existing agent received the new instructions. No wake was requested. The original offline implementation and test phase did not run an installer.
 
 ## Verification
 
