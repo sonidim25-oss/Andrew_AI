@@ -38,3 +38,8 @@ class OwnerVoiceSetupTests(unittest.TestCase):
         self.assertEqual(self.env.read_bytes(), previous)
         self.assertFalse(self.dropin.exists())
         self.assertEqual(restart.call_count, 2)
+
+    def test_effective_voice_waits_for_systemd_process_environment(self):
+        with patch.object(self.module.subprocess, 'check_output', return_value='123\n'), \
+             patch.object(Path, 'read_bytes', side_effect=[b'', b'ANDREW_TTS_VOICE=' + self.module.VOICE.encode() + b'\0']):
+            self.assertEqual(self.module.effective_voice(), self.module.VOICE)

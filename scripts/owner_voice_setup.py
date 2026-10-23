@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import pwd
 import subprocess
+import time
 
 import budget_deployment as rollout
 from owner_voice_preview import VOICE, MODEL, DIRECTORY
@@ -38,12 +39,22 @@ def restart_controller():
 
 
 def effective_voice():
-    pid = int(subprocess.check_output(['systemctl', 'show', 'andrew-control.service',
-                                       '--property=MainPID', '--value'], text=True).strip())
-    if pid <= 0:
-        raise ValueError('Controller is not running')
-    environment = dict(item.split(b'=', 1) for item in Path('/proc', str(pid), 'environ').read_bytes().split(b'\0') if b'=' in item)
-    return environment.get(b'ANDREW_TTS_VOICE', b'').decode()
+    # Type=simple may report active before the executor has applied EnvironmentFile.
+    # Observe the live process briefly before rejecting and restoring the config.
+    value = ''
+    for _ in range(20):
+        pid = int(subprocess.check_output(['systemctl', 'show', 'andrew-control.service',
+                                           '--property=MainPID', '--value'], text=True).strip())
+        if pid > 0:
+            try:
+                environment = dict(item.split(b'=', 1) for item in Path('/proc', str(pid), 'environ').read_bytes().split(b'\0') if b'=' in item)
+                value = environment.get(b'ANDREW_TTS_VOICE', b'').decode()
+                if value == VOICE:
+                    return value
+            except FileNotFoundError:
+                pass  # The executor or a restarting process has just exited.
+        time.sleep(.25)
+    return value
 
 
 def configure_voice(owner, environment_file, dropin, write):
